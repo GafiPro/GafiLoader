@@ -18,6 +18,7 @@ application {
 
 dependencies {
     implementation 'org.ow2.asm:asm:9.9.1'
+    implementation 'org.ow2.asm:asm-commons:9.9.1'
     implementation 'com.google.code.gson:gson:2.13.2'
     implementation 'net.fabricmc:mapping-io:0.9.1'
     implementation 'net.fabricmc:tiny-remapper:0.15.0'
@@ -39,12 +40,34 @@ tasks.withType(Test).configureEach {
     }
 }
 
+
+tasks.named('test') {
+    // Exercise the actual packaged javaagent, not only the bytecode helper in unit tests.
+    dependsOn tasks.named('jar')
+    systemProperty 'gafi.loader.agent.jar',
+            tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+}
+
 jar {
+    // A self-contained JAR is required because a Java agent's dependencies must be
+    // visible to the system class loader before Minecraft/Fabric starts loading.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { dependency ->
+            dependency.isDirectory() ? dependency : zipTree(dependency)
+        }
+    }
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
+    exclude '**/module-info.class'
+
     manifest {
         attributes(
-            'Implementation-Title': 'Gafi Loader Compatibility Scanner',
+            'Implementation-Title': 'Gafi Loader',
             'Implementation-Version': project.version,
-            'Main-Class': application.mainClass.get()
+            'Main-Class': application.mainClass.get(),
+            'Premain-Class': 'dev.gafipro.gafiloader.GameSideCompatibilityAgent',
+            'Can-Redefine-Classes': 'false',
+            'Can-Retransform-Classes': 'false'
         )
     }
 }
