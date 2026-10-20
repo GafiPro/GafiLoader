@@ -54,6 +54,12 @@ class IntermediaryMappingsTest {
         assertTrue(report.findings().isEmpty(), () -> report.findings().toString());
         assertEquals(2, report.summary().intermediaryClassesMapped());
         assertEquals(2, report.summary().intermediaryMembersMapped());
+
+        IntermediaryMappings loaded = IntermediaryMappings.load(
+                intermediaryMappings, MojangMappings.load(mojangMappings));
+        assertEquals("net/minecraft/Foo$1", loaded.mapClassName("net/minecraft/class_1$1"));
+        assertEquals("(Lnet/minecraft/Foo$Nested;)V",
+                loaded.mapDescriptor("(Lnet/minecraft/class_1$Nested;)V"));
     }
 
     private static byte[] targetFooClass() {
