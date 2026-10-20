@@ -120,7 +120,7 @@ final class MojangMappings {
                     }
                 }
             }
-            normalized.append(line).append('\\n');
+            normalized.append(line).append(System.lineSeparator());
         }
         return normalized.toString();
     }
