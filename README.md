@@ -37,7 +37,7 @@ The scanner indexes classes, methods, and fields from a Minecraft 26.2 JAR, insp
 ./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/mods"
 ~~~
 
-On Windows, use gradlew.bat instead of ./gradlew and quote paths containing spaces. The --mods argument can be one JAR or a directory containing JARs. An optional JSON report can be saved with --report report.json.
+On Windows, use gradlew.bat instead of ./gradlew and quote paths containing spaces. The --mods argument can be one JAR or a directory containing JARs. An optional JSON report can be saved with --report report.json. Reviewed aliases can be supplied with --aliases aliases.tsv; see [aliases.example.tsv](aliases.example.tsv) for the tab-separated format.
 
 ~~~text
 Gafi Loader compatibility scanner
@@ -55,7 +55,7 @@ The scanner reports missing classes, methods, and fields referenced by the mod b
 
 ## Current limitations
 
-- Direct symbol comparison cannot infer arbitrary class or member renames between versions.
+- Direct symbol comparison cannot infer arbitrary class or member renames between versions. Explicit TSV aliases can normalize known changes, but each rule must be verified against the 26.2 API.
 - The scanner currently focuses on Minecraft-owned symbols; Fabric Loader and Fabric API compatibility require separate analysis.
 - It does not modify the launcher, Fabric Loader, or mod JARs and does not yet make legacy mods load.
 - A 26.2 JAR from the official launcher and real mod JARs are required for end-to-end validation.
