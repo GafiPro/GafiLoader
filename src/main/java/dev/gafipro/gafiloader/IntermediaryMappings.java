@@ -5,6 +5,7 @@ import net.fabricmc.mappingio.format.MappingFormat;
 import net.fabricmc.mappingio.tree.MemoryMappingTree;
 import net.fabricmc.mappingio.tree.MappingTree;
 import net.fabricmc.mappingio.tree.MappingTreeView;
+import net.fabricmc.tinyremapper.IMappingProvider;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -131,6 +132,59 @@ final class IntermediaryMappings {
         }
 
         return new IntermediaryMappings(classes, members);
+    }
+
+    /**
+     * Creates a TinyRemapper provider for Intermediary -> 26.2 named mappings.
+     * Reviewed aliases are composed after the 1.21.11 intermediary-to-Mojang maps.
+     * Descriptor-shape changes are rejected because a rename mapping cannot adapt call semantics.
+     */
+    IMappingProvider tinyRemapperProvider(CompatibilityScanner.AliasSet aliases) {
+        return out -> {
+            for (Map.Entry<String, String> classMapping : intermediaryToNamedClasses.entrySet()) {
+                String targetName = aliases.mapClass(classMapping.getValue());
+                if (!classMapping.getKey().equals(targetName)) {
+                    out.acceptClass(classMapping.getKey(), targetName);
+                }
+            }
+
+            for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+                MemberKey source = entry.getKey();
+                MappedMember legacy = entry.getValue();
+                CompatibilityScanner.SymbolKind kind = source.kind();
+
+                CompatibilityScanner.Reference oldReference = new CompatibilityScanner.Reference(
+                        kind, legacy.owner(), legacy.name(), legacy.descriptor());
+                CompatibilityScanner.Reference targetReference = aliases.normalize(oldReference);
+
+                String classTargetOwner = aliases.mapClass(legacy.owner());
+                if (!classTargetOwner.equals(targetReference.owner())) {
+                    throw new IllegalArgumentException("Cannot remap member across owners without a dedicated "
+                            + "compatibility adapter: " + legacy.owner() + "#" + legacy.name()
+                            + " -> " + targetReference.owner() + "#" + targetReference.name());
+                }
+
+                String structurallyRemappedDescriptor = aliases.mapDescriptor(
+                        normalizeDescriptor(source.descriptor()));
+                if (!structurallyRemappedDescriptor.equals(targetReference.descriptor())) {
+                    throw new IllegalArgumentException("Cannot safely remap changed descriptor for "
+                            + legacy.owner() + "#" + legacy.name() + legacy.descriptor()
+                            + ": bytecode descriptor remapping yields " + structurallyRemappedDescriptor
+                            + ", but the alias requests " + targetReference.descriptor()
+                            + ". A semantic bytecode adapter is required.");
+                }
+
+                IMappingProvider.Member providerMember = new IMappingProvider.Member(
+                        source.owner(), source.name(), source.descriptor());
+                if (kind == CompatibilityScanner.SymbolKind.METHOD) {
+                    if (!source.name().equals(targetReference.name())) {
+                        out.acceptMethod(providerMember, targetReference.name());
+                    }
+                } else if (!source.name().equals(targetReference.name())) {
+                    out.acceptField(providerMember, targetReference.name());
+                }
+            }
+        };
     }
 
     CompatibilityScanner.Reference normalize(CompatibilityScanner.Reference reference) {
