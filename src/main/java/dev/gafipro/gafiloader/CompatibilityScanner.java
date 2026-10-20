@@ -38,6 +38,15 @@ public final class CompatibilityScanner {
     private static final String MINECRAFT_PACKAGE = "net/minecraft/";
 
     public Report scan(Path gameJar, Collection<Path> modJars) throws IOException {
+        return scan(gameJar, modJars, AliasSet.empty());
+    }
+
+    public Report scan(Path gameJar, Collection<Path> modJars, Path aliasesFile) throws IOException {
+        AliasSet aliases = aliasesFile == null ? AliasSet.empty() : AliasSet.load(aliasesFile);
+        return scan(gameJar, modJars, aliases);
+    }
+
+    private Report scan(Path gameJar, Collection<Path> modJars, AliasSet aliases) throws IOException {
         if (gameJar == null || !Files.isRegularFile(gameJar)) {
             throw new IllegalArgumentException("The target game JAR does not exist: " + gameJar);
         }
@@ -65,7 +74,8 @@ public final class CompatibilityScanner {
             scannedClasses += scan.classCount();
             inspectedReferences += scan.references().size();
 
-            for (Reference reference : scan.references()) {
+            for (Reference sourceReference : scan.references()) {
+                Reference reference = aliases.normalize(sourceReference);
                 if (!reference.owner().startsWith(MINECRAFT_PACKAGE)) {
                     continue;
                 }
@@ -114,7 +124,8 @@ public final class CompatibilityScanner {
         int missingMethods = countKind(findings, "MISSING_METHOD");
         int missingFields = countKind(findings, "MISSING_FIELD");
         Summary summary = new Summary(orderedMods.size(), scannedClasses, inspectedReferences,
-                gameClasses.size(), findings.size(), missingClasses, missingMethods, missingFields);
+                gameClasses.size(), findings.size(), missingClasses, missingMethods, missingFields,
+                aliases.classAliasCount(), aliases.memberAliasCount());
 
         return new Report(
                 gameJar.toAbsolutePath().normalize().toString(),
@@ -616,6 +627,140 @@ public final class CompatibilityScanner {
     private record ClassInfo(Set<Member> fields, Set<Member> methods) {}
     private record Member(String name, String descriptor) {}
     private record Reference(SymbolKind kind, String owner, String name, String descriptor) {}
+    private record AliasTarget(String owner, String name, String descriptor) {}
+
+    /**
+     * Explicit symbol equivalences. The scanner never guesses aliases because a wrong alias can
+     * turn a detectable incompatibility into a misleading "compatible" result.
+     */
+    private static final class AliasSet {
+        private final Map<String, String> classes;
+        private final Map<Reference, AliasTarget> members;
+
+        private AliasSet(Map<String, String> classes, Map<Reference, AliasTarget> members) {
+            this.classes = Map.copyOf(classes);
+            this.members = Map.copyOf(members);
+        }
+
+        static AliasSet empty() {
+            return new AliasSet(Map.of(), Map.of());
+        }
+
+        static AliasSet load(Path file) throws IOException {
+            if (!Files.isRegularFile(file)) {
+                throw new IllegalArgumentException("Alias file does not exist: " + file);
+            }
+            Map<String, String> classAliases = new HashMap<>();
+            Map<Reference, AliasTarget> memberAliases = new HashMap<>();
+            List<String> lines = Files.readAllLines(file);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                // Tabs are intentional: descriptors and owners must not be split ambiguously.
+                String[] columns = lines.get(i).split("\\t", -1);
+                String kind = columns[0].trim().toUpperCase(java.util.Locale.ROOT);
+                if (kind.equals("CLASS")) {
+                    if (columns.length != 3) {
+                        throw invalidAlias(file, i + 1, "CLASS requires: CLASS<TAB>old-owner<TAB>new-owner");
+                    }
+                    String oldOwner = requireValue(columns[1], file, i + 1);
+                    String newOwner = requireValue(columns[2], file, i + 1);
+                    putConsistent(classAliases, oldOwner, newOwner, file, i + 1);
+                } else if (kind.equals("METHOD") || kind.equals("FIELD")) {
+                    if (columns.length != 7) {
+                        throw invalidAlias(file, i + 1,
+                                kind + " requires: " + kind
+                                        + "<TAB>old-owner<TAB>old-name<TAB>old-descriptor"
+                                        + "<TAB>new-owner<TAB>new-name<TAB>new-descriptor");
+                    }
+                    String oldOwner = requireValue(columns[1], file, i + 1);
+                    String oldName = requireValue(columns[2], file, i + 1);
+                    String oldDescriptor = requireValue(columns[3], file, i + 1);
+                    String newOwner = requireValue(columns[4], file, i + 1);
+                    String newName = requireValue(columns[5], file, i + 1);
+                    String newDescriptor = requireValue(columns[6], file, i + 1);
+                    SymbolKind symbolKind = kind.equals("METHOD") ? SymbolKind.METHOD : SymbolKind.FIELD;
+                    Reference key = new Reference(symbolKind, oldOwner, oldName, oldDescriptor);
+                    AliasTarget target = new AliasTarget(newOwner, newName, newDescriptor);
+                    AliasTarget previous = memberAliases.putIfAbsent(key, target);
+                    if (previous != null && !previous.equals(target)) {
+                        throw invalidAlias(file, i + 1, "Conflicting alias for " + oldOwner + "#" + oldName);
+                    }
+                } else {
+                    throw invalidAlias(file, i + 1, "Unknown alias kind: " + kind);
+                }
+            }
+            return new AliasSet(classAliases, memberAliases);
+        }
+
+        Reference normalize(Reference reference) {
+            if (reference.kind() == SymbolKind.CLASS) {
+                return new Reference(SymbolKind.CLASS, mapClass(reference.owner()), null, null);
+            }
+
+            AliasTarget explicit = members.get(reference);
+            if (explicit != null) {
+                return new Reference(reference.kind(), explicit.owner(), explicit.name(), explicit.descriptor());
+            }
+            return new Reference(reference.kind(), mapClass(reference.owner()), reference.name(),
+                    mapDescriptor(reference.descriptor()));
+        }
+
+        int classAliasCount() {
+            return classes.size();
+        }
+
+        int memberAliasCount() {
+            return members.size();
+        }
+
+        private String mapClass(String owner) {
+            String exact = classes.get(owner);
+            if (exact != null) {
+                return exact;
+            }
+            for (Map.Entry<String, String> entry : classes.entrySet()) {
+                if (owner.startsWith(entry.getKey() + "$")) {
+                    return entry.getValue() + owner.substring(entry.getKey().length());
+                }
+            }
+            return owner;
+        }
+
+        private String mapDescriptor(String descriptor) {
+            if (descriptor == null) {
+                return null;
+            }
+            String mapped = descriptor;
+            for (Map.Entry<String, String> entry : classes.entrySet()) {
+                mapped = mapped.replace("L" + entry.getKey() + ";", "L" + entry.getValue() + ";");
+                mapped = mapped.replace("L" + entry.getKey() + "$", "L" + entry.getValue() + "$");
+            }
+            return mapped;
+        }
+
+        private static void putConsistent(Map<String, String> aliases, String key, String value,
+                                          Path file, int line) throws IOException {
+            String previous = aliases.putIfAbsent(key, value);
+            if (previous != null && !previous.equals(value)) {
+                throw invalidAlias(file, line, "Conflicting class alias for " + key);
+            }
+        }
+
+        private static String requireValue(String value, Path file, int line) throws IOException {
+            String trimmed = value.trim();
+            if (trimmed.isEmpty() || trimmed.equals("-")) {
+                throw invalidAlias(file, line, "Empty alias value");
+            }
+            return trimmed;
+        }
+
+        private static IOException invalidAlias(Path file, int line, String message) {
+            return new IOException(file + ":" + line + ": " + message);
+        }
+    }
 
     private enum SymbolKind {
         CLASS,
@@ -628,7 +773,8 @@ public final class CompatibilityScanner {
 
     public record Summary(int modJarsScanned, int modClassesScanned, int referencesInspected,
                           int targetClassesIndexed, int findingCount, int missingClasses,
-                          int missingMethods, int missingFields) {}
+                          int missingMethods, int missingFields, int classAliasesLoaded,
+                          int memberAliasesLoaded) {}
 
     public record Report(String targetGameJar, List<String> modJars, Summary summary,
                          List<Finding> findings) {}
