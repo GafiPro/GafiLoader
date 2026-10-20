@@ -4,6 +4,7 @@ import net.fabricmc.mappingio.MappingReader;
 import net.fabricmc.mappingio.format.MappingFormat;
 import net.fabricmc.mappingio.tree.MemoryMappingTree;
 import net.fabricmc.mappingio.tree.MappingTree;
+import net.fabricmc.mappingio.tree.MappingTreeView;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -74,8 +75,8 @@ final class IntermediaryMappings {
 
         int officialId = tree.getNamespaceId("official");
         int intermediaryId = tree.getNamespaceId("intermediary");
-        if (officialId == MappingTreeViewCompat.NULL_NAMESPACE_ID
-                || intermediaryId == MappingTreeViewCompat.NULL_NAMESPACE_ID) {
+        if (officialId == MappingTreeView.NULL_NAMESPACE_ID
+                || intermediaryId == MappingTreeView.NULL_NAMESPACE_ID) {
             throw new IOException("Tiny mappings must contain 'official' and 'intermediary' namespaces: "
                     + tinyFileOrJar);
         }
@@ -246,13 +247,4 @@ final class IntermediaryMappings {
 
     private record MappedMember(String owner, String name, String descriptor) {}
 
-    /**
-     * Mapping-IO reserves -1 as the ID for the source namespace. Exposed here with a local
-     * name so the namespace validation does not depend on Mapping-IO's implementation details.
-     */
-    private static final class MappingTreeViewCompat {
-        private static final int NULL_NAMESPACE_ID = -1;
-
-        private MappingTreeViewCompat() {}
-    }
 }
