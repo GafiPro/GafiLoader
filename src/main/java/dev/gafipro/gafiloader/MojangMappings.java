@@ -115,7 +115,7 @@ final class MojangMappings {
                 int close = declaration.lastIndexOf(')');
                 if (open >= 0 && close > open && close + 1 < declaration.length()) {
                     String suffix = declaration.substring(close + 1);
-                    if (suffix.matches("(?::\\\\d+){1,2}")) {
+                    if (suffix.matches("(?::[0-9]+){1,2}")) {
                         line = declaration.substring(0, close + 1) + line.substring(arrow);
                     }
                 }
