@@ -66,4 +66,4 @@ Every compatibility rule should have a regression test and a clear explanation o
 
 ## License
 
-Apache-2.0. See LICENSE.
+MIT. See LICENSE.
