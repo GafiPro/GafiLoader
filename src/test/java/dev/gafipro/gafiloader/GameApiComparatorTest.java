@@ -31,7 +31,7 @@ class GameApiComparatorTest {
         Files.writeString(mappings, String.join("\n",
                 "com.example.Foo -> a:",
                 "    int oldField -> c",
-                "    void oldMethod(com.example.Bar) -> b",
+                "    1:1:void oldMethod(com.example.Bar):12:12 -> b",
                 "com.example.Bar -> d:",
                 ""));
         writeJar(legacyJar,
