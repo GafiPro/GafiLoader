@@ -26,7 +26,7 @@ public final class Main {
 
             List<Path> mods = findModJars(options.modsPath());
             CompatibilityScanner.Report report = new CompatibilityScanner()
-                    .scan(options.gameJar(), mods);
+                    .scan(options.gameJar(), mods, options.aliasesPath());
 
             printSummary(report);
             for (CompatibilityScanner.Finding finding : report.findings()) {
@@ -80,6 +80,8 @@ public final class Main {
                 + " (classes: " + summary.missingClasses()
                 + ", methods: " + summary.missingMethods()
                 + ", fields: " + summary.missingFields() + ")");
+        System.out.println("Aliases loaded:    " + summary.classAliasesLoaded() + " classes, "
+                + summary.memberAliasesLoaded() + " members");
         System.out.println();
     }
 
@@ -119,6 +121,7 @@ public final class Main {
         Path gameJar = null;
         Path modsPath = null;
         Path reportPath = null;
+        Path aliasesPath = null;
         boolean help = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -143,12 +146,18 @@ public final class Main {
                     }
                     reportPath = Path.of(args[i]);
                 }
+                case "--aliases" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--aliases requires a TSV alias file.");
+                    }
+                    aliasesPath = Path.of(args[i]);
+                }
                 default -> throw new IllegalArgumentException("Unknown argument: " + argument);
             }
         }
 
         if (help) {
-            return new Options(null, null, null, true);
+            return new Options(null, null, null, null, true);
         }
         if (gameJar == null) {
             throw new IllegalArgumentException("Missing required --game argument.");
@@ -160,7 +169,10 @@ public final class Main {
             throw new IllegalArgumentException("Minecraft game JAR does not exist: " + gameJar);
         }
         requireJar(gameJar, "Target game");
-        return new Options(gameJar, modsPath, reportPath, false);
+        if (aliasesPath != null && !Files.isRegularFile(aliasesPath)) {
+            throw new IllegalArgumentException("Alias file does not exist: " + aliasesPath);
+        }
+        return new Options(gameJar, modsPath, reportPath, aliasesPath, false);
     }
 
     private static void printUsage() {
@@ -174,12 +186,14 @@ public final class Main {
                   --game <path>     Minecraft 26.2 target JAR (required)
                   --mods <path>     One legacy mod JAR or a directory of JARs (required)
                   --report <path>   Also write a JSON report
+                  --aliases <path>  Apply explicit TSV class/method/field aliases
                   --help, -h        Show this help
 
                 The scanner finds direct net/minecraft class/member references absent from the target JAR.
+                --aliases can normalize explicitly mapped old symbols before comparison.
                 It does not load legacy mods or infer arbitrary renames yet.
                 """);
     }
 
-    private record Options(Path gameJar, Path modsPath, Path reportPath, boolean help) {}
+    private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath, boolean help) {}
 }
