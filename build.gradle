@@ -46,8 +46,9 @@ tasks.named('test') {
     dependsOn tasks.named('jar')
     systemProperty 'gafi.loader.agent.jar',
             tasks.named('jar').get().archiveFile.get().asFile.absolutePath
-    providers.gradleProperty('gafiFabricLoaderJar').ifPresent { fabricLoaderJar ->
-        systemProperty 'gafi.loader.fabric.loader.jar', fabricLoaderJar
+    def fabricLoaderJar = providers.gradleProperty('gafiFabricLoaderJar')
+    if (fabricLoaderJar.isPresent()) {
+        systemProperty 'gafi.loader.fabric.loader.jar', fabricLoaderJar.get()
     }
 }
 
