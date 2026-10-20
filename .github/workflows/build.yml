@@ -24,3 +24,10 @@ jobs:
         run: curl --fail --location --retry 3 --silent --show-error https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar --output "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
       - name: Build and test with the pinned Gradle wrapper
         run: ./gradlew --no-daemon clean test build -PgafiFabricLoaderJar="$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+      - name: Upload self-contained agent JAR for manual integration
+        uses: actions/upload-artifact@v4
+        with:
+          name: gafi-loader-agent-${{ github.sha }}
+          path: build/libs/gafi-loader-*.jar
+          if-no-files-found: error
+          retention-days: 7
