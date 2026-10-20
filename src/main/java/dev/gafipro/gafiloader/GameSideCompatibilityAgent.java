@@ -1,0 +1,212 @@
+package dev.gafipro.gafiloader;
+
+import java.io.IOException;
+import java.io.Reader;
+import java.lang.instrument.ClassFileTransformer;
+import java.lang.instrument.IllegalClassFormatException;
+import java.lang.instrument.Instrumentation;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.ProtectionDomain;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.atomic.LongAdder;
+
+/**
+ * Runtime Java agent for in-memory 1.21.11 Intermediary-to-26.2 name remapping and method aliases.
+ *
+ * <p>Recommended launch form:
+ * {@code -javaagent:/path/to/gafi-loader.jar=/path/to/gafi-loader-agent.properties}</p>
+ * A plain TSV argument remains supported for the legacy alias-only mode.
+ */
+public final class GameSideCompatibilityAgent {
+    private GameSideCompatibilityAgent() {}
+
+    public static void premain(String agentArguments, Instrumentation instrumentation) throws IOException {
+        if (agentArguments == null || agentArguments.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Gafi Loader requires an agent properties file or a legacy rules TSV.");
+        }
+
+        Path argumentPath = Path.of(agentArguments).toAbsolutePath().normalize();
+        AgentSetup setup = loadSetup(argumentPath);
+        GameJarPatcher.RuntimeRules rules = setup.rules();
+        IntermediaryMappings intermediaryMappings = setup.intermediaryMappings();
+        CompatibilityScanner.AliasSet bytecodeAliases = setup.bytecodeAliases();
+        TargetApiIndex targetApi = setup.targetApi();
+        LongAdder remappedClasses = new LongAdder();
+        LongAdder aliasedClasses = new LongAdder();
+        MixinResourceRemapper.configure(intermediaryMappings, bytecodeAliases, targetApi);
+
+        instrumentation.addTransformer(new ClassFileTransformer() {
+            @Override
+            public byte[] transform(Module module, ClassLoader loader, String className,
+                                    Class<?> classBeingRedefined, ProtectionDomain protectionDomain,
+                                    byte[] classfileBuffer) throws IllegalClassFormatException {
+                if (className == null) {
+                    return null;
+                }
+
+                try {
+                    // Game classes are already in 26.2's runtime namespace. They may still receive
+                    // explicitly configured legacy method aliases, but are not namespace-remapped.
+                    byte[] transformed = GameJarPatcher.transformClassForRuntime(
+                            className, classfileBuffer, rules);
+                    if (transformed != null) {
+                        aliasedClasses.increment();
+                        System.out.println("[Gafi Loader] Added legacy method aliases to " + className);
+                    }
+
+                    // Mixin configs and refmaps are read as resources, before a mod's classes
+                    // reach Instrumentation. Hook Fabric's Mixin service at that resource boundary.
+                    if (intermediaryMappings != null
+                            && MixinServiceKnotPatcher.TARGET_CLASS.equals(className)) {
+                        byte[] hookInput = transformed == null ? classfileBuffer : transformed;
+                        byte[] hooked = MixinServiceKnotPatcher.transform(className, hookInput);
+                        System.out.println("[Gafi Loader] Enabled in-memory Mixin resource remapping.");
+                        return hooked;
+                    }
+
+                    if (intermediaryMappings == null || skipIntermediaryScan(className)) {
+                        return transformed;
+                    }
+                    byte[] mappingInput = transformed == null ? classfileBuffer : transformed;
+                    byte[] remapped = IntermediaryBytecodeRemapper.remap(
+                            mappingInput, intermediaryMappings, bytecodeAliases, targetApi);
+                    if (remapped != null) {
+                        remappedClasses.increment();
+                    }
+                    if (remapped != null) {
+                        return remapped;
+                    }
+                    return transformed;
+                } catch (IOException | RuntimeException exception) {
+                    System.err.println("[Gafi Loader] FAILED to transform " + className + ".");
+                    exception.printStackTrace(System.err);
+                    IllegalClassFormatException failure = new IllegalClassFormatException(exception.getMessage());
+                    failure.initCause(exception);
+                    throw failure;
+                }
+            }
+        }, false);
+
+        System.out.println("[Gafi Loader] Runtime game-side compatibility agent active.");
+        System.out.println("[Gafi Loader] Config: " + setup.configPath());
+        System.out.println("[Gafi Loader] Game-side method alias rules: " + rules.ruleCount());
+        if (intermediaryMappings != null) {
+            System.out.println("[Gafi Loader] Intermediary remapping enabled: "
+                    + intermediaryMappings.classCount() + " classes, "
+                    + intermediaryMappings.memberCount() + " members indexed.");
+            System.out.println("[Gafi Loader] Mixin resource remapping enabled at the Fabric Mixin-service boundary.");
+        } else {
+            System.out.println("[Gafi Loader] Intermediary remapping disabled.");
+        }
+        System.out.println("[Gafi Loader] Original Minecraft and mod JARs will not be modified.");
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Set<String> applied = rules.appliedRules();
+            if (applied.size() < rules.ruleCount()) {
+                System.err.println("[Gafi Loader] Warning: only " + applied.size() + " of "
+                        + rules.ruleCount() + " configured aliases were applied. "
+                        + "Some target classes may not have been loaded in this run.");
+            }
+            System.out.println("[Gafi Loader] Classes with method aliases: " + aliasedClasses.sum());
+            System.out.println("[Gafi Loader] Classes remapped from Intermediary: " + remappedClasses.sum());
+        }, "gafi-loader-compatibility-summary"));
+    }
+
+    private static boolean skipIntermediaryScan(String className) {
+        return className.startsWith("java/")
+                || className.startsWith("javax/")
+                || className.startsWith("jdk/")
+                || className.startsWith("sun/")
+                || className.startsWith("com/sun/")
+                || className.startsWith("net/minecraft/")
+                || className.startsWith("dev/gafipro/gafiloader/")
+                || className.startsWith("org/objectweb/asm/")
+                || className.startsWith("org/spongepowered/asm/")
+                || className.startsWith("net/fabricmc/mappingio/")
+                || className.startsWith("net/fabricmc/tinyremapper/")
+                || className.startsWith("com/google/gson/")
+                || className.startsWith("org/junit/")
+                || className.startsWith("org/slf4j/");
+    }
+
+    private static AgentSetup loadSetup(Path argumentPath) throws IOException {
+        if (!Files.isRegularFile(argumentPath)) {
+            throw new IllegalArgumentException("Gafi Loader agent config does not exist: " + argumentPath);
+        }
+
+        if (argumentPath.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".tsv")) {
+            return new AgentSetup(argumentPath, GameJarPatcher.loadRuntimeRules(argumentPath),
+                    null, CompatibilityScanner.AliasSet.empty(), null);
+        }
+
+        Properties properties = new Properties();
+        try (Reader reader = Files.newBufferedReader(argumentPath, StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        }
+
+        Path base = argumentPath.getParent();
+        Path rulesPath = resolveConfiguredPath(properties, "rules", base);
+        Path targetGameJarPath = resolveConfiguredPath(properties, "targetGameJar", base);
+        Path intermediaryPath = resolveConfiguredPath(properties, "intermediaryMappings", base);
+        Path legacyMappingsPath = resolveConfiguredPath(properties, "legacyMappings", base);
+        Path bytecodeAliasesPath = resolveConfiguredPath(properties, "bytecodeAliases", base);
+
+        boolean hasIntermediary = intermediaryPath != null;
+        boolean hasLegacyMappings = legacyMappingsPath != null;
+        if (hasIntermediary != hasLegacyMappings) {
+            throw new IOException("Agent config must set both intermediaryMappings and legacyMappings.");
+        }
+        if (bytecodeAliasesPath != null && !hasIntermediary) {
+            throw new IOException("Agent config property 'bytecodeAliases' requires intermediaryMappings and legacyMappings.");
+        }
+        if (bytecodeAliasesPath != null && targetGameJarPath == null) {
+            throw new IOException("Agent config property 'bytecodeAliases' also requires targetGameJar "
+                    + "so aliases can be checked against the actual Minecraft 26.2 API.");
+        }
+
+        GameJarPatcher.RuntimeRules rules = rulesPath == null
+                ? GameJarPatcher.emptyRuntimeRules() : GameJarPatcher.loadRuntimeRules(rulesPath);
+        CompatibilityScanner.AliasSet bytecodeAliases = bytecodeAliasesPath == null
+                ? CompatibilityScanner.AliasSet.empty()
+                : CompatibilityScanner.AliasSet.load(bytecodeAliasesPath);
+        TargetApiIndex targetApi = targetGameJarPath == null ? null : TargetApiIndex.load(targetGameJarPath);
+        if (bytecodeAliasesPath != null) {
+            bytecodeAliases.validateAgainstTarget(targetApi);
+        }
+        IntermediaryMappings mappings = null;
+        if (hasIntermediary) {
+            MojangMappings mojang = MojangMappings.load(legacyMappingsPath);
+            mappings = IntermediaryMappings.load(intermediaryPath, mojang);
+        }
+        if (rules.ruleCount() == 0 && mappings == null) {
+            throw new IOException("Agent config must define rules, intermediary mappings, or both.");
+        }
+        return new AgentSetup(argumentPath, rules, mappings, bytecodeAliases, targetApi);
+    }
+
+    private static Path resolveConfiguredPath(Properties properties, String key, Path base)
+            throws IOException {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        Path configured = Path.of(value.trim());
+        if (!configured.isAbsolute()) {
+            configured = base.resolve(configured);
+        }
+        configured = configured.normalize().toAbsolutePath();
+        if (!Files.isRegularFile(configured)) {
+            throw new IOException("Agent config property '" + key + "' does not point to a file: " + configured);
+        }
+        return configured;
+    }
+
+    private record AgentSetup(Path configPath, GameJarPatcher.RuntimeRules rules,
+                              IntermediaryMappings intermediaryMappings,
+                              CompatibilityScanner.AliasSet bytecodeAliases,
+                              TargetApiIndex targetApi) {}
+}
