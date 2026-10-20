@@ -27,17 +27,17 @@ The scanner indexes classes, methods, and fields from a Minecraft 26.2 JAR, insp
 ### Build and test
 
 ~~~bash
-gradle clean test
-gradle build
+./gradlew clean test
+./gradlew build
 ~~~
 
 ### Run
 
 ~~~bash
-gradle run --args="--game /path/to/26.2-client.jar --mods /path/to/mods"
+./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/mods"
 ~~~
 
-On Windows, quote paths containing spaces. The --mods argument can be one JAR or a directory containing JARs. An optional JSON report can be saved with --report report.json.
+On Windows, use gradlew.bat instead of ./gradlew and quote paths containing spaces. The --mods argument can be one JAR or a directory containing JARs. An optional JSON report can be saved with --report report.json.
 
 ~~~text
 Gafi Loader compatibility scanner
