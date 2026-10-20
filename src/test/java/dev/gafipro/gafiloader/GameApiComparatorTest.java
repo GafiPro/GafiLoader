@@ -16,6 +16,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameApiComparatorTest {
@@ -57,6 +58,33 @@ class GameApiComparatorTest {
                         && difference.owner().equals("com/example/Foo")
                         && difference.name().equals("oldField")
                         && difference.candidates().contains("newField")));
+    }
+
+    @Test
+    void doesNotSuggestNameAliasesWhenStaticInstanceSemanticsDiffer() throws IOException {
+        Path legacyJar = temporaryDirectory.resolve("legacy-dispatch.jar");
+        Path targetJar = temporaryDirectory.resolve("target-dispatch.jar");
+        Path mappings = temporaryDirectory.resolve("dispatch-mappings.txt");
+
+        Files.writeString(mappings, "com.example.Foo -> a:\n");
+        writeJar(legacyJar, entry("a", legacyDispatchChangedClass()));
+        writeJar(targetJar, entry("com/example/Foo", targetDispatchChangedClass()));
+
+        GameApiComparator.Report report = new GameApiComparator().compare(legacyJar, targetJar, mappings);
+
+        assertTrue(report.differences().stream().anyMatch(difference ->
+                difference.kind().equals("METHOD_DISPATCH_CHANGED_CANDIDATE")
+                        && difference.owner().equals("com/example/Foo")
+                        && difference.name().equals("oldName")
+                        && difference.candidates().contains("newName")));
+        assertTrue(report.differences().stream().anyMatch(difference ->
+                difference.kind().equals("METHOD_DISPATCH_CHANGED")
+                        && difference.owner().equals("com/example/Foo")
+                        && difference.name().equals("sameName")));
+        assertFalse(report.differences().stream().anyMatch(difference ->
+                difference.kind().equals("METHOD_NAME_CHANGED_CANDIDATE")
+                        && difference.owner().equals("com/example/Foo")
+                        && difference.name().equals("oldName")));
     }
 
     @Test
@@ -108,6 +136,51 @@ class GameApiComparatorTest {
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(0, 0);
         method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] legacyDispatchChangedClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "a", null, "java/lang/Object", null);
+
+        MethodVisitor oldName = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "oldName", "()V", null, null);
+        oldName.visitCode();
+        oldName.visitInsn(Opcodes.RETURN);
+        oldName.visitMaxs(0, 0);
+        oldName.visitEnd();
+
+        MethodVisitor sameName = writer.visitMethod(Opcodes.ACC_PUBLIC, "sameName", "()I", null, null);
+        sameName.visitCode();
+        sameName.visitIntInsn(Opcodes.BIPUSH, 7);
+        sameName.visitInsn(Opcodes.IRETURN);
+        sameName.visitMaxs(0, 0);
+        sameName.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetDispatchChangedClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "com/example/Foo",
+                null, "java/lang/Object", null);
+
+        MethodVisitor newName = writer.visitMethod(Opcodes.ACC_PUBLIC, "newName", "()V", null, null);
+        newName.visitCode();
+        newName.visitInsn(Opcodes.RETURN);
+        newName.visitMaxs(0, 0);
+        newName.visitEnd();
+
+        MethodVisitor sameName = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sameName", "()I", null, null);
+        sameName.visitCode();
+        sameName.visitIntInsn(Opcodes.BIPUSH, 7);
+        sameName.visitInsn(Opcodes.IRETURN);
+        sameName.visitMaxs(0, 0);
+        sameName.visitEnd();
+
         writer.visitEnd();
         return writer.toByteArray();
     }
