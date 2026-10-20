@@ -124,7 +124,7 @@ public final class GameApiComparator {
                             String normalizedMemberName = mappings == null ? name
                                     : mappings.toNamedMember(originalName, MojangMappings.SymbolKind.FIELD,
                                             name, normalizedDescriptor);
-                            fields.add(new Member(normalizedMemberName, normalizedDescriptor));
+                            fields.add(new Member(normalizedMemberName, normalizedDescriptor, access));
                             return null;
                         }
 
@@ -136,7 +136,7 @@ public final class GameApiComparator {
                             String normalizedMemberName = mappings == null ? name
                                     : mappings.toNamedMember(originalName, MojangMappings.SymbolKind.METHOD,
                                             name, normalizedDescriptor);
-                            methods.add(new Member(normalizedMemberName, normalizedDescriptor));
+                            methods.add(new Member(normalizedMemberName, normalizedDescriptor, access));
                             return null;
                         }
 
@@ -178,21 +178,47 @@ public final class GameApiComparator {
         for (Member oldMember : oldMembers) {
             // Constructors and class initializers are important bytecode details, but they do not
             // normally represent public compatibility promises. Report them only when missing.
-            if (exactTargetMembers.contains(oldMember)) {
+            Member sameSignature = exactTargetMembers.stream()
+                    .filter(candidate -> candidate.name().equals(oldMember.name())
+                            && candidate.descriptor().equals(oldMember.descriptor()))
+                    .findFirst().orElse(null);
+            if (sameSignature != null) {
+                if (isStatic(sameSignature) != isStatic(oldMember)) {
+                    String changedKind = kind == MojangMappings.SymbolKind.METHOD
+                            ? "METHOD_DISPATCH_CHANGED" : "FIELD_STORAGE_KIND_CHANGED";
+                    differences.add(new Difference(changedKind, legacyClass.name(), oldMember.name(),
+                            oldMember.descriptor(), List.of(),
+                            "The name and descriptor still exist, but static/instance semantics changed. "
+                                    + "A name alias cannot safely adapt this difference."));
+                }
                 continue;
             }
 
-            List<String> sameDescriptor = exactTargetMembers.stream()
+            List<Member> sameDescriptorMembers = exactTargetMembers.stream()
                     .filter(candidate -> candidate.descriptor().equals(oldMember.descriptor()))
+                    .filter(candidate -> !candidate.name().equals(oldMember.name()))
+                    .toList();
+            List<String> sameDispatchNames = sameDescriptorMembers.stream()
+                    .filter(candidate -> isStatic(candidate) == isStatic(oldMember))
                     .map(Member::name)
-                    .filter(name -> !name.equals(oldMember.name()))
                     .distinct().sorted().toList();
-            if (!sameDescriptor.isEmpty()) {
+            if (!sameDispatchNames.isEmpty()) {
                 String suffix = kind == MojangMappings.SymbolKind.METHOD
                         ? "METHOD_NAME_CHANGED_CANDIDATE" : "FIELD_NAME_CHANGED_CANDIDATE";
                 differences.add(new Difference(suffix, legacyClass.name(), oldMember.name(),
-                        oldMember.descriptor(), sameDescriptor,
-                        "Same descriptor exists under another target name. This is a candidate alias, not proof of semantic equivalence."));
+                        oldMember.descriptor(), sameDispatchNames,
+                        "Same descriptor and static/instance kind exist under another target name. "
+                                + "This is a candidate alias, not proof of semantic equivalence."));
+                continue;
+            }
+            if (!sameDescriptorMembers.isEmpty()) {
+                String changedKind = kind == MojangMappings.SymbolKind.METHOD
+                        ? "METHOD_DISPATCH_CHANGED_CANDIDATE" : "FIELD_STORAGE_KIND_CHANGED_CANDIDATE";
+                List<String> candidates = sameDescriptorMembers.stream().map(Member::name).distinct().sorted().toList();
+                differences.add(new Difference(changedKind, legacyClass.name(), oldMember.name(),
+                        oldMember.descriptor(), candidates,
+                        "Same descriptor names were found, but only with a different static/instance kind. "
+                                + "Do not generate an alias from this candidate."));
                 continue;
             }
 
@@ -233,6 +259,10 @@ public final class GameApiComparator {
         return members;
     }
 
+    private static boolean isStatic(Member member) {
+        return (member.access() & Opcodes.ACC_STATIC) != 0;
+    }
+
     private static int count(List<Difference> differences, String kind) {
         return (int) differences.stream().filter(difference -> difference.kind().equals(kind)).count();
     }
@@ -246,7 +276,7 @@ public final class GameApiComparator {
     }
 
     private record ApiClass(String name, String superName, Set<Member> fields, Set<Member> methods) {}
-    private record Member(String name, String descriptor) {}
+    private record Member(String name, String descriptor, int access) {}
 
     private static final class DuplicateClassException extends RuntimeException {
         private final String className;
