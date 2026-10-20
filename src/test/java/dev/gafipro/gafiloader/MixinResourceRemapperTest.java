@@ -1,0 +1,184 @@
+package dev.gafipro.gafiloader;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class MixinResourceRemapperTest {
+    @TempDir
+    Path temporaryDirectory;
+
+    @AfterEach
+    void resetGlobalMappings() {
+        MixinResourceRemapper.configure(null, CompatibilityScanner.AliasSet.empty());
+    }
+
+    @Test
+    void remapsMixinTargetsAndRefmapSelectorsInMemory() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("intermediary.tiny");
+        Path aliasesFile = temporaryDirectory.resolve("aliases.tsv");
+
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "    int oldField -> c",
+                "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
+                "net.minecraft.Bar -> d:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "\tf\tI\tc\tfield_1",
+                "\tm\t(Ld;)V\tb\tmethod_2",
+                "c\td\tnet/minecraft/class_2",
+                ""));
+        Files.writeString(aliasesFile, String.join("\n",
+                "METHOD\tnet/minecraft/Foo\toldMethod\t(Lnet/minecraft/Bar;)V"
+                        + "\tnet/minecraft/Foo\tcurrentMethod\t(Lnet/minecraft/Bar;)V",
+                "FIELD\tnet/minecraft/Foo\toldField\tI\tnet/minecraft/Foo\tcurrentField\tI",
+                ""));
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        CompatibilityScanner.AliasSet aliases = CompatibilityScanner.AliasSet.load(aliasesFile);
+        MixinResourceRemapper.configure(mappings, aliases);
+
+        String json = """
+                {
+                  "target": "Lnet/minecraft/class_1;method_2(Lnet/minecraft/class_2;)V",
+                  "field": "Lnet/minecraft/class_1;field_1:I",
+                  "package": "example.mixins",
+                  "nested": ["net.minecraft.class_1"]
+                }
+                """;
+        byte[] source = json.getBytes(StandardCharsets.UTF_8);
+        InputStream resultStream = MixinResourceRemapper.transform(
+                "example.refmap.json", new ByteArrayInputStream(source));
+        String result = new String(resultStream.readAllBytes(), StandardCharsets.UTF_8);
+
+        assertTrue(result.contains("Lnet/minecraft/Foo;currentMethod(Lnet/minecraft/Bar;)V"), result);
+        assertTrue(result.contains("Lnet/minecraft/Foo;currentField:I"), result);
+        assertTrue(result.contains("net.minecraft.Foo"), result);
+        assertFalse(result.contains("class_1"), result);
+        assertFalse(result.contains("method_2"), result);
+        assertFalse(result.contains("field_1"), result);
+        // The incoming resource bytes are independent from the returned in-memory view.
+        assertTrue(new String(source, StandardCharsets.UTF_8).contains("class_1"));
+    }
+
+    @Test
+    void remapsLegacyClassBytecodeBeforeMixinInspectsItWithoutMutatingSourceBytes() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("mixin-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("mixin-intermediary.tiny");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "    int oldField -> c",
+                "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
+                "net.minecraft.Bar -> d:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "\tf\tI\tc\tfield_1",
+                "\tm\t(Ld;)V\tb\tmethod_2",
+                "c\td\tnet/minecraft/class_2",
+                ""));
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty());
+
+        byte[] original = legacyMixinClass();
+        byte[] originalSnapshot = original.clone();
+        byte[] normalized = MixinResourceRemapper.transformClassBytes(
+                "example.LegacyMixin", original);
+        byte[] normalizedThroughResource;
+        try (InputStream stream = MixinResourceRemapper.transform(
+                "example/LegacyMixin.class", new ByteArrayInputStream(originalSnapshot))) {
+            normalizedThroughResource = stream.readAllBytes();
+        }
+
+        assertFalse(java.util.Arrays.equals(originalSnapshot, normalized),
+                "Mixin should receive normalized bytes for legacy class metadata");
+        assertArrayEquals(originalSnapshot, original,
+                "The source class bytes must remain unchanged");
+        assertArrayEquals(normalized, normalizedThroughResource,
+                "The resource hook should apply the same transformation to class resources");
+
+        java.util.concurrent.atomic.AtomicBoolean mappedField = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicBoolean mappedMethod = new java.util.concurrent.atomic.AtomicBoolean();
+        new ClassReader(normalized).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                        if (owner.equals("net/minecraft/Foo") && fieldName.equals("oldField")
+                                && fieldDescriptor.equals("I")) {
+                            mappedField.set(true);
+                        }
+                    }
+
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        if (owner.equals("net/minecraft/Foo") && methodName.equals("oldMethod")
+                                && methodDescriptor.equals("(Lnet/minecraft/Bar;)V")) {
+                            mappedMethod.set(true);
+                        }
+                    }
+                };
+            }
+        }, 0);
+        assertTrue(mappedField.get(), "Expected Intermediary field owner/name normalization");
+        assertTrue(mappedMethod.get(), "Expected Intermediary method owner/name/descriptor normalization");
+    }
+
+    private static byte[] legacyMixinClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "example/LegacyMixin", null,
+                "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "invoke", "(Lnet/minecraft/class_1;Lnet/minecraft/class_2;)V", null, null);
+        method.visitCode();
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitFieldInsn(Opcodes.GETFIELD, "net/minecraft/class_1", "field_1", "I");
+        method.visitInsn(Opcodes.POP);
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitVarInsn(Opcodes.ALOAD, 1);
+        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraft/class_1", "method_2",
+                "(Lnet/minecraft/class_2;)V", false);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    @Test
+    void leavesUnrelatedResourcesAlone() {
+        InputStream original = new ByteArrayInputStream("unchanged".getBytes(StandardCharsets.UTF_8));
+        MixinResourceRemapper.configure(null, CompatibilityScanner.AliasSet.empty());
+
+        assertFalse(MixinResourceRemapper.isMixinResource("assets/example/lang/en_us.json"));
+        assertSame(original, MixinResourceRemapper.transform("assets/example/lang/en_us.json", original));
+    }
+}
