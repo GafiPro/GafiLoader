@@ -1,0 +1,47 @@
+plugins {
+    id 'application'
+}
+
+group = 'dev.gafipro'
+version = providers.gradleProperty('project_version').get()
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+application {
+    mainClass = 'dev.gafipro.gafiloader.Main'
+    applicationName = 'gafi-loader'
+}
+
+dependencies {
+    implementation 'org.ow2.asm:asm:9.9'
+    implementation 'com.google.code.gson:gson:2.13.2'
+
+    testImplementation platform('org.junit:junit-bom:5.13.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed', 'skipped'
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+            'Implementation-Title': 'Gafi Loader Compatibility Scanner',
+            'Implementation-Version': project.version,
+            'Main-Class': application.mainClass.get()
+        )
+    }
+}
