@@ -9,3 +9,9 @@ indent_size = 4
 
 [*.{md,txt,yml,yaml}]
 trim_trailing_whitespace = false
+
+[*.java]
+indent_size = 4
+
+[*.{gradle,properties}]
+indent_size = 4
