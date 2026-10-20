@@ -688,7 +688,7 @@ public final class CompatibilityScanner {
      * Explicit symbol equivalences. The scanner never guesses aliases because a wrong alias can
      * turn a detectable incompatibility into a misleading "compatible" result.
      */
-    private static final class AliasSet {
+    static final class AliasSet {
         private final Map<String, String> classes;
         private final Map<Reference, AliasTarget> members;
 
@@ -771,7 +771,7 @@ public final class CompatibilityScanner {
             return members.size();
         }
 
-        private String mapClass(String owner) {
+        String mapClass(String owner) {
             String exact = classes.get(owner);
             if (exact != null) {
                 return exact;
@@ -784,7 +784,7 @@ public final class CompatibilityScanner {
             return owner;
         }
 
-        private String mapDescriptor(String descriptor) {
+        String mapDescriptor(String descriptor) {
             if (descriptor == null) {
                 return null;
             }
