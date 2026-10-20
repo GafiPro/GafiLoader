@@ -24,10 +24,35 @@ public final class Main {
                 return;
             }
 
-            if (options.modsPath() != null) {
+            Path effectiveGameJar = options.gameJar();
+            if (options.patchGameOutput() != null) {
+                GameJarPatcher.PatchReport patchReport = new GameJarPatcher().patch(
+                        options.gameJar(), options.patchGameOutput(), options.patchRulesPath());
+                effectiveGameJar = Path.of(patchReport.outputGameJar());
+                printPatchSummary(patchReport);
+            }
+
+            if (options.dependencyOverridesOutput() != null) {
+                List<Path> legacyMods = findModJars(options.modsPath());
+                DependencyOverrideGenerator.OverrideReport report =
+                        new DependencyOverrideGenerator().generate(legacyMods, options.dependencyOverridesOutput());
+                System.out.println("Gafi Loader — Fabric dependency overrides");
+                System.out.println("Selected legacy mods: " + report.modsSelected());
+                System.out.println("Newly configured:     " + report.newlyConfiguredModIds().size());
+                System.out.println("Already configured:   " + report.alreadyConfiguredModIds().size());
+                System.out.println("Config file:          " + report.outputConfig());
+                if (!report.newlyConfiguredModIds().isEmpty()) {
+                    System.out.println("Minecraft version gate removed for:");
+                    report.newlyConfiguredModIds().forEach(id -> System.out.println("  " + id));
+                }
+                System.out.println("This only relaxes Fabric's version check; runtime compatibility still must be tested.");
+                System.out.println();
+            }
+
+            if (options.modsPath() != null && effectiveGameJar != null) {
                 List<Path> mods = findModJars(options.modsPath());
                 CompatibilityScanner.Report report = new CompatibilityScanner()
-                        .scan(options.gameJar(), mods, options.aliasesPath(),
+                        .scan(effectiveGameJar, mods, options.aliasesPath(),
                                 options.intermediaryMappingsPath(), options.legacyMappingsPath());
 
                 printSummary(report);
@@ -54,7 +79,7 @@ public final class Main {
 
             if (options.legacyGameJar() != null) {
                 GameApiComparator.Report report = new GameApiComparator().compare(
-                        options.legacyGameJar(), options.gameJar(), options.legacyMappingsPath());
+                        options.legacyGameJar(), effectiveGameJar, options.legacyMappingsPath());
                 printApiSummary(report);
                 for (GameApiComparator.Difference difference : report.differences()) {
                     String symbol = difference.owner();
@@ -70,6 +95,14 @@ public final class Main {
                 }
 
                 writeJsonReport(options.apiReportPath(), report, "API comparison");
+                if (options.aliasCandidatesOutput() != null) {
+                    MethodAliasCandidateWriter.ExportReport candidateReport =
+                            new MethodAliasCandidateWriter().write(report, options.aliasCandidatesOutput());
+                    System.out.println("Review-only method candidate TSV: " + candidateReport.outputFile());
+                    System.out.println("Candidates: " + candidateReport.candidates()
+                            + " (unique name matches: " + candidateReport.uniqueCandidates()
+                            + ", ambiguous: " + candidateReport.ambiguousCandidates() + ")");
+                }
                 System.out.println("Candidate names require review; this report does not apply patches.");
             }
         } catch (IllegalArgumentException exception) {
@@ -136,6 +169,20 @@ public final class Main {
         System.out.println();
     }
 
+    private static void printPatchSummary(GameJarPatcher.PatchReport report) {
+        System.out.println("Gafi Loader — game-side compatibility patch");
+        System.out.println("Original game:    " + report.inputGameJar());
+        System.out.println("Patched copy:     " + report.outputGameJar());
+        System.out.println("Classes patched:  " + report.classesPatched());
+        System.out.println("Method aliases:   " + report.methodAliasesAdded());
+        for (String alias : report.appliedAliases()) {
+            System.out.println("  " + alias);
+        }
+        System.out.println("The original game JAR and all mod JARs remain untouched.");
+        System.out.println("This does not by itself integrate the patched JAR with the Fabric launcher.");
+        System.out.println();
+    }
+
     private static List<Path> findModJars(Path path) throws IOException {
         if (!Files.exists(path)) {
             throw new IllegalArgumentException("Mods path does not exist: " + path);
@@ -177,6 +224,10 @@ public final class Main {
         Path legacyGameJar = null;
         Path legacyMappingsPath = null;
         Path apiReportPath = null;
+        Path patchGameOutput = null;
+        Path patchRulesPath = null;
+        Path dependencyOverridesOutput = null;
+        Path aliasCandidatesOutput = null;
         boolean help = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -232,18 +283,48 @@ public final class Main {
                     }
                     apiReportPath = Path.of(args[i]);
                 }
+                case "--alias-candidates" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--alias-candidates requires an output TSV path.");
+                    }
+                    aliasCandidatesOutput = Path.of(args[i]);
+                }
+                case "--patch-game" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--patch-game requires an output JAR path.");
+                    }
+                    patchGameOutput = Path.of(args[i]);
+                }
+                case "--patch-rules" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--patch-rules requires a game-side rules TSV.");
+                    }
+                    patchRulesPath = Path.of(args[i]);
+                }
+                case "--generate-dependency-overrides" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException(
+                                "--generate-dependency-overrides requires the output JSON path.");
+                    }
+                    dependencyOverridesOutput = Path.of(args[i]);
+                }
                 default -> throw new IllegalArgumentException("Unknown argument: " + argument);
             }
         }
 
         if (help) {
-            return new Options(null, null, null, null, null, null, null, null, true);
+            return new Options(null, null, null, null, null, null, null, null, null, null, null, null, true);
         }
-        if (gameJar == null) {
-            throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
+        if (modsPath == null && legacyGameJar == null && patchGameOutput == null
+                && dependencyOverridesOutput == null) {
+            throw new IllegalArgumentException(
+                    "Provide --mods, --legacy-game, --patch-game, or --generate-dependency-overrides.");
         }
-        if (modsPath == null && legacyGameJar == null) {
-            throw new IllegalArgumentException("Provide --mods, --legacy-game, or both.");
+        if (dependencyOverridesOutput != null && modsPath == null) {
+            throw new IllegalArgumentException("--generate-dependency-overrides requires --mods.");
+        }
+        if ((patchGameOutput == null) != (patchRulesPath == null)) {
+            throw new IllegalArgumentException("--patch-game and --patch-rules must be supplied together.");
         }
         if (legacyGameJar != null && legacyMappingsPath == null) {
             throw new IllegalArgumentException("--legacy-game requires --legacy-mappings (official 1.21.11 Mojang mappings).");
@@ -264,19 +345,36 @@ public final class Main {
         if (legacyGameJar == null && apiReportPath != null) {
             throw new IllegalArgumentException("--api-report requires --legacy-game.");
         }
-        if (!Files.isRegularFile(gameJar)) {
-            throw new IllegalArgumentException("Minecraft 26.2 game JAR does not exist: " + gameJar);
+        if (legacyGameJar == null && aliasCandidatesOutput != null) {
+            throw new IllegalArgumentException("--alias-candidates requires --legacy-game and --legacy-mappings.");
         }
-        requireJar(gameJar, "Target game");
+        boolean scannerRequested = modsPath != null && (dependencyOverridesOutput == null
+                || gameJar != null || reportPath != null || aliasesPath != null
+                || intermediaryMappingsPath != null);
+        boolean needsGameJar = scannerRequested || legacyGameJar != null || patchGameOutput != null;
+        if (needsGameJar && gameJar == null) {
+            throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
+        }
+        if (gameJar != null) {
+            if (!Files.isRegularFile(gameJar)) {
+                throw new IllegalArgumentException("Minecraft 26.2 game JAR does not exist: " + gameJar);
+            }
+            requireJar(gameJar, "Target game");
+        }
         checkFile(aliasesPath, "Alias file");
         checkFile(intermediaryMappingsPath, "Intermediary mappings file/JAR");
         checkFile(legacyGameJar, "Legacy game JAR");
         checkFile(legacyMappingsPath, "Legacy mappings file");
+        checkFile(patchRulesPath, "Game-side compatibility rules");
+        if (patchGameOutput != null) {
+            requireJar(patchGameOutput, "Patched game output");
+        }
         if (legacyGameJar != null) {
             requireJar(legacyGameJar, "Legacy game");
         }
         return new Options(gameJar, modsPath, reportPath, aliasesPath, intermediaryMappingsPath,
-                legacyGameJar, legacyMappingsPath, apiReportPath, false);
+                legacyGameJar, legacyMappingsPath, apiReportPath, patchGameOutput, patchRulesPath,
+                dependencyOverridesOutput, aliasCandidatesOutput, false);
     }
 
     private static void checkFile(Path path, String description) {
@@ -291,8 +389,10 @@ public final class Main {
 
                 Usage:
                   gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
-                  gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
+                  gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json] [--alias-candidates candidates.tsv]
                   gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
+                  gafi-loader --game <26.2-game.jar> --patch-game <output.jar> --patch-rules <rules.tsv>
+                  gafi-loader --mods <legacy-mods-directory> --generate-dependency-overrides <config.json>
                   Add --mods and --legacy-game to run both analyses.
 
                 Options:
@@ -304,15 +404,24 @@ public final class Main {
                   --legacy-game <path>      Obfuscated Minecraft 1.21.11 client JAR
                   --legacy-mappings <path>  Official Mojang mappings for Minecraft 1.21.11
                   --api-report <path>       Save the API comparison as JSON
+                  --alias-candidates <path> Export review-only method-name candidates as TSV
+                  --patch-game <path>       Write a patched COPY of the 26.2 game JAR
+                  --patch-rules <path>      Reviewed same-descriptor METHOD_ALIAS rules TSV
+                  --generate-dependency-overrides <path>
+                                            Merge Minecraft-version overrides for selected legacy Fabric mods
                   --help, -h                Show this help
 
                 The API comparison normalizes the 1.21.11 game JAR using Mojang's ProGuard mappings.
                 The mod scanner can normalize production Intermediary references when both mapping files are supplied.
-                Differences and rename candidates are diagnostic only; the current tool does not load old mods.
+                METHOD_ALIAS rules patch only the game copy or inject aliases in memory with -javaagent.
+                Dependency overrides only relax Fabric's Minecraft version gate; neither feature proves mod compatibility.
+                Candidate TSV rows are review-only and cannot be applied directly as METHOD_ALIAS rules.
                 """);
     }
 
     private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath,
                            Path intermediaryMappingsPath, Path legacyGameJar,
-                           Path legacyMappingsPath, Path apiReportPath, boolean help) {}
+                           Path legacyMappingsPath, Path apiReportPath,
+                           Path patchGameOutput, Path patchRulesPath,
+                           Path dependencyOverridesOutput, Path aliasCandidatesOutput, boolean help) {}
 }
