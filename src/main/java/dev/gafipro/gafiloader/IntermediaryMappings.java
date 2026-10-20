@@ -208,101 +208,7 @@ final class IntermediaryMappings {
 
     /**
      * Map a class name, including anonymous/synthetic inner classes omitted from some mapping artifacts.
-     * Inner binary names keep the outer-class prefix and the same '
-        return intermediaryToNamedClasses.size();
-    }
-
-    int memberCount() {
-        return intermediaryToNamedMembers.size();
-    }
-
-    String normalizeDescriptor(String descriptor) {
-        if (descriptor == null || descriptor.isEmpty()) {
-            return descriptor;
-        }
-        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
-                ? org.objectweb.asm.Type.getMethodType(descriptor)
-                : org.objectweb.asm.Type.getType(descriptor);
-        return remapType(type).getDescriptor();
-    }
-
-    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
-        return switch (type.getSort()) {
-            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
-                    mapClassName(type.getInternalName()));
-            case org.objectweb.asm.Type.ARRAY -> {
-                org.objectweb.asm.Type element = remapType(type.getElementType());
-                yield org.objectweb.asm.Type.getType(
-                        "[".repeat(type.getDimensions()) + element.getDescriptor());
-            }
-            case org.objectweb.asm.Type.METHOD -> {
-                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
-                for (int i = 0; i < arguments.length; i++) {
-                    arguments[i] = remapType(arguments[i]);
-                }
-                yield org.objectweb.asm.Type.getMethodType(
-                        org.objectweb.asm.Type.getMethodDescriptor(
-                                remapType(type.getReturnType()), arguments));
-            }
-            default -> type;
-        };
-    }
-
-    private static String readTinyHeader(Path path) throws IOException {
-        if (isZip(path)) {
-            try (ZipFile zip = new ZipFile(path.toFile())) {
-                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
-                if (entry == null) {
-                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
-                }
-                try (var input = zip.getInputStream(entry);
-                     var reader = new java.io.BufferedReader(
-                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
-                    String line = reader.readLine();
-                    if (line == null) {
-                        throw new IOException("Empty mapping file in " + path);
-                    }
-                    return line;
-                }
-            }
-        }
-
-        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            String line = reader.readLine();
-            if (line == null) {
-                throw new IOException("Empty mapping file: " + path);
-            }
-            return line;
-        }
-    }
-
-    private static boolean isZip(Path path) {
-        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
-    }
-
-    private static void putClassConsistent(Map<String, String> map, String key, String value,
-                                           Path mappingFile) throws IOException {
-        String previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
-                                            MappedMember value, Path mappingFile) throws IOException {
-        MappedMember previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
-                             String name, String descriptor) {}
-
-    private record MappedMember(String owner, String name, String descriptor) {}
-
-}
- suffix after namespace remapping.
+     * Inner binary names keep the outer-class prefix and the same '$' suffix after namespace remapping.
      */
     String mapClassName(String intermediaryInternalName) {
         String direct = intermediaryToNamedClasses.get(intermediaryInternalName);
@@ -310,201 +216,13 @@ final class IntermediaryMappings {
             return direct;
         }
 
-        int dollar = intermediaryInternalName.lastIndexOf('
-        return intermediaryToNamedClasses.size();
-    }
-
-    int memberCount() {
-        return intermediaryToNamedMembers.size();
-    }
-
-    private String normalizeDescriptor(String descriptor) {
-        if (descriptor == null || descriptor.isEmpty()) {
-            return descriptor;
-        }
-        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
-                ? org.objectweb.asm.Type.getMethodType(descriptor)
-                : org.objectweb.asm.Type.getType(descriptor);
-        return remapType(type).getDescriptor();
-    }
-
-    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
-        return switch (type.getSort()) {
-            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
-                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
-            case org.objectweb.asm.Type.ARRAY -> {
-                org.objectweb.asm.Type element = remapType(type.getElementType());
-                yield org.objectweb.asm.Type.getType(
-                        "[".repeat(type.getDimensions()) + element.getDescriptor());
-            }
-            case org.objectweb.asm.Type.METHOD -> {
-                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
-                for (int i = 0; i < arguments.length; i++) {
-                    arguments[i] = remapType(arguments[i]);
-                }
-                yield org.objectweb.asm.Type.getMethodType(
-                        org.objectweb.asm.Type.getMethodDescriptor(
-                                remapType(type.getReturnType()), arguments));
-            }
-            default -> type;
-        };
-    }
-
-    private static String readTinyHeader(Path path) throws IOException {
-        if (isZip(path)) {
-            try (ZipFile zip = new ZipFile(path.toFile())) {
-                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
-                if (entry == null) {
-                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
-                }
-                try (var input = zip.getInputStream(entry);
-                     var reader = new java.io.BufferedReader(
-                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
-                    String line = reader.readLine();
-                    if (line == null) {
-                        throw new IOException("Empty mapping file in " + path);
-                    }
-                    return line;
-                }
-            }
-        }
-
-        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            String line = reader.readLine();
-            if (line == null) {
-                throw new IOException("Empty mapping file: " + path);
-            }
-            return line;
-        }
-    }
-
-    private static boolean isZip(Path path) {
-        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
-    }
-
-    private static void putClassConsistent(Map<String, String> map, String key, String value,
-                                           Path mappingFile) throws IOException {
-        String previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
-                                            MappedMember value, Path mappingFile) throws IOException {
-        MappedMember previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
-                             String name, String descriptor) {}
-
-    private record MappedMember(String owner, String name, String descriptor) {}
-
-}
-);
+        int dollar = intermediaryInternalName.lastIndexOf('$');
         while (dollar > 0) {
             String outer = intermediaryToNamedClasses.get(intermediaryInternalName.substring(0, dollar));
             if (outer != null) {
                 return outer + intermediaryInternalName.substring(dollar);
             }
-            dollar = intermediaryInternalName.lastIndexOf('
-        return intermediaryToNamedClasses.size();
-    }
-
-    int memberCount() {
-        return intermediaryToNamedMembers.size();
-    }
-
-    private String normalizeDescriptor(String descriptor) {
-        if (descriptor == null || descriptor.isEmpty()) {
-            return descriptor;
-        }
-        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
-                ? org.objectweb.asm.Type.getMethodType(descriptor)
-                : org.objectweb.asm.Type.getType(descriptor);
-        return remapType(type).getDescriptor();
-    }
-
-    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
-        return switch (type.getSort()) {
-            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
-                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
-            case org.objectweb.asm.Type.ARRAY -> {
-                org.objectweb.asm.Type element = remapType(type.getElementType());
-                yield org.objectweb.asm.Type.getType(
-                        "[".repeat(type.getDimensions()) + element.getDescriptor());
-            }
-            case org.objectweb.asm.Type.METHOD -> {
-                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
-                for (int i = 0; i < arguments.length; i++) {
-                    arguments[i] = remapType(arguments[i]);
-                }
-                yield org.objectweb.asm.Type.getMethodType(
-                        org.objectweb.asm.Type.getMethodDescriptor(
-                                remapType(type.getReturnType()), arguments));
-            }
-            default -> type;
-        };
-    }
-
-    private static String readTinyHeader(Path path) throws IOException {
-        if (isZip(path)) {
-            try (ZipFile zip = new ZipFile(path.toFile())) {
-                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
-                if (entry == null) {
-                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
-                }
-                try (var input = zip.getInputStream(entry);
-                     var reader = new java.io.BufferedReader(
-                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
-                    String line = reader.readLine();
-                    if (line == null) {
-                        throw new IOException("Empty mapping file in " + path);
-                    }
-                    return line;
-                }
-            }
-        }
-
-        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            String line = reader.readLine();
-            if (line == null) {
-                throw new IOException("Empty mapping file: " + path);
-            }
-            return line;
-        }
-    }
-
-    private static boolean isZip(Path path) {
-        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
-    }
-
-    private static void putClassConsistent(Map<String, String> map, String key, String value,
-                                           Path mappingFile) throws IOException {
-        String previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
-                                            MappedMember value, Path mappingFile) throws IOException {
-        MappedMember previous = map.putIfAbsent(key, value);
-        if (previous != null && !previous.equals(value)) {
-            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
-        }
-    }
-
-    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
-                             String name, String descriptor) {}
-
-    private record MappedMember(String owner, String name, String descriptor) {}
-
-}
-, dollar - 1);
+            dollar = intermediaryInternalName.lastIndexOf('$', dollar - 1);
         }
         return intermediaryInternalName;
     }
@@ -531,7 +249,7 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    private String normalizeDescriptor(String descriptor) {
+    String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
@@ -544,7 +262,7 @@ final class IntermediaryMappings {
     private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
         return switch (type.getSort()) {
             case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
-                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
+                    mapClassName(type.getInternalName()));
             case org.objectweb.asm.Type.ARRAY -> {
                 org.objectweb.asm.Type element = remapType(type.getElementType());
                 yield org.objectweb.asm.Type.getType(
