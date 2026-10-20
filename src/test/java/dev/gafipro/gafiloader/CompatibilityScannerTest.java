@@ -45,6 +45,46 @@ class CompatibilityScannerTest {
         assertTrue(findingKeys.stream().noneMatch(key -> key.endsWith("#present")));
     }
 
+    @Test
+    void appliesExplicitClassAndMethodAliasesBeforeComparing() throws IOException {
+        Path gameJar = temporaryDirectory.resolve("minecraft-alias-test.jar");
+        Path modJar = temporaryDirectory.resolve("legacy-alias-test-mod.jar");
+        Path aliasesFile = temporaryDirectory.resolve("aliases.tsv");
+
+        writeJar(gameJar, "net/minecraft/Target", targetClass());
+        writeJar(modJar, "test/AliasedLegacyMod", aliasedLegacyModClass());
+        java.nio.file.Files.writeString(aliasesFile, String.join("\n",
+                "CLASS\tnet/minecraft/LegacyTarget\tnet/minecraft/Target",
+                "METHOD\tnet/minecraft/LegacyTarget\toldPresent\t()V"
+                        + "\tnet/minecraft/Target\tpresent\t()V",
+                ""));
+
+        CompatibilityScanner.Report report = new CompatibilityScanner()
+                .scan(gameJar, List.of(modJar), aliasesFile);
+
+        assertTrue(report.findings().isEmpty());
+        assertEquals(1, report.summary().classAliasesLoaded());
+        assertEquals(1, report.summary().memberAliasesLoaded());
+    }
+
+    private static byte[] aliasedLegacyModClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "test/AliasedLegacyMod",
+                null, "java/lang/Object", null);
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "run", "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC,
+                "net/minecraft/LegacyTarget", "oldPresent", "()V", false);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] targetClass() {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/minecraft/Target",
