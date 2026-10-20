@@ -190,8 +190,7 @@ final class IntermediaryMappings {
     CompatibilityScanner.Reference normalize(CompatibilityScanner.Reference reference) {
         if (reference.kind() == CompatibilityScanner.SymbolKind.CLASS) {
             return new CompatibilityScanner.Reference(reference.kind(),
-                    intermediaryToNamedClasses.getOrDefault(reference.owner(), reference.owner()),
-                    null, null);
+                    mapClassName(reference.owner()), null, null);
         }
 
         MappedMember member = intermediaryToNamedMembers.get(new MemberKey(
@@ -204,8 +203,30 @@ final class IntermediaryMappings {
         // Normalize the owner and descriptor even when this particular member has no mapping.
         // Retaining the old member name leaves a useful unresolved-symbol diagnostic.
         return new CompatibilityScanner.Reference(reference.kind(),
-                intermediaryToNamedClasses.getOrDefault(reference.owner(), reference.owner()),
-                reference.name(), normalizeDescriptor(reference.descriptor()));
+                mapClassName(reference.owner()), reference.name(), normalizeDescriptor(reference.descriptor()));
+    }
+
+    String mapClassName(String intermediaryInternalName) {
+        String direct = intermediaryToNamedClasses.get(intermediaryInternalName);
+        if (direct != null) {
+            return direct;
+        }
+
+        // Mapping artifacts may omit anonymous/synthetic inner classes. Their JVM binary names
+        // normally retain the mapped outer class plus the same '
+
+    String mapMethodName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    String mapFieldName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
+    }
+
+    String mapDescriptor(String descriptor) {
+        return normalizeDescriptor(descriptor);
     }
 
     int classCount() {
@@ -216,7 +237,348 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    private String normalizeDescriptor(String descriptor) {
+    String normalizeDescriptor(String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return descriptor;
+        }
+        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
+                ? org.objectweb.asm.Type.getMethodType(descriptor)
+                : org.objectweb.asm.Type.getType(descriptor);
+        return remapType(type).getDescriptor();
+    }
+
+    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
+        return switch (type.getSort()) {
+            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
+                    mapClassName(type.getInternalName()));
+            case org.objectweb.asm.Type.ARRAY -> {
+                org.objectweb.asm.Type element = remapType(type.getElementType());
+                yield org.objectweb.asm.Type.getType(
+                        "[".repeat(type.getDimensions()) + element.getDescriptor());
+            }
+            case org.objectweb.asm.Type.METHOD -> {
+                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
+                for (int i = 0; i < arguments.length; i++) {
+                    arguments[i] = remapType(arguments[i]);
+                }
+                yield org.objectweb.asm.Type.getMethodType(
+                        org.objectweb.asm.Type.getMethodDescriptor(
+                                remapType(type.getReturnType()), arguments));
+            }
+            default -> type;
+        };
+    }
+
+    private static String readTinyHeader(Path path) throws IOException {
+        if (isZip(path)) {
+            try (ZipFile zip = new ZipFile(path.toFile())) {
+                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
+                if (entry == null) {
+                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
+                }
+                try (var input = zip.getInputStream(entry);
+                     var reader = new java.io.BufferedReader(
+                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                    String line = reader.readLine();
+                    if (line == null) {
+                        throw new IOException("Empty mapping file in " + path);
+                    }
+                    return line;
+                }
+            }
+        }
+
+        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line = reader.readLine();
+            if (line == null) {
+                throw new IOException("Empty mapping file: " + path);
+            }
+            return line;
+        }
+    }
+
+    private static boolean isZip(Path path) {
+        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
+    }
+
+    private static void putClassConsistent(Map<String, String> map, String key, String value,
+                                           Path mappingFile) throws IOException {
+        String previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
+                                            MappedMember value, Path mappingFile) throws IOException {
+        MappedMember previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
+                             String name, String descriptor) {}
+
+    private record MappedMember(String owner, String name, String descriptor) {}
+
+}
+ suffix; map that safely rather
+        // than leaking an Intermediary owner such as class_310$1 into the 26.2 runtime.
+        int dollar = intermediaryInternalName.lastIndexOf('
+
+    String mapMethodName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    String mapFieldName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
+    }
+
+    String mapDescriptor(String descriptor) {
+        return normalizeDescriptor(descriptor);
+    }
+
+    int classCount() {
+        return intermediaryToNamedClasses.size();
+    }
+
+    int memberCount() {
+        return intermediaryToNamedMembers.size();
+    }
+
+    String normalizeDescriptor(String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return descriptor;
+        }
+        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
+                ? org.objectweb.asm.Type.getMethodType(descriptor)
+                : org.objectweb.asm.Type.getType(descriptor);
+        return remapType(type).getDescriptor();
+    }
+
+    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
+        return switch (type.getSort()) {
+            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
+                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
+            case org.objectweb.asm.Type.ARRAY -> {
+                org.objectweb.asm.Type element = remapType(type.getElementType());
+                yield org.objectweb.asm.Type.getType(
+                        "[".repeat(type.getDimensions()) + element.getDescriptor());
+            }
+            case org.objectweb.asm.Type.METHOD -> {
+                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
+                for (int i = 0; i < arguments.length; i++) {
+                    arguments[i] = remapType(arguments[i]);
+                }
+                yield org.objectweb.asm.Type.getMethodType(
+                        org.objectweb.asm.Type.getMethodDescriptor(
+                                remapType(type.getReturnType()), arguments));
+            }
+            default -> type;
+        };
+    }
+
+    private static String readTinyHeader(Path path) throws IOException {
+        if (isZip(path)) {
+            try (ZipFile zip = new ZipFile(path.toFile())) {
+                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
+                if (entry == null) {
+                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
+                }
+                try (var input = zip.getInputStream(entry);
+                     var reader = new java.io.BufferedReader(
+                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                    String line = reader.readLine();
+                    if (line == null) {
+                        throw new IOException("Empty mapping file in " + path);
+                    }
+                    return line;
+                }
+            }
+        }
+
+        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line = reader.readLine();
+            if (line == null) {
+                throw new IOException("Empty mapping file: " + path);
+            }
+            return line;
+        }
+    }
+
+    private static boolean isZip(Path path) {
+        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
+    }
+
+    private static void putClassConsistent(Map<String, String> map, String key, String value,
+                                           Path mappingFile) throws IOException {
+        String previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
+                                            MappedMember value, Path mappingFile) throws IOException {
+        MappedMember previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
+                             String name, String descriptor) {}
+
+    private record MappedMember(String owner, String name, String descriptor) {}
+
+}
+);
+        while (dollar > 0) {
+            String outer = intermediaryToNamedClasses.get(intermediaryInternalName.substring(0, dollar));
+            if (outer != null) {
+                return outer + intermediaryInternalName.substring(dollar);
+            }
+            dollar = intermediaryInternalName.lastIndexOf('
+
+    String mapMethodName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    String mapFieldName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
+    }
+
+    String mapDescriptor(String descriptor) {
+        return normalizeDescriptor(descriptor);
+    }
+
+    int classCount() {
+        return intermediaryToNamedClasses.size();
+    }
+
+    int memberCount() {
+        return intermediaryToNamedMembers.size();
+    }
+
+    String normalizeDescriptor(String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return descriptor;
+        }
+        org.objectweb.asm.Type type = descriptor.charAt(0) == '('
+                ? org.objectweb.asm.Type.getMethodType(descriptor)
+                : org.objectweb.asm.Type.getType(descriptor);
+        return remapType(type).getDescriptor();
+    }
+
+    private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
+        return switch (type.getSort()) {
+            case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
+                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
+            case org.objectweb.asm.Type.ARRAY -> {
+                org.objectweb.asm.Type element = remapType(type.getElementType());
+                yield org.objectweb.asm.Type.getType(
+                        "[".repeat(type.getDimensions()) + element.getDescriptor());
+            }
+            case org.objectweb.asm.Type.METHOD -> {
+                org.objectweb.asm.Type[] arguments = type.getArgumentTypes();
+                for (int i = 0; i < arguments.length; i++) {
+                    arguments[i] = remapType(arguments[i]);
+                }
+                yield org.objectweb.asm.Type.getMethodType(
+                        org.objectweb.asm.Type.getMethodDescriptor(
+                                remapType(type.getReturnType()), arguments));
+            }
+            default -> type;
+        };
+    }
+
+    private static String readTinyHeader(Path path) throws IOException {
+        if (isZip(path)) {
+            try (ZipFile zip = new ZipFile(path.toFile())) {
+                ZipEntry entry = zip.getEntry(EMBEDDED_MAPPING_PATH);
+                if (entry == null) {
+                    throw new IOException("Mapping JAR has no " + EMBEDDED_MAPPING_PATH + ": " + path);
+                }
+                try (var input = zip.getInputStream(entry);
+                     var reader = new java.io.BufferedReader(
+                             new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                    String line = reader.readLine();
+                    if (line == null) {
+                        throw new IOException("Empty mapping file in " + path);
+                    }
+                    return line;
+                }
+            }
+        }
+
+        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line = reader.readLine();
+            if (line == null) {
+                throw new IOException("Empty mapping file: " + path);
+            }
+            return line;
+        }
+    }
+
+    private static boolean isZip(Path path) {
+        return path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar");
+    }
+
+    private static void putClassConsistent(Map<String, String> map, String key, String value,
+                                           Path mappingFile) throws IOException {
+        String previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary class mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private static void putMemberConsistent(Map<MemberKey, MappedMember> map, MemberKey key,
+                                            MappedMember value, Path mappingFile) throws IOException {
+        MappedMember previous = map.putIfAbsent(key, value);
+        if (previous != null && !previous.equals(value)) {
+            throw new IOException("Conflicting Intermediary member mapping for " + key + " in " + mappingFile);
+        }
+    }
+
+    private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
+                             String name, String descriptor) {}
+
+    private record MappedMember(String owner, String name, String descriptor) {}
+
+}
+, dollar - 1);
+        }
+        return intermediaryInternalName;
+    }
+
+    String mapMethodName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    String mapFieldName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
+    }
+
+    String mapDescriptor(String descriptor) {
+        return normalizeDescriptor(descriptor);
+    }
+
+    int classCount() {
+        return intermediaryToNamedClasses.size();
+    }
+
+    int memberCount() {
+        return intermediaryToNamedMembers.size();
+    }
+
+    String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
