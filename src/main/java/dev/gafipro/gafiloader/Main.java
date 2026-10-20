@@ -24,38 +24,52 @@ public final class Main {
                 return;
             }
 
-            List<Path> mods = findModJars(options.modsPath());
-            CompatibilityScanner.Report report = new CompatibilityScanner()
-                    .scan(options.gameJar(), mods, options.aliasesPath());
+            if (options.modsPath() != null) {
+                List<Path> mods = findModJars(options.modsPath());
+                CompatibilityScanner.Report report = new CompatibilityScanner()
+                        .scan(options.gameJar(), mods, options.aliasesPath());
 
-            printSummary(report);
-            for (CompatibilityScanner.Finding finding : report.findings()) {
-                String symbol = finding.owner();
-                if (finding.name() != null) {
-                    symbol += "#" + finding.name() + (finding.descriptor() == null ? "" : finding.descriptor());
+                printSummary(report);
+                for (CompatibilityScanner.Finding finding : report.findings()) {
+                    String symbol = finding.owner();
+                    if (finding.name() != null) {
+                        symbol += "#" + finding.name()
+                                + (finding.descriptor() == null ? "" : finding.descriptor());
+                    }
+                    System.out.printf("  [%s] %s%n    mod: %s%n    %s%n",
+                            finding.kind(), symbol, finding.modJar(), finding.detail());
                 }
-                System.out.printf("  [%s] %s%n    mod: %s%n    %s%n",
-                        finding.kind(), symbol, finding.modJar(), finding.detail());
+
+                writeJsonReport(options.reportPath(), report, "Symbol scan");
+                if (report.findings().isEmpty()) {
+                    System.out.println("No unresolved direct Minecraft symbols were found.");
+                    System.out.println("This is not a guarantee of runtime compatibility.");
+                } else {
+                    System.out.println();
+                    System.out.println("These are candidate incompatibilities, not automatic fixes.");
+                    System.out.println("Class/member renames and changed behavior still require mappings or adapters.");
+                }
             }
 
-            if (options.reportPath() != null) {
-                Path reportPath = options.reportPath().toAbsolutePath().normalize();
-                Path parent = reportPath.getParent();
-                if (parent != null) {
-                    Files.createDirectories(parent);
+            if (options.legacyGameJar() != null) {
+                GameApiComparator.Report report = new GameApiComparator().compare(
+                        options.legacyGameJar(), options.gameJar(), options.legacyMappingsPath());
+                printApiSummary(report);
+                for (GameApiComparator.Difference difference : report.differences()) {
+                    String symbol = difference.owner();
+                    if (difference.name() != null) {
+                        symbol += "#" + difference.name()
+                                + (difference.descriptor() == null ? "" : difference.descriptor());
+                    }
+                    System.out.printf("  [%s] %s%n    %s%n",
+                            difference.kind(), symbol, difference.detail());
+                    if (!difference.candidates().isEmpty()) {
+                        System.out.println("    candidates: " + String.join(", ", difference.candidates()));
+                    }
                 }
-                Files.writeString(reportPath, GSON.toJson(report) + System.lineSeparator());
-                System.out.println();
-                System.out.println("JSON report: " + reportPath);
-            }
 
-            if (report.findings().isEmpty()) {
-                System.out.println("No unresolved direct Minecraft symbols were found.");
-                System.out.println("This is not a guarantee of runtime compatibility.");
-            } else {
-                System.out.println();
-                System.out.println("These are candidate incompatibilities, not automatic fixes.");
-                System.out.println("Class/member renames and changed behavior still require mapping or adapters.");
+                writeJsonReport(options.apiReportPath(), report, "API comparison");
+                System.out.println("Candidate names require review; this report does not apply patches.");
             }
         } catch (IllegalArgumentException exception) {
             System.err.println("Gafi Loader: " + exception.getMessage());
@@ -66,6 +80,20 @@ public final class Main {
             System.err.println("Gafi Loader: I/O error: " + exception.getMessage());
             System.exit(2);
         }
+    }
+
+    private static void writeJsonReport(Path output, Object report, String label) throws IOException {
+        if (output == null) {
+            return;
+        }
+        Path reportPath = output.toAbsolutePath().normalize();
+        Path parent = reportPath.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(reportPath, GSON.toJson(report) + System.lineSeparator());
+        System.out.println();
+        System.out.println(label + " JSON report: " + reportPath);
     }
 
     private static void printSummary(CompatibilityScanner.Report report) {
@@ -82,6 +110,26 @@ public final class Main {
                 + ", fields: " + summary.missingFields() + ")");
         System.out.println("Aliases loaded:    " + summary.classAliasesLoaded() + " classes, "
                 + summary.memberAliasesLoaded() + " members");
+        System.out.println();
+    }
+
+    private static void printApiSummary(GameApiComparator.Report report) {
+        GameApiComparator.Summary summary = report.summary();
+        System.out.println();
+        System.out.println("Gafi Loader — 1.21.11 to 26.2 API comparison");
+        System.out.println("Legacy game:       " + report.legacyGameJar());
+        System.out.println("Target game:       " + report.targetGameJar());
+        System.out.println("Legacy mappings:   " + report.legacyMappingsFile());
+        System.out.println("Legacy classes:    " + report.legacyClassesIndexed()
+                + " indexed (" + report.legacyClassesMapped() + " mapped)");
+        System.out.println("Target classes:    " + report.targetClassesIndexed());
+        System.out.println("Mapping members:   " + report.legacyMembersMapped());
+        System.out.println("Differences:       " + summary.differences()
+                + " (classes: " + summary.missingClasses()
+                + ", methods: " + summary.missingMethods()
+                + ", fields: " + summary.missingFields()
+                + ", rename candidates: " + summary.renamedCandidates()
+                + ", descriptor candidates: " + summary.descriptorChangedCandidates() + ")");
         System.out.println();
     }
 
@@ -122,6 +170,9 @@ public final class Main {
         Path modsPath = null;
         Path reportPath = null;
         Path aliasesPath = null;
+        Path legacyGameJar = null;
+        Path legacyMappingsPath = null;
+        Path apiReportPath = null;
         boolean help = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -130,7 +181,7 @@ public final class Main {
                 case "--help", "-h" -> help = true;
                 case "--game" -> {
                     if (++i >= args.length) {
-                        throw new IllegalArgumentException("--game requires a path to the Minecraft 26.2 JAR.");
+                        throw new IllegalArgumentException("--game requires the Minecraft 26.2 JAR.");
                     }
                     gameJar = Path.of(args[i]);
                 }
@@ -152,48 +203,93 @@ public final class Main {
                     }
                     aliasesPath = Path.of(args[i]);
                 }
+                case "--legacy-game" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--legacy-game requires the Minecraft 1.21.11 JAR.");
+                    }
+                    legacyGameJar = Path.of(args[i]);
+                }
+                case "--legacy-mappings" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--legacy-mappings requires official 1.21.11 mappings.");
+                    }
+                    legacyMappingsPath = Path.of(args[i]);
+                }
+                case "--api-report" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--api-report requires an output path.");
+                    }
+                    apiReportPath = Path.of(args[i]);
+                }
                 default -> throw new IllegalArgumentException("Unknown argument: " + argument);
             }
         }
 
         if (help) {
-            return new Options(null, null, null, null, true);
+            return new Options(null, null, null, null, null, null, null, true);
         }
         if (gameJar == null) {
-            throw new IllegalArgumentException("Missing required --game argument.");
+            throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
         }
-        if (modsPath == null) {
-            throw new IllegalArgumentException("Missing required --mods argument.");
+        if (modsPath == null && legacyGameJar == null) {
+            throw new IllegalArgumentException("Provide --mods, --legacy-game, or both.");
+        }
+        if (legacyGameJar != null && legacyMappingsPath == null) {
+            throw new IllegalArgumentException("--legacy-game requires --legacy-mappings (official 1.21.11 Mojang mappings).");
+        }
+        if (legacyGameJar == null && legacyMappingsPath != null) {
+            throw new IllegalArgumentException("--legacy-mappings is only valid with --legacy-game.");
+        }
+        if (modsPath == null && (reportPath != null || aliasesPath != null)) {
+            throw new IllegalArgumentException("--report and --aliases require --mods.");
+        }
+        if (legacyGameJar == null && apiReportPath != null) {
+            throw new IllegalArgumentException("--api-report requires --legacy-game.");
         }
         if (!Files.isRegularFile(gameJar)) {
-            throw new IllegalArgumentException("Minecraft game JAR does not exist: " + gameJar);
+            throw new IllegalArgumentException("Minecraft 26.2 game JAR does not exist: " + gameJar);
         }
         requireJar(gameJar, "Target game");
-        if (aliasesPath != null && !Files.isRegularFile(aliasesPath)) {
-            throw new IllegalArgumentException("Alias file does not exist: " + aliasesPath);
+        checkFile(aliasesPath, "Alias file");
+        checkFile(legacyGameJar, "Legacy game JAR");
+        checkFile(legacyMappingsPath, "Legacy mappings file");
+        if (legacyGameJar != null) {
+            requireJar(legacyGameJar, "Legacy game");
         }
-        return new Options(gameJar, modsPath, reportPath, aliasesPath, false);
+        return new Options(gameJar, modsPath, reportPath, aliasesPath, legacyGameJar,
+                legacyMappingsPath, apiReportPath, false);
+    }
+
+    private static void checkFile(Path path, String description) {
+        if (path != null && !Files.isRegularFile(path)) {
+            throw new IllegalArgumentException(description + " does not exist: " + path);
+        }
     }
 
     private static void printUsage() {
         System.out.println("""
-                Gafi Loader compatibility scanner
+                Gafi Loader — Minecraft 26.2 compatibility tools
 
                 Usage:
-                  gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json]
+                  gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
+                  gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
+                  Add both --mods and --legacy-game to run both analyses.
 
                 Options:
-                  --game <path>     Minecraft 26.2 target JAR (required)
-                  --mods <path>     One legacy mod JAR or a directory of JARs (required)
-                  --report <path>   Also write a JSON report
-                  --aliases <path>  Apply explicit TSV class/method/field aliases
-                  --help, -h        Show this help
+                  --game <path>             Minecraft 26.2 target JAR (always the target)
+                  --mods <path>             One mod JAR or a directory of JARs to scan
+                  --report <path>           Save the mod symbol scan as JSON
+                  --aliases <path>          Apply reviewed TSV class/method/field aliases
+                  --legacy-game <path>      Obfuscated Minecraft 1.21.11 client JAR
+                  --legacy-mappings <path>  Official Mojang mappings for Minecraft 1.21.11
+                  --api-report <path>       Save the API comparison as JSON
+                  --help, -h                Show this help
 
-                The scanner finds direct net/minecraft class/member references absent from the target JAR.
-                --aliases can normalize explicitly mapped old symbols before comparison.
-                It does not load legacy mods or infer arbitrary renames yet.
+                The API comparison normalizes the 1.21.11 game JAR using Mojang's ProGuard mappings.
+                Differences and rename candidates are diagnostic only; the current tool does not load old mods.
                 """);
     }
 
-    private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath, boolean help) {}
+    private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath,
+                           Path legacyGameJar, Path legacyMappingsPath, Path apiReportPath, boolean help) {}
 }
