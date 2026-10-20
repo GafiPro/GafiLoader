@@ -7,6 +7,7 @@ import net.fabricmc.mappingio.tree.MappingTree;
 import org.objectweb.asm.Type;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -45,7 +46,11 @@ final class MojangMappings {
         }
 
         MemoryMappingTree tree = new MemoryMappingTree();
-        MappingReader.read(mappingFile, MappingFormat.PROGUARD_FILE, tree);
+        // Mojang's client mappings append obfuscated line ranges after method descriptors,
+        // while Mapping-IO's ProGuard reader does not accept that suffix on ordinary members.
+        // Normalize only those line-number suffixes; retain all names and descriptors unchanged.
+        String mappingText = normalizeMethodLineNumberSuffixes(Files.readString(mappingFile));
+        MappingReader.read(new StringReader(mappingText), MappingFormat.PROGUARD_FILE, tree);
         if (tree.getClasses().isEmpty() || tree.getDstNamespaces().isEmpty()) {
             throw new IOException("No class mappings were read from " + mappingFile);
         }
@@ -98,6 +103,26 @@ final class MojangMappings {
 
         return new MojangMappings(obfuscatedToNamedClasses, namedToObfuscatedClasses,
                 obfuscatedToNamedMembers, sourceNamespace, obfuscatedNamespace);
+    }
+
+    private static String normalizeMethodLineNumberSuffixes(String content) {
+        StringBuilder normalized = new StringBuilder(content.length());
+        for (String line : content.split("\\R", -1)) {
+            int arrow = line.indexOf(" -> ");
+            if (arrow > 0) {
+                String declaration = line.substring(0, arrow);
+                int open = declaration.indexOf('(');
+                int close = declaration.lastIndexOf(')');
+                if (open >= 0 && close > open && close + 1 < declaration.length()) {
+                    String suffix = declaration.substring(close + 1);
+                    if (suffix.matches("(?::\\\\d+){1,2}")) {
+                        line = declaration.substring(0, close + 1) + line.substring(arrow);
+                    }
+                }
+            }
+            normalized.append(line).append('\\n');
+        }
+        return normalized.toString();
     }
 
     String toNamedClass(String obfuscatedInternalName) {
