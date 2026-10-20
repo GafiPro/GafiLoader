@@ -1,0 +1,12 @@
+# Explicit, reviewed mappings from legacy symbols to Minecraft 26.2 symbols.
+# Use JVM internal class names (slashes) and JVM descriptors, not Java source notation.
+# Rows are TAB-separated. Remove or replace these examples before running the scanner.
+#
+# CLASS<TAB>legacy-owner<TAB>target-owner
+CLASS	net/minecraft/LegacyClass	net/minecraft/NewClass
+#
+# METHOD<TAB>legacy-owner<TAB>legacy-name<TAB>legacy-descriptor<TAB>target-owner<TAB>target-name<TAB>target-descriptor
+METHOD	net/minecraft/LegacyClass	oldMethod	(I)V	net/minecraft/NewClass	newMethod	(I)V
+#
+# FIELD<TAB>legacy-owner<TAB>legacy-name<TAB>legacy-descriptor<TAB>target-owner<TAB>target-name<TAB>target-descriptor
+FIELD	net/minecraft/LegacyClass	oldField	I	net/minecraft/NewClass	newField	I
