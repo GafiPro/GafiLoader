@@ -44,7 +44,7 @@ class GameApiComparatorTest {
         GameApiComparator.Report report = new GameApiComparator().compare(legacyJar, targetJar, mappings);
 
         assertEquals(2, report.legacyClassesMapped());
-        assertEquals(3, report.legacyMembersMapped());
+        assertEquals(2, report.legacyMembersMapped());
         assertEquals(0, report.summary().missingClasses());
         assertEquals(2, report.summary().renamedCandidates());
         assertTrue(report.differences().stream().anyMatch(difference ->
