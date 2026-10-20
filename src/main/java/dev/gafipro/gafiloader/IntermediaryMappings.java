@@ -206,30 +206,9 @@ final class IntermediaryMappings {
                 mapClassName(reference.owner()), reference.name(), normalizeDescriptor(reference.descriptor()));
     }
 
-    String mapClassName(String intermediaryInternalName) {
-        String direct = intermediaryToNamedClasses.get(intermediaryInternalName);
-        if (direct != null) {
-            return direct;
-        }
-
-        // Mapping artifacts may omit anonymous/synthetic inner classes. Their JVM binary names
-        // normally retain the mapped outer class plus the same '
-
-    String mapMethodName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
-    }
-
-    String mapFieldName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
-    }
-
-    String mapDescriptor(String descriptor) {
-        return normalizeDescriptor(descriptor);
-    }
-
-    int classCount() {
+    /**
+     * Map a class name, including anonymous/synthetic inner classes omitted from some mapping artifacts.
+     * Inner binary names keep the outer-class prefix and the same '
         return intermediaryToNamedClasses.size();
     }
 
@@ -323,25 +302,15 @@ final class IntermediaryMappings {
     private record MappedMember(String owner, String name, String descriptor) {}
 
 }
- suffix; map that safely rather
-        // than leaking an Intermediary owner such as class_310$1 into the 26.2 runtime.
+ suffix after namespace remapping.
+     */
+    String mapClassName(String intermediaryInternalName) {
+        String direct = intermediaryToNamedClasses.get(intermediaryInternalName);
+        if (direct != null) {
+            return direct;
+        }
+
         int dollar = intermediaryInternalName.lastIndexOf('
-
-    String mapMethodName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
-    }
-
-    String mapFieldName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
-    }
-
-    String mapDescriptor(String descriptor) {
-        return normalizeDescriptor(descriptor);
-    }
-
-    int classCount() {
         return intermediaryToNamedClasses.size();
     }
 
@@ -349,7 +318,7 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    String normalizeDescriptor(String descriptor) {
+    private String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
@@ -442,22 +411,6 @@ final class IntermediaryMappings {
                 return outer + intermediaryInternalName.substring(dollar);
             }
             dollar = intermediaryInternalName.lastIndexOf('
-
-    String mapMethodName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
-    }
-
-    String mapFieldName(String owner, String name, String descriptor) {
-        return normalize(new CompatibilityScanner.Reference(
-                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
-    }
-
-    String mapDescriptor(String descriptor) {
-        return normalizeDescriptor(descriptor);
-    }
-
-    int classCount() {
         return intermediaryToNamedClasses.size();
     }
 
@@ -465,7 +418,7 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    String normalizeDescriptor(String descriptor) {
+    private String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
@@ -578,7 +531,7 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    String normalizeDescriptor(String descriptor) {
+    private String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
