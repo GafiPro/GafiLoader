@@ -27,7 +27,8 @@ public final class Main {
             if (options.modsPath() != null) {
                 List<Path> mods = findModJars(options.modsPath());
                 CompatibilityScanner.Report report = new CompatibilityScanner()
-                        .scan(options.gameJar(), mods, options.aliasesPath());
+                        .scan(options.gameJar(), mods, options.aliasesPath(),
+                                options.intermediaryMappingsPath(), options.legacyMappingsPath());
 
                 printSummary(report);
                 for (CompatibilityScanner.Finding finding : report.findings()) {
@@ -110,6 +111,8 @@ public final class Main {
                 + ", fields: " + summary.missingFields() + ")");
         System.out.println("Aliases loaded:    " + summary.classAliasesLoaded() + " classes, "
                 + summary.memberAliasesLoaded() + " members");
+        System.out.println("Intermediary map:  " + summary.intermediaryClassesMapped() + " classes, "
+                + summary.intermediaryMembersMapped() + " members");
         System.out.println();
     }
 
@@ -170,6 +173,7 @@ public final class Main {
         Path modsPath = null;
         Path reportPath = null;
         Path aliasesPath = null;
+        Path intermediaryMappingsPath = null;
         Path legacyGameJar = null;
         Path legacyMappingsPath = null;
         Path apiReportPath = null;
@@ -203,6 +207,13 @@ public final class Main {
                     }
                     aliasesPath = Path.of(args[i]);
                 }
+                case "--intermediary-mappings" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException(
+                                "--intermediary-mappings requires the 1.21.11 Fabric Intermediary Tiny file or JAR.");
+                    }
+                    intermediaryMappingsPath = Path.of(args[i]);
+                }
                 case "--legacy-game" -> {
                     if (++i >= args.length) {
                         throw new IllegalArgumentException("--legacy-game requires the Minecraft 1.21.11 JAR.");
@@ -226,7 +237,7 @@ public final class Main {
         }
 
         if (help) {
-            return new Options(null, null, null, null, null, null, null, true);
+            return new Options(null, null, null, null, null, null, null, null, true);
         }
         if (gameJar == null) {
             throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
@@ -237,8 +248,15 @@ public final class Main {
         if (legacyGameJar != null && legacyMappingsPath == null) {
             throw new IllegalArgumentException("--legacy-game requires --legacy-mappings (official 1.21.11 Mojang mappings).");
         }
-        if (legacyGameJar == null && legacyMappingsPath != null) {
-            throw new IllegalArgumentException("--legacy-mappings is only valid with --legacy-game.");
+        if (intermediaryMappingsPath != null && legacyMappingsPath == null) {
+            throw new IllegalArgumentException(
+                    "--intermediary-mappings requires --legacy-mappings to translate Intermediary names to Mojang names.");
+        }
+        if (legacyGameJar == null && legacyMappingsPath != null && intermediaryMappingsPath == null) {
+            throw new IllegalArgumentException("--legacy-mappings requires --legacy-game or --intermediary-mappings.");
+        }
+        if (intermediaryMappingsPath != null && modsPath == null) {
+            throw new IllegalArgumentException("--intermediary-mappings requires --mods.");
         }
         if (modsPath == null && (reportPath != null || aliasesPath != null)) {
             throw new IllegalArgumentException("--report and --aliases require --mods.");
@@ -251,13 +269,14 @@ public final class Main {
         }
         requireJar(gameJar, "Target game");
         checkFile(aliasesPath, "Alias file");
+        checkFile(intermediaryMappingsPath, "Intermediary mappings file/JAR");
         checkFile(legacyGameJar, "Legacy game JAR");
         checkFile(legacyMappingsPath, "Legacy mappings file");
         if (legacyGameJar != null) {
             requireJar(legacyGameJar, "Legacy game");
         }
-        return new Options(gameJar, modsPath, reportPath, aliasesPath, legacyGameJar,
-                legacyMappingsPath, apiReportPath, false);
+        return new Options(gameJar, modsPath, reportPath, aliasesPath, intermediaryMappingsPath,
+                legacyGameJar, legacyMappingsPath, apiReportPath, false);
     }
 
     private static void checkFile(Path path, String description) {
@@ -273,23 +292,27 @@ public final class Main {
                 Usage:
                   gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
-                  Add both --mods and --legacy-game to run both analyses.
+                  gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
+                  Add --mods and --legacy-game to run both analyses.
 
                 Options:
                   --game <path>             Minecraft 26.2 target JAR (always the target)
                   --mods <path>             One mod JAR or a directory of JARs to scan
                   --report <path>           Save the mod symbol scan as JSON
                   --aliases <path>          Apply reviewed TSV class/method/field aliases
+                  --intermediary-mappings <path>  Tiny file or JAR for 1.21.11 Intermediary mappings
                   --legacy-game <path>      Obfuscated Minecraft 1.21.11 client JAR
                   --legacy-mappings <path>  Official Mojang mappings for Minecraft 1.21.11
                   --api-report <path>       Save the API comparison as JSON
                   --help, -h                Show this help
 
                 The API comparison normalizes the 1.21.11 game JAR using Mojang's ProGuard mappings.
+                The mod scanner can normalize production Intermediary references when both mapping files are supplied.
                 Differences and rename candidates are diagnostic only; the current tool does not load old mods.
                 """);
     }
 
     private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath,
-                           Path legacyGameJar, Path legacyMappingsPath, Path apiReportPath, boolean help) {}
+                           Path intermediaryMappingsPath, Path legacyGameJar,
+                           Path legacyMappingsPath, Path apiReportPath, boolean help) {}
 }
