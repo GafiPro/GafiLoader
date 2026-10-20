@@ -263,9 +263,26 @@ public final class CompatibilityScanner {
         }
 
         @Override
-        public void visitRecordComponent(String name, String descriptor, String signature) {
+        public org.objectweb.asm.RecordComponentVisitor visitRecordComponent(
+                String name, String descriptor, String signature) {
             addDescriptor(descriptor);
-            addSignature(signature);
+            addTypeSignature(signature);
+            return new org.objectweb.asm.RecordComponentVisitor(Opcodes.ASM9) {
+                @Override
+                public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                    addDescriptor(annotationDescriptor);
+                    return annotationVisitor();
+                }
+
+                @Override
+                public AnnotationVisitor visitTypeAnnotation(int typeRef,
+                                                             org.objectweb.asm.TypePath typePath,
+                                                             String annotationDescriptor,
+                                                             boolean visible) {
+                    addDescriptor(annotationDescriptor);
+                    return annotationVisitor();
+                }
+            };
         }
 
         @Override
@@ -286,7 +303,7 @@ public final class CompatibilityScanner {
         public FieldVisitor visitField(int access, String name, String descriptor,
                                        String signature, Object value) {
             addDescriptor(descriptor);
-            addSignature(signature);
+            addTypeSignature(signature);
             if (value instanceof Type type) {
                 addType(type);
             }
@@ -407,7 +424,7 @@ public final class CompatibilityScanner {
                                                String variableSignature, org.objectweb.asm.Label start,
                                                org.objectweb.asm.Label end, int index) {
                     addDescriptor(variableDescriptor);
-                    addSignature(variableSignature);
+                    addTypeSignature(variableSignature);
                 }
 
                 @Override
@@ -473,7 +490,26 @@ public final class CompatibilityScanner {
             if (signature == null || signature.isEmpty()) {
                 return;
             }
-            new SignatureReader(signature).accept(new SignatureVisitor(Opcodes.ASM9) {
+            try {
+                new SignatureReader(signature).accept(signatureVisitor());
+            } catch (IllegalArgumentException ignored) {
+                // Some optional signature metadata is malformed or uses a different signature kind.
+            }
+        }
+
+        private void addTypeSignature(String signature) {
+            if (signature == null || signature.isEmpty()) {
+                return;
+            }
+            try {
+                new SignatureReader(signature).acceptType(signatureVisitor());
+            } catch (IllegalArgumentException ignored) {
+                // Raw descriptors are scanned separately; generic signatures are best-effort only.
+            }
+        }
+
+        private SignatureVisitor signatureVisitor() {
+            return new SignatureVisitor(Opcodes.ASM9) {
                 @Override
                 public void visitClassType(String name) {
                     addClass(name);
@@ -481,12 +517,9 @@ public final class CompatibilityScanner {
 
                 @Override
                 public void visitInnerClassType(String name) {
-                    // The outer class is already recorded; inner names are represented with '$'
-                    // in the JVM descriptor, so record the likely binary name as well.
-                    // Nested generic signature names may not have enough context to reconstruct
-                    // every binary name, which is why this remains a best-effort extra reference.
+                    // The outer type is already recorded from the generic signature.
                 }
-            });
+            };
         }
 
         private void addDescriptor(String descriptor) {
