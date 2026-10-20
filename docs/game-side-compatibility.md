@@ -44,7 +44,7 @@ Implemented prototype pieces:
 - Offline game-JAR copy patcher for explicit same-descriptor method aliases.
 - Java agent that performs those aliases in memory before a target class is defined.
 - Java agent configuration that loads the official 1.21.11 Mojang mappings and Fabric Intermediary artifact, then remaps direct legacy class/member/descriptors in loaded bytecode to 26.2 names without editing the mod JAR.
-- Hooks at Fabric's `MixinServiceKnot.getResourceAsStream` and `getClassBytes` boundaries: known Mixin config/refmap JSON is remapped in memory, and class bytes requested by Mixin for metadata inspection have their direct Intermediary references normalized before Mixin consumes them. The hooks validate the expected method signatures; current tests use synthetic fixtures, not an actual Fabric 26.2 launch.
+- Hooks at Fabric's `MixinServiceKnot.getResourceAsStream` and `getClassBytes` boundaries: known Mixin config/refmap JSON is remapped in memory, and class bytes requested by Mixin for metadata inspection have their direct Intermediary references normalized before Mixin consumes them. The hooks validate the expected method signatures. CI also downloads the released Fabric Loader 0.20.1 JAR and applies the patcher to its actual `MixinServiceKnot` class. That verifies the binary hook points, but is not an actual Fabric 26.2 game launch.
 - Generator for Fabric's documented dependency-override configuration, scoped to an explicitly selected set of legacy mod JARs.
 - Regression tests using synthetic JARs/classes for bytecode delegation, Intermediary owner/member/descriptor remapping in a separate JVM, preservation of source bytes, and dependency-config merging.
 
