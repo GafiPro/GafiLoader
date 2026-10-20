@@ -771,6 +771,51 @@ public final class CompatibilityScanner {
             return members.size();
         }
 
+        /**
+         * Validate every alias target against the actual 26.2 game artifact before the runtime
+         * transformer is installed. This catches typos and stale rules before mods start linking.
+         */
+        void validateAgainstTarget(Path targetGameJar) throws IOException {
+            validateAgainstTarget(TargetApiIndex.load(targetGameJar));
+        }
+
+        void validateAgainstTarget(TargetApiIndex target) throws IOException {
+            if (target == null) {
+                throw new IllegalArgumentException("Target Minecraft API index is required.");
+            }
+            for (Map.Entry<String, String> entry : classes.entrySet()) {
+                if (!target.hasClass(entry.getValue())) {
+                    throw new IOException("Class alias target is absent from Minecraft 26.2: "
+                            + entry.getKey() + " -> " + entry.getValue());
+                }
+            }
+
+            for (Map.Entry<Reference, AliasTarget> entry : members.entrySet()) {
+                Reference source = entry.getKey();
+                AliasTarget destination = entry.getValue();
+                if (!target.hasClass(destination.owner())) {
+                    throw new IOException("Member alias target owner is absent from Minecraft 26.2: "
+                            + destination.owner() + " (from " + source.owner() + "#" + source.name() + ")");
+                }
+                String descriptorExpectedFromClassAliases = mapDescriptor(source.descriptor());
+                if (!descriptorExpectedFromClassAliases.equals(destination.descriptor())) {
+                    throw new IOException("Unsupported descriptor-changing alias for " + source.owner()
+                            + "#" + source.name() + source.descriptor() + ": target descriptor "
+                            + destination.descriptor() + " does not match class-only mapping "
+                            + descriptorExpectedFromClassAliases);
+                }
+
+                boolean found = source.kind() == SymbolKind.METHOD
+                        ? target.methodAccess(destination.owner(), destination.name(), destination.descriptor()) != null
+                        : target.fieldAccess(destination.owner(), destination.name(), destination.descriptor()) != null;
+                if (!found) {
+                    throw new IOException("Member alias target is absent from Minecraft 26.2: "
+                            + destination.owner() + "#" + destination.name() + destination.descriptor()
+                            + " (from " + source.owner() + "#" + source.name() + source.descriptor() + ")");
+                }
+            }
+        }
+
         String mapClass(String owner) {
             String exact = classes.get(owner);
             if (exact != null) {
