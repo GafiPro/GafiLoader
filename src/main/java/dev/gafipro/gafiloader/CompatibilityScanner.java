@@ -38,15 +38,34 @@ public final class CompatibilityScanner {
     private static final String MINECRAFT_PACKAGE = "net/minecraft/";
 
     public Report scan(Path gameJar, Collection<Path> modJars) throws IOException {
-        return scan(gameJar, modJars, AliasSet.empty());
+        return scan(gameJar, modJars, null, null, null);
     }
 
     public Report scan(Path gameJar, Collection<Path> modJars, Path aliasesFile) throws IOException {
-        AliasSet aliases = aliasesFile == null ? AliasSet.empty() : AliasSet.load(aliasesFile);
-        return scan(gameJar, modJars, aliases);
+        return scan(gameJar, modJars, aliasesFile, null, null);
     }
 
-    private Report scan(Path gameJar, Collection<Path> modJars, AliasSet aliases) throws IOException {
+    /**
+     * Scans mods and optionally normalizes production Intermediary names through the 1.21.11
+     * official mappings before comparing references with the unobfuscated 26.2 target.
+     */
+    public Report scan(Path gameJar, Collection<Path> modJars, Path aliasesFile,
+                       Path intermediaryMappingsFile, Path legacyMojangMappingsFile) throws IOException {
+        AliasSet aliases = aliasesFile == null ? AliasSet.empty() : AliasSet.load(aliasesFile);
+        IntermediaryMappings intermediaryMappings = null;
+        if (intermediaryMappingsFile != null) {
+            if (legacyMojangMappingsFile == null) {
+                throw new IllegalArgumentException(
+                        "Official 1.21.11 Mojang mappings are required with --intermediary-mappings.");
+            }
+            MojangMappings mojangMappings = MojangMappings.load(legacyMojangMappingsFile);
+            intermediaryMappings = IntermediaryMappings.load(intermediaryMappingsFile, mojangMappings);
+        }
+        return scanInternal(gameJar, modJars, aliases, intermediaryMappings);
+    }
+
+    private Report scanInternal(Path gameJar, Collection<Path> modJars, AliasSet aliases,
+                                IntermediaryMappings intermediaryMappings) throws IOException {
         if (gameJar == null || !Files.isRegularFile(gameJar)) {
             throw new IllegalArgumentException("The target game JAR does not exist: " + gameJar);
         }
@@ -75,7 +94,9 @@ public final class CompatibilityScanner {
             inspectedReferences += scan.references().size();
 
             for (Reference sourceReference : scan.references()) {
-                Reference reference = aliases.normalize(sourceReference);
+                Reference normalized = intermediaryMappings == null
+                        ? sourceReference : intermediaryMappings.normalize(sourceReference);
+                Reference reference = aliases.normalize(normalized);
                 if (!reference.owner().startsWith(MINECRAFT_PACKAGE)) {
                     continue;
                 }
@@ -97,16 +118,18 @@ public final class CompatibilityScanner {
                 }
 
                 Member member = new Member(reference.name(), reference.descriptor());
-                if (reference.kind() == SymbolKind.METHOD && !targetClass.methods().contains(member)) {
+                if (reference.kind() == SymbolKind.METHOD
+                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.METHOD, new HashSet<>())) {
                     findings.add(new Finding(
                             modJar.toString(), "MISSING_METHOD", reference.owner(), reference.name(),
                             reference.descriptor(),
-                            "The target class exists, but the exact method name/descriptor was not found."));
-                } else if (reference.kind() == SymbolKind.FIELD && !targetClass.fields().contains(member)) {
+                            "The target class and its hierarchy do not declare the exact method name/descriptor."));
+                } else if (reference.kind() == SymbolKind.FIELD
+                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.FIELD, new HashSet<>())) {
                     findings.add(new Finding(
                             modJar.toString(), "MISSING_FIELD", reference.owner(), reference.name(),
                             reference.descriptor(),
-                            "The target class exists, but the exact field name/descriptor was not found."));
+                            "The target class and its hierarchy do not declare the exact field name/descriptor."));
                 }
             }
         }
@@ -125,13 +148,39 @@ public final class CompatibilityScanner {
         int missingFields = countKind(findings, "MISSING_FIELD");
         Summary summary = new Summary(orderedMods.size(), scannedClasses, inspectedReferences,
                 gameClasses.size(), findings.size(), missingClasses, missingMethods, missingFields,
-                aliases.classAliasCount(), aliases.memberAliasCount());
+                aliases.classAliasCount(), aliases.memberAliasCount(),
+                intermediaryMappings == null ? 0 : intermediaryMappings.classCount(),
+                intermediaryMappings == null ? 0 : intermediaryMappings.memberCount());
 
         return new Report(
                 gameJar.toAbsolutePath().normalize().toString(),
                 orderedMods.stream().map(Path::toString).toList(),
                 summary,
                 findings);
+    }
+
+    private static boolean memberExists(Map<String, ClassInfo> classes, String owner,
+                                        Member member, SymbolKind kind, Set<String> visited) {
+        if (owner == null || !visited.add(owner)) {
+            return false;
+        }
+        ClassInfo classInfo = classes.get(owner);
+        if (classInfo == null) {
+            return false;
+        }
+        Set<Member> members = kind == SymbolKind.METHOD ? classInfo.methods() : classInfo.fields();
+        if (members.contains(member)) {
+            return true;
+        }
+        if (memberExists(classes, classInfo.superName(), member, kind, visited)) {
+            return true;
+        }
+        for (String interfaceName : classInfo.interfaces()) {
+            if (memberExists(classes, interfaceName, member, kind, visited)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int countKind(List<Finding> findings, String kind) {
@@ -156,6 +205,8 @@ public final class CompatibilityScanner {
                     ClassReader reader = new ClassReader(input);
                     reader.accept(new ClassVisitor(Opcodes.ASM9) {
                         private String className;
+                        private String superName;
+                        private List<String> interfaces = List.of();
                         private final Set<Member> fields = new HashSet<>();
                         private final Set<Member> methods = new HashSet<>();
 
@@ -163,6 +214,8 @@ public final class CompatibilityScanner {
                         public void visit(int version, int access, String name, String signature,
                                           String superName, String[] interfaces) {
                             className = name;
+                            this.superName = superName;
+                            this.interfaces = interfaces == null ? List.of() : List.of(interfaces.clone());
                         }
 
                         @Override
@@ -182,7 +235,8 @@ public final class CompatibilityScanner {
                         @Override
                         public void visitEnd() {
                             classes.putIfAbsent(className,
-                                    new ClassInfo(Set.copyOf(fields), Set.copyOf(methods)));
+                                    new ClassInfo(Set.copyOf(fields), Set.copyOf(methods),
+                                            superName, List.copyOf(interfaces)));
                         }
                     }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                 } catch (RuntimeException exception) {
@@ -624,9 +678,10 @@ public final class CompatibilityScanner {
     }
 
     private record ModScan(int classCount, Set<Reference> references) {}
-    private record ClassInfo(Set<Member> fields, Set<Member> methods) {}
+    private record ClassInfo(Set<Member> fields, Set<Member> methods, String superName,
+                             List<String> interfaces) {}
     private record Member(String name, String descriptor) {}
-    private record Reference(SymbolKind kind, String owner, String name, String descriptor) {}
+    record Reference(SymbolKind kind, String owner, String name, String descriptor) {}
     private record AliasTarget(String owner, String name, String descriptor) {}
 
     /**
@@ -762,7 +817,7 @@ public final class CompatibilityScanner {
         }
     }
 
-    private enum SymbolKind {
+    enum SymbolKind {
         CLASS,
         METHOD,
         FIELD
@@ -774,7 +829,8 @@ public final class CompatibilityScanner {
     public record Summary(int modJarsScanned, int modClassesScanned, int referencesInspected,
                           int targetClassesIndexed, int findingCount, int missingClasses,
                           int missingMethods, int missingFields, int classAliasesLoaded,
-                          int memberAliasesLoaded) {}
+                          int memberAliasesLoaded, int intermediaryClassesMapped,
+                          int intermediaryMembersMapped) {}
 
     public record Report(String targetGameJar, List<String> modJars, Summary summary,
                          List<Finding> findings) {}
