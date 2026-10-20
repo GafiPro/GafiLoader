@@ -20,5 +20,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Download released Fabric Loader binary for Mixin hook validation
+        run: curl --fail --location --retry 3 --silent --show-error https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar --output "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
       - name: Build and test with the pinned Gradle wrapper
-        run: ./gradlew --no-daemon clean test build
+        run: ./gradlew --no-daemon clean test build -PgafiFabricLoaderJar="$RUNNER_TEMP/fabric-loader-0.20.1.jar"
