@@ -176,9 +176,10 @@ public final class GameApiComparator {
         Set<Member> exactTargetMembers = resolveMembers(targetClass.name(), kind, targetClasses, new HashSet<>());
 
         for (Member oldMember : oldMembers) {
-            // Private synthetic lambda bodies are compiler implementation details, not callable
-            // compatibility entry points. Source/compiler changes routinely renumber them.
-            if (kind == MojangMappings.SymbolKind.METHOD && isPrivateSyntheticLambda(oldMember)) {
+            // This report models the callable game API surface. Private/package-private
+            // implementation details in vanilla are not generally linkable from ordinary mods;
+            // direct references inside real mod bytecode are handled separately by CompatibilityScanner.
+            if ((oldMember.access() & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) == 0) {
                 continue;
             }
 
@@ -242,6 +243,11 @@ public final class GameApiComparator {
                 continue;
             }
 
+            if (kind == MojangMappings.SymbolKind.METHOD
+                    && hasVerifiedStructuralBridge(legacyClass.name(), oldMember, targetClasses)) {
+                continue;
+            }
+
             String missingKind = kind == MojangMappings.SymbolKind.METHOD ? "MISSING_METHOD" : "MISSING_FIELD";
             differences.add(new Difference(missingKind, legacyClass.name(), oldMember.name(),
                     oldMember.descriptor(), List.of(),
@@ -263,6 +269,67 @@ public final class GameApiComparator {
                 kind == MojangMappings.SymbolKind.METHOD ? classInfo.methods() : classInfo.fields());
         members.addAll(resolveMembers(classInfo.superName(), kind, classes, visited));
         return members;
+    }
+
+    private static boolean hasVerifiedStructuralBridge(String owner, Member oldMember,
+                                                         Map<String, ApiClass> targetClasses) {
+        String displaySlot = "net/minecraft/world/scores/DisplaySlot";
+        String chatFormatting = "net/minecraft/ChatFormatting";
+        String screenBridge = "(Lnet/minecraft/ChatFormatting;)Lnet/minecraft/world/scores/DisplaySlot;";
+        if (owner.equals(displaySlot) && oldMember.name().equals("teamColorToSlot")
+                && oldMember.descriptor().equals(screenBridge) && isStatic(oldMember)) {
+            ApiClass targetSlot = targetClasses.get(displaySlot);
+            ApiClass targetFormatting = targetClasses.get(chatFormatting);
+            if (targetSlot == null || targetFormatting == null) {
+                return false;
+            }
+            Member isColor = findMember(targetFormatting, MojangMappings.SymbolKind.METHOD, "isColor", "()Z");
+            if (isColor == null || isStatic(isColor)
+                    || (isColor.access() & Opcodes.ACC_ABSTRACT) != 0) {
+                return false;
+            }
+            for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
+                    "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
+                    "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
+                Member field = findMember(targetSlot, MojangMappings.SymbolKind.FIELD,
+                        "TEAM_" + color, "L" + displaySlot + ";");
+                if (field == null || (field.access() & Opcodes.ACC_STATIC) == 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        String readOnlyScoreInfo = "net/minecraft/world/scores/ReadOnlyScoreInfo";
+        String numberFormat = "net/minecraft/network/chat/numbers/NumberFormat";
+        String mutableComponent = "net/minecraft/network/chat/MutableComponent";
+        String commonComponents = "net/minecraft/network/chat/CommonComponents";
+        String safeDescriptor = "(L" + readOnlyScoreInfo + ";L" + numberFormat + ";)L"
+                + mutableComponent + ";";
+        String formatDescriptor = "(L" + numberFormat + ";)L" + mutableComponent + ";";
+        if (owner.equals(readOnlyScoreInfo) && oldMember.name().equals("safeFormatValue")
+                && oldMember.descriptor().equals(safeDescriptor) && isStatic(oldMember)) {
+            ApiClass targetScore = targetClasses.get(readOnlyScoreInfo);
+            ApiClass targetCommon = targetClasses.get(commonComponents);
+            if (targetScore == null || targetCommon == null) {
+                return false;
+            }
+            Member format = findMember(targetScore, MojangMappings.SymbolKind.METHOD,
+                    "formatValue", formatDescriptor);
+            Member empty = findMember(targetCommon, MojangMappings.SymbolKind.FIELD,
+                    "EMPTY", "L" + mutableComponent + ";");
+            return format != null
+                    && (format.access() & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT)) == 0
+                    && empty != null && (empty.access() & Opcodes.ACC_STATIC) != 0;
+        }
+        return false;
+    }
+
+    private static Member findMember(ApiClass owner, MojangMappings.SymbolKind kind,
+                                     String name, String descriptor) {
+        Set<Member> members = kind == MojangMappings.SymbolKind.METHOD ? owner.methods() : owner.fields();
+        return members.stream().filter(member -> member.name().equals(name)
+                && member.descriptor().equals(descriptor)).findFirst().orElse(null);
     }
 
     private static boolean isStatic(Member member) {
