@@ -105,6 +105,23 @@ class GameApiComparatorTest {
     }
 
     @Test
+    void ignoresPrivateAndPackagePrivateVanillaImplementationMethods() throws IOException {
+        Path legacyJar = temporaryDirectory.resolve("legacy-internal-methods.jar");
+        Path targetJar = temporaryDirectory.resolve("target-internal-methods.jar");
+        Path mappings = temporaryDirectory.resolve("internal-method-mappings.txt");
+
+        Files.writeString(mappings, "com.example.Foo -> a:\n");
+        writeJar(legacyJar, entry("a", legacyPrivateMethodsClass()));
+        writeJar(targetJar, entry("com/example/Foo", emptyClass("com/example/Foo")));
+
+        GameApiComparator.Report report = new GameApiComparator().compare(legacyJar, targetJar, mappings);
+
+        assertFalse(report.differences().stream().anyMatch(difference ->
+                difference.kind().equals("MISSING_METHOD")
+                        && (difference.name().equals("privateCall") || difference.name().equals("packageCall"))));
+    }
+
+    @Test
     void reportsClassesThatNoLongerExistInTarget() throws IOException {
         Path legacyJar = temporaryDirectory.resolve("legacy-missing-class.jar");
         Path targetJar = temporaryDirectory.resolve("target-missing-class.jar");
@@ -120,6 +137,21 @@ class GameApiComparatorTest {
         assertTrue(report.differences().stream().anyMatch(difference ->
                 difference.kind().equals("MISSING_CLASS")
                         && difference.owner().equals("com/example/Vanished")));
+    }
+
+    private static byte[] legacyPrivateMethodsClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "a", null, "java/lang/Object", null);
+        for (int access : new int[]{Opcodes.ACC_PRIVATE, 0}) {
+            MethodVisitor method = writer.visitMethod(access, access == 0 ? "packageCall" : "privateCall",
+                    "()V", null, null);
+            method.visitCode();
+            method.visitInsn(Opcodes.RETURN);
+            method.visitMaxs(0, 0);
+            method.visitEnd();
+        }
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] legacySyntheticLambdaClass() {
