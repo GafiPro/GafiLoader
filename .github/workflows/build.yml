@@ -37,6 +37,14 @@ jobs:
             --intermediary-mappings "$GAFI_REAL_INTERMEDIARY_MAPPINGS" \
             --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
             --report build/real-artifact-test/compatibility-report.json
+          java -jar "$agent_jar" \
+            --game "$GAFI_REAL_TARGET_GAME" \
+            --legacy-game "$GAFI_REAL_LEGACY_GAME" \
+            --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
+            --api-report build/real-artifact-test/api-diff.json \
+            --alias-candidates build/real-artifact-test/method-alias-candidates.tsv \
+            > build/real-artifact-test/api-comparison.log
+          tail -n 20 build/real-artifact-test/api-comparison.log
           cp "$GAFI_REAL_FIXTURE_METADATA" build/real-artifact-test/fixture-metadata.json
       - name: Upload integration diagnostics and self-contained agent JAR
         uses: actions/upload-artifact@v4
@@ -45,6 +53,8 @@ jobs:
           path: |
             build/libs/gafi-loader-*.jar
             build/real-artifact-test/compatibility-report.json
+            build/real-artifact-test/api-diff.json
+            build/real-artifact-test/method-alias-candidates.tsv
             build/real-artifact-test/fixture-metadata.json
           if-no-files-found: error
           retention-days: 7
