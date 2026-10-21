@@ -37,6 +37,24 @@ class LegacyApiBridgePatcherTest {
                     + "Lnet/minecraft/network/chat/MutableComponent;";
 
     @Test
+    void supportsStructuralBridgesOnTheActualOfficial26_2TargetWhenFixtureIsAvailable() throws Exception {
+        String configured = System.getProperty("gafi.loader.real.target.jar");
+        org.junit.jupiter.api.Assumptions.assumeTrue(configured != null && !configured.isBlank()
+                && Files.isRegularFile(Path.of(configured)),
+                "Official Minecraft 26.2 fixture is only available in integration CI");
+
+        Path targetJar = Path.of(configured);
+        TargetApiIndex api = TargetApiIndex.load(targetJar);
+        byte[] displayBytes = readClass(targetJar, DISPLAY_SLOT);
+        byte[] scoreBytes = readClass(targetJar, READ_ONLY_SCORE_INFO);
+
+        assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(DISPLAY_SLOT, displayBytes, api),
+                "Official target should support the verified DisplaySlot bridge");
+        assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(READ_ONLY_SCORE_INFO, scoreBytes, api),
+                "Official target should support the verified ReadOnlyScoreInfo bridge");
+    }
+
+    @Test
     void insertsDisplaySlotCompatibilityBridgeOnlyWhenEveryTargetColorExists() throws Exception {
         TargetApiIndex api = targetApi(true, true);
         byte[] patched = LegacyApiBridgePatcher.transformClassForRuntime(
@@ -72,6 +90,18 @@ class LegacyApiBridgePatcherTest {
                 DISPLAY_SLOT, displaySlotClass(), api));
         assertNull(LegacyApiBridgePatcher.transformClassForRuntime(
                 READ_ONLY_SCORE_INFO, readOnlyScoreInfoClass(), api));
+    }
+
+    private static byte[] readClass(Path jarPath, String className) throws IOException {
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarPath.toFile())) {
+            java.util.jar.JarEntry entry = jar.getJarEntry(className + ".class");
+            if (entry == null) {
+                throw new IOException("Expected class not found in target JAR: " + className);
+            }
+            try (java.io.InputStream input = jar.getInputStream(entry)) {
+                return input.readAllBytes();
+            }
+        }
     }
 
     private TargetApiIndex targetApi(boolean includeColors, boolean includeFormatBridge) throws IOException {
