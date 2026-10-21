@@ -50,6 +50,19 @@ tasks.named('test') {
     if (fabricLoaderJar.isPresent()) {
         systemProperty 'gafi.loader.fabric.loader.jar', fabricLoaderJar.get()
     }
+
+    // Real-artifact integration tests are enabled only when CI provides the pinned public fixtures.
+    [
+        'GAFI_REAL_TARGET_GAME': 'gafi.loader.real.target.jar',
+        'GAFI_REAL_LEGACY_MOD': 'gafi.loader.real.mod.jar',
+        'GAFI_REAL_INTERMEDIARY_MAPPINGS': 'gafi.loader.real.intermediary.jar',
+        'GAFI_REAL_LEGACY_MAPPINGS': 'gafi.loader.real.official.mappings'
+    ].each { environmentName, propertyName ->
+        def configuredPath = System.getenv(environmentName)
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            systemProperty propertyName, configuredPath
+        }
+    }
 }
 
 jar {
