@@ -93,7 +93,7 @@ class GameApiComparatorTest {
         Path targetJar = temporaryDirectory.resolve("target-without-lambda.jar");
         Path mappings = temporaryDirectory.resolve("lambda-mappings.txt");
 
-        Files.writeString(mappings, "com.example.Foo -> a:\\n");
+        Files.writeString(mappings, "com.example.Foo -> a:\n");
         writeJar(legacyJar, entry("a", legacySyntheticLambdaClass()));
         writeJar(targetJar, entry("com/example/Foo", emptyClass("com/example/Foo")));
 
