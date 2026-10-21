@@ -130,6 +130,10 @@ class LegacyApiBridgePatcherTest {
                 READ_ONLY_SCORE_INFO, null, "java/lang/Object", null);
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "formatValue",
                 "(L" + NUMBER_FORMAT + ";)L" + MUTABLE_COMPONENT + ";", null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitMaxs(0, 0);
         method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
