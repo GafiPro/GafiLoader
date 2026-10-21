@@ -193,17 +193,49 @@ final class IntermediaryMappings {
                     mapClassName(reference.owner()), null, null);
         }
 
-        MappedMember member = intermediaryToNamedMembers.get(new MemberKey(
-                reference.owner(), reference.kind(), reference.name(), reference.descriptor()));
+        MemberKey directKey = new MemberKey(
+                reference.owner(), reference.kind(), reference.name(), reference.descriptor());
+        MappedMember member = intermediaryToNamedMembers.get(directKey);
         if (member != null) {
             return new CompatibilityScanner.Reference(reference.kind(),
                     member.owner(), member.name(), member.descriptor());
+        }
+
+        // Intermediary names identify override groups, but the mapping row for an inherited
+        // method is usually owned by its declaring superclass. A production mod can legally
+        // reference that method through a subclass owner (for example Button.method_25355,
+        // inherited from AbstractWidget). Only use this fallback when every mapping row with
+        // the exact old name + descriptor agrees on the same named method and descriptor.
+        MappedMember inherited = findUnambiguousMemberByIntermediaryName(directKey);
+        if (inherited != null) {
+            return new CompatibilityScanner.Reference(reference.kind(),
+                    mapClassName(reference.owner()), inherited.name(), inherited.descriptor());
         }
 
         // Normalize the owner and descriptor even when this particular member has no mapping.
         // Retaining the old member name leaves a useful unresolved-symbol diagnostic.
         return new CompatibilityScanner.Reference(reference.kind(),
                 mapClassName(reference.owner()), reference.name(), normalizeDescriptor(reference.descriptor()));
+    }
+
+    private MappedMember findUnambiguousMemberByIntermediaryName(MemberKey requested) {
+        MappedMember candidate = null;
+        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+            MemberKey key = entry.getKey();
+            if (key.kind() != requested.kind()
+                    || !key.name().equals(requested.name())
+                    || !key.descriptor().equals(requested.descriptor())) {
+                continue;
+            }
+            MappedMember mapped = entry.getValue();
+            if (candidate == null) {
+                candidate = mapped;
+            } else if (!candidate.name().equals(mapped.name())
+                    || !candidate.descriptor().equals(mapped.descriptor())) {
+                return null;
+            }
+        }
+        return candidate;
     }
 
     /**
