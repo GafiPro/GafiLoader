@@ -33,6 +33,7 @@ class IntermediaryMappingsTest {
                 "    int oldField -> c",
                 "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
                 "net.minecraft.Bar -> d:",
+                "net.minecraft.Child -> e:",
                 ""));
 
         Files.writeString(intermediaryMappings, String.join("\n",
@@ -41,6 +42,7 @@ class IntermediaryMappingsTest {
                 "\tf\tI\tc\tfield_1",
                 "\tm\t(Ld;)V\tb\tmethod_2",
                 "c\td\tnet/minecraft/class_2",
+                "c\te\tnet/minecraft/class_3",
                 ""));
 
         writeJar(targetJar,
@@ -60,6 +62,13 @@ class IntermediaryMappingsTest {
         assertEquals("net/minecraft/Foo$1", loaded.mapClassName("net/minecraft/class_1$1"));
         assertEquals("(Lnet/minecraft/Foo$Nested;)V",
                 loaded.mapDescriptor("(Lnet/minecraft/class_1$Nested;)V"));
+
+        CompatibilityScanner.Reference inheritedMethod = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/class_3", "method_2", "(Lnet/minecraft/class_2;)V"));
+        assertEquals("net/minecraft/Child", inheritedMethod.owner());
+        assertEquals("oldMethod", inheritedMethod.name());
+        assertEquals("(Lnet/minecraft/Bar;)V", inheritedMethod.descriptor());
     }
 
     private static byte[] targetFooClass() {
