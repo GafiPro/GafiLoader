@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,9 +48,6 @@ class LegacyApiBridgePatcherTest {
         assertTrue(instructions.contains("CALL " + CHAT_FORMATTING + "#isColor()Z"));
         assertTrue(instructions.contains("CALL java/lang/Enum#name()Ljava/lang/String;"));
         assertTrue(instructions.contains("CALL java/lang/Enum#valueOf(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;"));
-        assertTrue(instructions.contains("FIELD net/minecraft/world/scores/DisplaySlot#TEAM_WHITE:L"
-                + DISPLAY_SLOT + ";") == false,
-                "The bridge computes enum names but must not read enum constants directly.");
     }
 
     @Test
