@@ -57,6 +57,7 @@ class RealModArtifactIntegrationTest {
         String modHashBefore = sha256(modJar);
         IntermediaryMappings mappings = IntermediaryMappings.load(
                 intermediaryJar, MojangMappings.load(legacyMappingsFile));
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty());
 
         CompatibilityScanner.Report report = new CompatibilityScanner().scan(
                 targetGame, List.of(modJar), null, intermediaryJar, legacyMappingsFile);
