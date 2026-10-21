@@ -125,6 +125,12 @@ final class IntermediaryBytecodeRemapper {
                         CompatibilityScanner.Reference mapped = mapReference(
                                 CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor,
                                 mappings, aliases, changed);
+                        // A small number of removed convenience methods can be adapted by
+                        // rewriting the call sequence in memory. This adapter is only enabled when
+                        // the configured target JAR proves the replacement field and method exist.
+                        if (adaptLegacyMinecraftSetScreen(mv, opcode, mapped, targetApi, changed)) {
+                            return;
+                        }
                         // Write the already-normalized reference directly to the downstream visitor.
                         // Letting MethodRemapper remap it again would lose aliases that move a member
                         // to a different owner class.
@@ -164,6 +170,34 @@ final class IntermediaryBytecodeRemapper {
         };
         reader.accept(visitor, 0);
         return changed.get() ? writer.toByteArray() : null;
+    }
+
+    private static boolean adaptLegacyMinecraftSetScreen(MethodVisitor visitor, int opcode,
+                                                              CompatibilityScanner.Reference mapped,
+                                                              TargetApiIndex targetApi,
+                                                              AtomicBoolean changed) {
+        String minecraft = "net/minecraft/client/Minecraft";
+        String screen = "net/minecraft/client/gui/screens/Screen";
+        String gui = "net/minecraft/client/gui/Gui";
+        String screenDescriptor = "(L" + screen + ";)V";
+        if (targetApi == null || opcode != Opcodes.INVOKEVIRTUAL
+                || !mapped.owner().equals(minecraft)
+                || !mapped.name().equals("setScreen")
+                || !mapped.descriptor().equals(screenDescriptor)
+                || targetApi.methodAccess(minecraft, "setScreen", screenDescriptor) != null
+                || targetApi.fieldAccess(minecraft, "gui", "L" + gui + ";") == null
+                || targetApi.methodAccess(gui, "setScreen", screenDescriptor) == null) {
+            return false;
+        }
+
+        // Before invokevirtual the operand stack is [Minecraft, Screen]. SWAP, GETFIELD,
+        // SWAP turns it into [Gui, Screen], preserving both references without locals or frames.
+        visitor.visitInsn(Opcodes.SWAP);
+        visitor.visitFieldInsn(Opcodes.GETFIELD, minecraft, "gui", "L" + gui + ";");
+        visitor.visitInsn(Opcodes.SWAP);
+        visitor.visitMethodInsn(Opcodes.INVOKEVIRTUAL, gui, "setScreen", screenDescriptor, false);
+        changed.set(true);
+        return true;
     }
 
     private static CompatibilityScanner.Reference mapReference(
