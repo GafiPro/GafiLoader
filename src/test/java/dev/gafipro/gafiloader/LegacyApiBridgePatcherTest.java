@@ -48,8 +48,27 @@ class LegacyApiBridgePatcherTest {
         byte[] displayBytes = readClass(targetJar, DISPLAY_SLOT);
         byte[] scoreBytes = readClass(targetJar, READ_ONLY_SCORE_INFO);
 
+        assertTrue(api.hasClass(DISPLAY_SLOT), "Official target is missing " + DISPLAY_SLOT);
+        assertTrue(api.hasClass(CHAT_FORMATTING), "Official target is missing " + CHAT_FORMATTING);
+        assertNotNull(api.methodAccess(CHAT_FORMATTING, "isColor", "()Z"),
+                "Official target is missing ChatFormatting.isColor()Z");
+        for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
+                "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
+                "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
+            Integer access = api.fieldAccess(DISPLAY_SLOT, "TEAM_" + color, "L" + DISPLAY_SLOT + ";");
+            assertNotNull(access, "Official target is missing DisplaySlot.TEAM_" + color);
+            assertTrue((access & Opcodes.ACC_STATIC) != 0,
+                    "DisplaySlot.TEAM_" + color + " is not static in the target");
+        }
         assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(DISPLAY_SLOT, displayBytes, api),
                 "Official target should support the verified DisplaySlot bridge");
+        assertTrue(api.isInterface(READ_ONLY_SCORE_INFO), "ReadOnlyScoreInfo is not an interface in target");
+        assertNotNull(api.methodAccess(READ_ONLY_SCORE_INFO, "formatValue",
+                "(L" + NUMBER_FORMAT + ";)L" + MUTABLE_COMPONENT + ";"),
+                "Official target is missing ReadOnlyScoreInfo.formatValue");
+        Integer commonEmpty = api.fieldAccess(COMMON_COMPONENTS, "EMPTY", "L" + MUTABLE_COMPONENT + ";");
+        assertNotNull(commonEmpty, "Official target is missing CommonComponents.EMPTY");
+        assertTrue((commonEmpty & Opcodes.ACC_STATIC) != 0, "CommonComponents.EMPTY is not static");
         assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(READ_ONLY_SCORE_INFO, scoreBytes, api),
                 "Official target should support the verified ReadOnlyScoreInfo bridge");
     }
