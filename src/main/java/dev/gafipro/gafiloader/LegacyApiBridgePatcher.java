@@ -106,7 +106,7 @@ final class LegacyApiBridgePatcher {
     private static byte[] addBridgeMethod(byte[] original, String name, String descriptor,
                                           BridgeWriter bridgeWriter) {
         ClassReader reader = new ClassReader(original);
-        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS) {
             @Override
             protected String getCommonSuperClass(String type1, String type2) {
                 // Avoid loading game classes before Minecraft's class loader has defined them.
@@ -160,6 +160,7 @@ final class LegacyApiBridgePatcher {
         method.visitInsn(Opcodes.ARETURN);
 
         method.visitLabel(nonNull);
+        method.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, CHAT_FORMATTING, "isColor", "()Z", false);
         method.visitJumpInsn(Opcodes.IFNE, isColor);
@@ -167,6 +168,7 @@ final class LegacyApiBridgePatcher {
         method.visitInsn(Opcodes.ARETURN);
 
         method.visitLabel(isColor);
+        method.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
         method.visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder");
         method.visitInsn(Opcodes.DUP);
         method.visitLdcInsn("TEAM_");
@@ -196,6 +198,7 @@ final class LegacyApiBridgePatcher {
         method.visitInsn(Opcodes.ARETURN);
 
         method.visitLabel(nonNull);
+        method.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitVarInsn(Opcodes.ALOAD, 1);
         method.visitMethodInsn(Opcodes.INVOKEINTERFACE, owner, "formatValue", FORMAT_VALUE, true);
