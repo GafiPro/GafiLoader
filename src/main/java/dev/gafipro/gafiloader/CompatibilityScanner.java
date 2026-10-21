@@ -119,7 +119,8 @@ public final class CompatibilityScanner {
 
                 Member member = new Member(reference.name(), reference.descriptor());
                 if (reference.kind() == SymbolKind.METHOD
-                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.METHOD, new HashSet<>())) {
+                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.METHOD, new HashSet<>())
+                        && !hasStructuralAdapter(reference, gameClasses)) {
                     findings.add(new Finding(
                             modJar.toString(), "MISSING_METHOD", reference.owner(), reference.name(),
                             reference.descriptor(),
@@ -157,6 +158,23 @@ public final class CompatibilityScanner {
                 orderedMods.stream().map(Path::toString).toList(),
                 summary,
                 findings);
+    }
+
+    private static boolean hasStructuralAdapter(Reference reference, Map<String, ClassInfo> gameClasses) {
+        String minecraft = "net/minecraft/client/Minecraft";
+        String screen = "net/minecraft/client/gui/screens/Screen";
+        String gui = "net/minecraft/client/gui/Gui";
+        String screenDescriptor = "(L" + screen + ";)V";
+        if (reference.kind() != SymbolKind.METHOD
+                || !reference.owner().equals(minecraft)
+                || !reference.name().equals("setScreen")
+                || !reference.descriptor().equals(screenDescriptor)) {
+            return false;
+        }
+        return memberExists(gameClasses, minecraft,
+                        new Member("gui", "L" + gui + ";"), SymbolKind.FIELD, new HashSet<>())
+                && memberExists(gameClasses, gui,
+                        new Member("setScreen", screenDescriptor), SymbolKind.METHOD, new HashSet<>());
     }
 
     private static boolean memberExists(Map<String, ClassInfo> classes, String owner,
