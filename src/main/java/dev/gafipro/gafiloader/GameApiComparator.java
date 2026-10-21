@@ -176,6 +176,12 @@ public final class GameApiComparator {
         Set<Member> exactTargetMembers = resolveMembers(targetClass.name(), kind, targetClasses, new HashSet<>());
 
         for (Member oldMember : oldMembers) {
+            // Private synthetic lambda bodies are compiler implementation details, not callable
+            // compatibility entry points. Source/compiler changes routinely renumber them.
+            if (kind == MojangMappings.SymbolKind.METHOD && isPrivateSyntheticLambda(oldMember)) {
+                continue;
+            }
+
             // Constructors and class initializers are important bytecode details, but they do not
             // normally represent public compatibility promises. Report them only when missing.
             Member sameSignature = exactTargetMembers.stream()
@@ -261,6 +267,12 @@ public final class GameApiComparator {
 
     private static boolean isStatic(Member member) {
         return (member.access() & Opcodes.ACC_STATIC) != 0;
+    }
+
+    private static boolean isPrivateSyntheticLambda(Member member) {
+        return (member.access() & (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC))
+                == (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC)
+                && member.name().startsWith("lambda$");
     }
 
     private static int count(List<Difference> differences, String kind) {
