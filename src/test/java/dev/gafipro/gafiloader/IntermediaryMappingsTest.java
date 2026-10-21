@@ -54,7 +54,7 @@ class IntermediaryMappingsTest {
                 targetJar, List.of(modJar), null, intermediaryMappings, mojangMappings);
 
         assertTrue(report.findings().isEmpty(), () -> report.findings().toString());
-        assertEquals(2, report.summary().intermediaryClassesMapped());
+        assertEquals(3, report.summary().intermediaryClassesMapped());
         assertEquals(2, report.summary().intermediaryMembersMapped());
 
         IntermediaryMappings loaded = IntermediaryMappings.load(
