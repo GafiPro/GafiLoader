@@ -88,6 +88,23 @@ class GameApiComparatorTest {
     }
 
     @Test
+    void doesNotReportPrivateSyntheticLambdaBodiesAsRemovedApiMethods() throws IOException {
+        Path legacyJar = temporaryDirectory.resolve("legacy-with-lambda.jar");
+        Path targetJar = temporaryDirectory.resolve("target-without-lambda.jar");
+        Path mappings = temporaryDirectory.resolve("lambda-mappings.txt");
+
+        Files.writeString(mappings, "com.example.Foo -> a:\\n");
+        writeJar(legacyJar, entry("a", legacySyntheticLambdaClass()));
+        writeJar(targetJar, entry("com/example/Foo", emptyClass("com/example/Foo")));
+
+        GameApiComparator.Report report = new GameApiComparator().compare(legacyJar, targetJar, mappings);
+
+        assertFalse(report.differences().stream().anyMatch(difference ->
+                difference.kind().equals("MISSING_METHOD")
+                        && difference.name().equals("lambda$run$0")));
+    }
+
+    @Test
     void reportsClassesThatNoLongerExistInTarget() throws IOException {
         Path legacyJar = temporaryDirectory.resolve("legacy-missing-class.jar");
         Path targetJar = temporaryDirectory.resolve("target-missing-class.jar");
@@ -103,6 +120,20 @@ class GameApiComparatorTest {
         assertTrue(report.differences().stream().anyMatch(difference ->
                 difference.kind().equals("MISSING_CLASS")
                         && difference.owner().equals("com/example/Vanished")));
+    }
+
+    private static byte[] legacySyntheticLambdaClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "a", null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(
+                Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+                "lambda$run$0", "()V", null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] legacyFooClass() {
