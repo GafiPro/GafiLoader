@@ -50,10 +50,17 @@ public final class GameSideCompatibilityAgent {
 
                 try {
                     // Game classes are already in 26.2's runtime namespace. They may still receive
-                    // explicitly configured legacy method aliases, but are not namespace-remapped.
+                    // explicitly configured aliases and reviewed structural bridges before definition.
                     byte[] transformed = GameJarPatcher.transformClassForRuntime(
                             className, classfileBuffer, rules);
-                    if (transformed != null) {
+                    byte[] bridgeInput = transformed == null ? classfileBuffer : transformed;
+                    byte[] bridged = LegacyApiBridgePatcher.transformClassForRuntime(
+                            className, bridgeInput, targetApi);
+                    if (bridged != null) {
+                        transformed = bridged;
+                        aliasedClasses.increment();
+                        System.out.println("[Gafi Loader] Added in-memory legacy API bridge to " + className);
+                    } else if (transformed != null) {
                         aliasedClasses.increment();
                         System.out.println("[Gafi Loader] Added legacy method aliases to " + className);
                     }
