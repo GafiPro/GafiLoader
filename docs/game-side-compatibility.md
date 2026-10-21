@@ -43,6 +43,7 @@ Implemented prototype pieces:
 - Review-only method candidate TSV export. Candidate records are intentionally distinct from executable patch rules.
 - Offline game-JAR copy patcher for explicit same-descriptor method aliases.
 - Java agent that performs those aliases in memory before a target class is defined.
+- Verified structural bridges injected into Minecraft 26.2 class bytes at definition time for the removed `Minecraft.setScreen(Screen)`, `DisplaySlot.teamColorToSlot(ChatFormatting)`, and `ReadOnlyScoreInfo.safeFormatValue(ReadOnlyScoreInfo, NumberFormat)` APIs. These adapters activate only when the configured 26.2 JAR contains the required replacement field/methods; original JARs remain unchanged.
 - Java agent configuration that loads the official 1.21.11 Mojang mappings and Fabric Intermediary artifact, then remaps direct legacy class/member/descriptors in loaded bytecode to 26.2 names without editing the mod JAR.
 - Hooks at Fabric's `MixinServiceKnot.getResourceAsStream` and `getClassBytes` boundaries: known Mixin config/refmap JSON is remapped in memory, and class bytes requested by Mixin for metadata inspection have their direct Intermediary references normalized before Mixin consumes them. The hooks validate the expected method signatures. CI also downloads the released Fabric Loader 0.20.1 JAR and applies the patcher to its actual `MixinServiceKnot` class. That verifies the binary hook points, but is not an actual Fabric 26.2 game launch.
 - Generator for Fabric's documented dependency-override configuration, scoped to an explicitly selected set of legacy mod JARs.
@@ -51,8 +52,8 @@ Implemented prototype pieces:
 Not yet implemented or verified:
 - A reviewed alias catalogue generated from the official 1.21.11 and 26.2 game artifacts.
 - Broad legacy-mod resolution. The dependency-override generator removes only the selected mods' `minecraft` version constraint; it does not make bytecode compatible or adapt other dependencies.
-- Validation against real production 1.21.11 mods and the official 26.2 runtime. The synthetic integration proves direct bytecode references only, not full feature compatibility.
+- Full end-to-end launch against the official 26.2 runtime with a production 1.21.11 mod. CI scans a real `Small Items Mod 1.21.11` JAR and checks that the structural adapters can be built against the official target API, but does not launch the full game or verify the mod feature in-game.
 - Missing-class aliases, semantic descriptor conversions, arbitrary reflection-string and unrelated-resource remapping, full Mixin/Fabric API adaptation, and game-behavior tests. The resource hook adapts names/selectors only; it does not port injection semantics.
-- End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod.
+- End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod. Remaining game-wide API differences include the `TimerQueue` serialization redesign and removed loot score-provider APIs; they need targeted compatibility work and are not claimed to be adapted.
 
 Therefore this is an early runtime-bridge prototype, not a claim that arbitrary legacy mods already load.
