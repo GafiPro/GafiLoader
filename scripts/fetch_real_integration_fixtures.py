@@ -94,15 +94,21 @@ def main() -> int:
     legacy_version = game_version(manifest, "1.21.11")
 
     target_download = target_version.get("downloads", {}).get("client")
+    legacy_download = legacy_version.get("downloads", {}).get("client")
     legacy_mappings = legacy_version.get("downloads", {}).get("client_mappings")
     if not target_download or not target_download.get("url"):
         raise RuntimeError("Official Minecraft 26.2 metadata has no client JAR download")
+    if not legacy_download or not legacy_download.get("url"):
+        raise RuntimeError("Official Minecraft 1.21.11 metadata has no client JAR download")
     if not legacy_mappings or not legacy_mappings.get("url"):
         raise RuntimeError("Official Minecraft 1.21.11 metadata has no client mappings")
 
     artifacts = {}
     artifacts["target_game"] = download(
         target_download["url"], output / "minecraft-26.2-client.jar", target_download.get("sha1")
+    )
+    artifacts["legacy_game"] = download(
+        legacy_download["url"], output / "minecraft-1.21.11-client.jar", legacy_download.get("sha1")
     )
     artifacts["legacy_mappings"] = download(
         legacy_mappings["url"], output / "minecraft-1.21.11-client-mappings.txt",
@@ -148,6 +154,7 @@ def main() -> int:
     if env_file:
         variables = {
             "GAFI_REAL_TARGET_GAME": artifacts["target_game"]["path"],
+            "GAFI_REAL_LEGACY_GAME": artifacts["legacy_game"]["path"],
             "GAFI_REAL_LEGACY_MOD": artifacts["legacy_mod"]["path"],
             "GAFI_REAL_INTERMEDIARY_MAPPINGS": artifacts["intermediary_mappings"]["path"],
             "GAFI_REAL_LEGACY_MAPPINGS": artifacts["legacy_mappings"]["path"],
