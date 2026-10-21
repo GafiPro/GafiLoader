@@ -39,7 +39,7 @@ class LegacyScreenCallAdapterTest {
         Files.writeString(intermediary, String.join("\n",
                 "tiny\t2\t0\tofficial\tintermediary",
                 "c\ta\tnet/minecraft/class_1",
-                "\tm\t(Lnet/minecraft/class_2;)V\tc\tmethod_1",
+                "\tm\t(Lb;)V\tc\tmethod_1",
                 "c\tb\tnet/minecraft/class_2",
                 "c\td\tnet/minecraft/class_3",
                 ""));
