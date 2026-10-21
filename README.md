@@ -115,8 +115,9 @@ relative to the properties file:
 ~~~properties
 intermediaryMappings=intermediary-1.21.11-v2.jar
 legacyMappings=1.21.11-client-mappings.txt
+# Required for target-verified structural adapters and recommended for alias validation:
+targetGameJar=/path/to/.minecraft/versions/26.2/26.2.jar
 # Optional: review-only, same-descriptor CLASS / METHOD / FIELD aliases applied to mod bytecode:
-# targetGameJar=/path/to/.minecraft/versions/26.2/26.2.jar
 # bytecodeAliases=runtime-bytecode-aliases.tsv
 # Optional: game-side method bridges for verified API differences:
 # rules=compatibility-rules.tsv
@@ -131,12 +132,7 @@ installation's JVM arguments:
 
 The mappings are specifically for legacy 1.21.11 Intermediary bytecode. They do not support Yarn-named
 development builds or arbitrary mapping namespaces. This prototype remaps direct JVM references,
-descriptors, handles, signatures and bytecode type references. The optional `bytecodeAliases` file
-uses the same tab-separated `CLASS`, `METHOD` and `FIELD` format as `aliases.example.tsv`; rules
-are applied after Intermediary normalization and let you describe reviewed, same-descriptor renames
-from the 1.21.11 named symbols to 26.2 runtime symbols. When that file is enabled, `targetGameJar`
-is required; Gafi Loader checks that each target class/member actually exists in the supplied 26.2 JAR
-and rejects aliases that change static/instance call shape. Descriptor-changing rules are rejected.
+descriptors, handles, signatures and bytecode type references. The `targetGameJar` setting points to the actual 26.2 client JAR. It enables target-verified structural adapters, including the current in-memory rewrite of legacy `Minecraft.setScreen(Screen)` calls to `Minecraft.gui.setScreen(Screen)` when the required field and method exist. The optional `bytecodeAliases` file uses the same tab-separated `CLASS`, `METHOD` and `FIELD` format as `aliases.example.tsv`; rules are applied after Intermediary normalization and let you describe reviewed, same-descriptor renames from the 1.21.11 named symbols to 26.2 runtime symbols. Gafi Loader checks that each target class/member actually exists in the supplied 26.2 JAR and rejects aliases that change static/instance call shape. Descriptor-changing rules are rejected.
 The agent hooks `MixinServiceKnot.getResourceAsStream` for recognized Mixin config/refmap JSON and `getClassBytes` for bytecode that Mixin requests during metadata inspection. That lets Gafi Loader normalize direct class/member references before Mixin reads the old bytecode, in addition to the regular JVM definition-time transformation. The hooks are pinned to the current Fabric Loader signatures and fail clearly if the expected methods are missing. CI downloads the released Fabric Loader 0.20.1 JAR and applies the patcher to its actual `MixinServiceKnot` class, checking that both hooks are present. This validates the binary interception points; it is not a full Minecraft 26.2 launch. The resource adapter also recognizes `.class` resources fetched through that boundary. This remains a narrow bridge: it does **not** rewrite arbitrary reflection strings or unrelated resource formats, nor does it adapt changed injection points, Mixin semantics, Fabric API callbacks, or game behavior. A remapped class linking successfully is not proof that its feature works in 26.2.
 
 ## Experimental game-side method aliases
