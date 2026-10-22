@@ -71,6 +71,41 @@ class IntermediaryMappingsTest {
         assertEquals("(Lnet/minecraft/Bar;)V", inheritedMethod.descriptor());
     }
 
+    @Test
+    void doesNotUseAnInheritedFallbackWhenIntermediaryNameIsAmbiguous() throws IOException {
+        Path mojangMappings = temporaryDirectory.resolve("ambiguous-client-mappings.txt");
+        Path intermediaryMappings = temporaryDirectory.resolve("ambiguous-intermediary.tiny");
+
+        Files.writeString(mojangMappings, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "    1:1:void firstMethod(net.minecraft.Bar):1:1 -> b",
+                "net.minecraft.Baz -> d:",
+                "    1:1:void secondMethod(net.minecraft.Bar):1:1 -> c",
+                "net.minecraft.Bar -> e:",
+                ""));
+
+        Files.writeString(intermediaryMappings, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "\tm\t(Le;)V\tb\tmethod_2",
+                "c\td\tnet/minecraft/class_2",
+                "\tm\t(Le;)V\tc\tmethod_2",
+                "c\te\tnet/minecraft/class_3",
+                ""));
+
+        IntermediaryMappings loaded = IntermediaryMappings.load(
+                intermediaryMappings, MojangMappings.load(mojangMappings));
+
+        CompatibilityScanner.Reference result = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/class_99", "method_2", "(Lnet/minecraft/class_3;)V"));
+
+        assertEquals("net/minecraft/class_99", result.owner());
+        assertEquals("method_2", result.name(),
+                "A name shared by unrelated mappings must not be guessed when the owner is unknown.");
+        assertEquals("(Lnet/minecraft/Bar;)V", result.descriptor());
+    }
+
     private static byte[] targetFooClass() {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/minecraft/Foo",
