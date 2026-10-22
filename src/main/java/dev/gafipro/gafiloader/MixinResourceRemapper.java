@@ -8,6 +8,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.AnnotationVisitor;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
 import java.io.BufferedReader;
 import java.io.StringReader;
@@ -18,6 +22,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -243,6 +249,11 @@ public final class MixinResourceRemapper {
             JsonElement root = JsonParser.parseString(new String(source, StandardCharsets.UTF_8));
             AtomicBoolean changed = new AtomicBoolean(false);
             JsonElement remapped = remapJson(root, currentMappings, aliases, changed);
+            int prunedMixins = pruneStructurallyIncompatibleMixins(
+                    remapped, resourceName, currentMappings, aliases, targetApi);
+            if (prunedMixins > 0) {
+                changed.set(true);
+            }
             if (!changed.get()) {
                 return new ByteArrayInputStream(source);
             }
@@ -258,6 +269,152 @@ public final class MixinResourceRemapper {
             return new ByteArrayInputStream(source);
         }
     }
+
+
+    /**
+     * Drops only mixin classes that are structurally impossible to apply: a normal class mixin
+     * whose target has become an interface. Continuing with the rest of the config is safer than
+     * aborting Fabric before launch, but it does not recreate the skipped mixin's behavior.
+     */
+    private static int pruneStructurallyIncompatibleMixins(
+            JsonElement root, String resourceName, IntermediaryMappings mappings,
+            CompatibilityScanner.AliasSet aliases, TargetApiIndex targetApi) {
+        if (!(root instanceof JsonObject config) || targetApi == null) {
+            return 0;
+        }
+
+        JsonElement packageValue = config.get("package");
+        if (packageValue == null || !packageValue.isJsonPrimitive()
+                || !packageValue.getAsJsonPrimitive().isString()) {
+            return 0;
+        }
+
+        String mixinPackage = packageValue.getAsString().replace('.', '/');
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        if (loader == null) {
+            loader = ClassLoader.getSystemClassLoader();
+        }
+
+        int pruned = 0;
+        for (String group : List.of("mixins", "client", "server")) {
+            JsonElement groupValue = config.get(group);
+            if (groupValue == null || !groupValue.isJsonArray()) {
+                continue;
+            }
+
+            JsonArray retained = new JsonArray();
+            boolean changedGroup = false;
+            for (JsonElement entry : groupValue.getAsJsonArray()) {
+                String incompatibleTarget = null;
+                if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
+                    String mixinName = entry.getAsString();
+                    String classResource = mixinClassResource(mixinPackage, mixinName);
+                    if (classResource != null) {
+                        try (InputStream input = loader.getResourceAsStream(classResource)) {
+                            if (input != null) {
+                                MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
+                                if (metadata != null && !metadata.isInterface()) {
+                                    for (String targetName : metadata.targets()) {
+                                        String normalized = targetName.replace('.', '/');
+                                        if (normalized.startsWith("L") && normalized.endsWith(";")) {
+                                            normalized = normalized.substring(1, normalized.length() - 1);
+                                        }
+                                        String mappedTarget = aliases.mapClass(mappings.mapClassName(normalized));
+                                        if (targetApi.isInterface(mappedTarget)) {
+                                            incompatibleTarget = mappedTarget;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (IOException | RuntimeException exception) {
+                            System.err.println("[Gafi Loader] Could not inspect mixin structure for "
+                                    + mixinName + " in " + resourceName + ": " + exception.getMessage());
+                        }
+                    }
+                }
+
+                if (incompatibleTarget != null) {
+                    System.err.println("[Gafi Loader] Skipping structurally incompatible mixin "
+                            + entry.getAsString() + " from " + resourceName + ": target "
+                            + incompatibleTarget + " is an interface in Minecraft 26.2, but the "
+                            + "mixin bytecode is a class. The skipped behavior is not emulated.");
+                    changedGroup = true;
+                    pruned++;
+                } else {
+                    retained.add(entry);
+                }
+            }
+
+            if (changedGroup) {
+                config.add(group, retained);
+            }
+        }
+        if (pruned > 0) {
+            System.out.println("[Gafi Loader] Removed " + pruned
+                    + " structurally incompatible mixin entry/entries from " + resourceName);
+        }
+        return pruned;
+    }
+
+    private static String mixinClassResource(String mixinPackage, String mixinName) {
+        if (mixinName == null || mixinName.isBlank() || mixinName.startsWith("@")) {
+            return null;
+        }
+        String normalized = mixinName.replace('.', '/');
+        if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        } else if (!normalized.contains("/") && mixinName.indexOf('.') < 0) {
+            normalized = mixinPackage.isBlank() ? normalized : mixinPackage + "/" + normalized;
+        } else if (!normalized.contains("/") && !mixinPackage.isBlank()) {
+            normalized = mixinPackage + "/" + normalized;
+        }
+        return normalized.endsWith(".class") ? normalized : normalized + ".class";
+    }
+
+    private static MixinClassMetadata readMixinMetadata(byte[] bytes) {
+        int[] access = {0};
+        List<String> targets = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public void visit(int version, int classAccess, String name, String signature,
+                              String superName, String[] interfaces) {
+                access[0] = classAccess;
+            }
+
+            @Override
+            public org.objectweb.asm.AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                if (!descriptor.equals("Lorg/spongepowered/asm/mixin/Mixin;")) {
+                    return null;
+                }
+                return new AnnotationVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitArray(String name) {
+                        if (!name.equals("value") && !name.equals("targets")) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String ignored, Object value) {
+                                if (name.equals("value") && value instanceof Type type
+                                        && type.getSort() == Type.OBJECT) {
+                                    targets.add(type.getInternalName());
+                                } else if (name.equals("targets") && value instanceof String target) {
+                                    targets.add(target);
+                                }
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        if (targets.isEmpty()) {
+            return null;
+        }
+        return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0, List.copyOf(targets));
+    }
+
+    private record MixinClassMetadata(boolean isInterface, List<String> targets) {}
 
     static boolean isMixinResource(String resourceName) {
         if (resourceName == null) {
