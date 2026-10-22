@@ -265,6 +265,44 @@ def read_mod_id(mod_jar: Path) -> str:
     return data["id"]
 
 
+def capture_runtime_diagnostics() -> str:
+    """Capture process state and JVM thread stacks before timing out a hung client."""
+    sections: list[str] = []
+    try:
+        processes = subprocess.run(
+            ["ps", "-eo", "pid,ppid,stat,etime,%cpu,%mem,args"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10, check=False,
+        )
+        sections.append("===== Process table =====\n" + processes.stdout)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        sections.append(f"Could not read process table: {error}")
+
+    try:
+        listing = subprocess.run(
+            ["jcmd", "-l"], text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=10, check=False,
+        )
+        sections.append("===== jcmd -l =====\n" + listing.stdout)
+        pids: list[str] = []
+        for line in listing.stdout.splitlines():
+            match = re.match(r"^\\s*(\\d+)\\s+(.*)$", line)
+            if match and "jdk.jcmd" not in match.group(2):
+                pids.append(match.group(1))
+        for pid in pids[:5]:
+            try:
+                dump = subprocess.run(
+                    ["jcmd", pid, "Thread.print", "-l"], text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=20, check=False,
+                )
+                sections.append(f"===== JVM {pid} Thread.print -l (exit {dump.returncode}) =====\\n" + dump.stdout)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                sections.append(f"Could not capture JVM {pid} thread dump: {error}")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        sections.append(f"Could not list JVMs with jcmd: {error}")
+    return "\\n\\n".join(sections) + "\\n"
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("usage: run_fabric_client_smoke.py <fixture-dir> <gafi-loader-fat-jar> <fabric-loader-jar>", file=sys.stderr)
@@ -409,11 +447,14 @@ def main() -> int:
 
     print(f"Starting actual Fabric client with mod id '{mod_id}' (timeout {LAUNCH_TIMEOUT_SECONDS}s)...", flush=True)
     print("Launch main class: " + main_class, flush=True)
+    runtime_diagnostics = ""
     with console_path.open("w", encoding="utf-8") as console:
         process = subprocess.Popen(
             command, cwd=game_dir, env=env, stdout=console, stderr=subprocess.STDOUT
         )
         deadline = time.monotonic() + LAUNCH_TIMEOUT_SECONDS
+        started = time.monotonic()
+        last_status = -15
         success_reason = None
         while time.monotonic() < deadline:
             return_code = process.poll()
@@ -432,9 +473,19 @@ def main() -> int:
                 )):
                     success_reason = "legacy mod present in the client log after resource loading began"
                     break
+            elapsed = int(time.monotonic() - started)
+            if elapsed // 15 > last_status // 15:
+                last_status = elapsed
+                console.flush()
+                log_state = f"{log_path.stat().st_size} bytes" if log_path.is_file() else "not created"
+                print(f"Client still running after {elapsed}s; latest.log: {log_state}; "
+                      f"console bytes: {console_path.stat().st_size}", flush=True)
             time.sleep(POLL_SECONDS)
 
         if process.poll() is None:
+            print("Client startup deadline reached; collecting JVM diagnostics before stopping it...", flush=True)
+            console.flush()
+            runtime_diagnostics = capture_runtime_diagnostics()
             process.terminate()
             try:
                 process.wait(timeout=10)
@@ -443,6 +494,10 @@ def main() -> int:
                 process.wait(timeout=5)
 
     console_text = console_path.read_text(encoding="utf-8", errors="replace")
+    if runtime_diagnostics:
+        with console_path.open("a", encoding="utf-8") as console:
+            console.write("\\n\\n" + runtime_diagnostics)
+        console_text += "\\n\\n" + runtime_diagnostics
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
     if not success_reason:
         print("===== Minecraft latest.log =====", flush=True)
