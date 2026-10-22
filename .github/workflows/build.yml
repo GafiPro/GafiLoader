@@ -52,7 +52,20 @@ jobs:
             > build/real-artifact-test/api-comparison.log
           tail -n 20 build/real-artifact-test/api-comparison.log
           cp "$GAFI_REAL_FIXTURE_METADATA" build/real-artifact-test/fixture-metadata.json
+      - name: Install virtual display and software OpenGL for client smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb libgl1-mesa-dri libglx-mesa0
+      - name: Launch actual Fabric client with the legacy mod and Gafi Loader
+        run: |
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' -print -quit)"
+          test -n "$agent_jar"
+          python3 scripts/run_fabric_client_smoke.py \
+            "$RUNNER_TEMP/gafi-real-fixture" \
+            "$GITHUB_WORKSPACE/$agent_jar" \
+            "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
       - name: Upload integration diagnostics and self-contained agent JAR
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gafi-loader-integration-${{ github.sha }}
@@ -62,5 +75,7 @@ jobs:
             build/real-artifact-test/api-diff.json
             build/real-artifact-test/method-alias-candidates.tsv
             build/real-artifact-test/fixture-metadata.json
-          if-no-files-found: error
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/client-console.log
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/game/logs/latest.log
+          if-no-files-found: warn
           retention-days: 7
