@@ -234,16 +234,22 @@ class MixinResourceRemapperTest {
         Path targetJar = temporaryDirectory.resolve("interface-target.jar");
         Files.writeString(mojangFile, String.join("\n",
                 "net.minecraft.BlockModel -> a:",
+                "net.minecraft.SystemReport -> b:",
                 ""));
         Files.writeString(intermediaryFile, String.join("\n",
                 "tiny\t2\t0\tofficial\tintermediary",
                 "c\ta\tnet/minecraft/class_1",
+                "c\tb\tnet/minecraft/class_2",
                 ""));
 
         byte[] targetInterface = interfaceClass("net/minecraft/BlockModel");
+        byte[] targetSystemReport = ordinaryClass("net/minecraft/SystemReport");
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
             jar.putNextEntry(new ZipEntry("net/minecraft/BlockModel.class"));
             jar.write(targetInterface);
+            jar.closeEntry();
+            jar.putNextEntry(new ZipEntry("net/minecraft/SystemReport.class"));
+            jar.write(targetSystemReport);
             jar.closeEntry();
         }
 
@@ -254,12 +260,17 @@ class MixinResourceRemapperTest {
 
         byte[] incompatibleClass = classMixinTargeting("example/mixins/BlockModelMixin",
                 "net/minecraft/class_1");
+        byte[] missingShadowClass = classMixinWithShadow("example/mixins/SystemReportMixin",
+                "net/minecraft/class_2", "setDetail", "(Ljava/lang/String;Ljava/util/function/Supplier;)V");
         ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
         ClassLoader resourceLoader = new ClassLoader(originalLoader) {
             @Override
             public InputStream getResourceAsStream(String name) {
                 if (name.equals("example/mixins/BlockModelMixin.class")) {
                     return new ByteArrayInputStream(incompatibleClass);
+                }
+                if (name.equals("example/mixins/SystemReportMixin.class")) {
+                    return new ByteArrayInputStream(missingShadowClass);
                 }
                 return super.getResourceAsStream(name);
             }
@@ -268,7 +279,7 @@ class MixinResourceRemapperTest {
         String config = """
                 {
                   "package": "example.mixins",
-                  "client": ["BlockModelMixin", "UnchangedMixin"]
+                  "client": ["BlockModelMixin", "SystemReportMixin", "UnchangedMixin"]
                 }
                 """;
         String transformed;
@@ -284,6 +295,7 @@ class MixinResourceRemapperTest {
         }
 
         assertFalse(transformed.contains("BlockModelMixin"), transformed);
+        assertFalse(transformed.contains("SystemReportMixin"), transformed);
         assertTrue(transformed.contains("UnchangedMixin"), transformed);
         assertTrue(transformed.contains("\"client\""), transformed);
         assertTrue(config.contains("BlockModelMixin"),
@@ -294,6 +306,32 @@ class MixinResourceRemapperTest {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
                 internalName, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] ordinaryClass(String internalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, internalName, null,
+                "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinWithShadow(String internalName, String targetInternalName,
+                                               String shadowName, String shadowDescriptor) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, internalName, null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+        MethodVisitor shadow = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                shadowName, shadowDescriptor, null, null);
+        shadow.visitAnnotation("Lorg/spongepowered/asm/mixin/Shadow;", false).visitEnd();
+        shadow.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
