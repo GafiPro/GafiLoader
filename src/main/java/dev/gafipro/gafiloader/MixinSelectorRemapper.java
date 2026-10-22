@@ -203,7 +203,7 @@ final class MixinSelectorRemapper {
             public void visit(String name, Object value) {
                 if (value instanceof String stringValue) {
                     String mapped = mapStringValue(annotationDescriptor, name, stringValue,
-                            targets, mappings, aliases);
+                            targets, mappings, aliases, enclosingMethodDescriptor);
                     if (!mapped.equals(stringValue)) {
                         changed.set(true);
                     }
@@ -224,7 +224,7 @@ final class MixinSelectorRemapper {
                     public void visit(String ignored, Object value) {
                         if (value instanceof String stringValue) {
                             String mapped = mapStringValue(annotationDescriptor, name, stringValue,
-                                    targets, mappings, aliases);
+                                    targets, mappings, aliases, enclosingMethodDescriptor);
                             if (!mapped.equals(stringValue)) {
                                 changed.set(true);
                             }
@@ -237,13 +237,13 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String nestedName, String nestedDescriptor) {
                         return wrap(super.visitAnnotation(nestedName, nestedDescriptor), nestedDescriptor,
-                                targets, mappings, aliases, changed);
+                                targets, mappings, aliases, changed, enclosingMethodDescriptor);
                     }
 
                     @Override
                     public AnnotationVisitor visitArray(String nestedName) {
                         return wrap(super.visitArray(nestedName), annotationDescriptor,
-                                targets, mappings, aliases, changed);
+                                targets, mappings, aliases, changed, enclosingMethodDescriptor);
                     }
                 };
             }
@@ -251,7 +251,7 @@ final class MixinSelectorRemapper {
             @Override
             public AnnotationVisitor visitAnnotation(String name, String nestedDescriptor) {
                 return wrap(super.visitAnnotation(name, nestedDescriptor), nestedDescriptor,
-                        targets, mappings, aliases, changed);
+                        targets, mappings, aliases, changed, enclosingMethodDescriptor);
             }
         };
     }
