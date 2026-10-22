@@ -72,14 +72,20 @@ final class LegacyApiBridgePatcher {
     }
 
     private static boolean supportsDisplaySlotBridge(TargetApiIndex targetApi) {
-        if (!targetApi.hasClass(DISPLAY_SLOT) || !targetApi.hasClass(CHAT_FORMATTING)
-                || targetApi.methodAccess(CHAT_FORMATTING, "isColor", "()Z") == null) {
+        if (!targetApi.hasClass(DISPLAY_SLOT) || !targetApi.hasClass(CHAT_FORMATTING)) {
             return false;
         }
 
+        // 26.2 no longer exposes ChatFormatting.isColor(). The old method's behavior is
+        // equivalent to membership in the 16 color enum constants, so check those constants
+        // explicitly in the real target jar and compare Enum.name() at runtime.
         for (String color : TEAM_COLOR_NAMES) {
-            Integer access = targetApi.fieldAccess(DISPLAY_SLOT, "TEAM_" + color, "L" + DISPLAY_SLOT + ";");
-            if (access == null || (access & Opcodes.ACC_STATIC) == 0) {
+            Integer targetSlot = targetApi.fieldAccess(DISPLAY_SLOT, "TEAM_" + color,
+                    "L" + DISPLAY_SLOT + ";");
+            Integer targetFormatting = targetApi.fieldAccess(CHAT_FORMATTING, color,
+                    "L" + CHAT_FORMATTING + ";");
+            if (targetSlot == null || (targetSlot & Opcodes.ACC_STATIC) == 0
+                    || targetFormatting == null || (targetFormatting & Opcodes.ACC_STATIC) == 0) {
                 return false;
             }
         }
@@ -152,7 +158,7 @@ final class LegacyApiBridgePatcher {
 
     private static void writeTeamColorToSlotBridge(MethodVisitor method, String owner) {
         Label nonNull = new Label();
-        Label isColor = new Label();
+        Label recognizedColor = new Label();
 
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitJumpInsn(Opcodes.IFNONNULL, nonNull);
@@ -161,13 +167,20 @@ final class LegacyApiBridgePatcher {
 
         method.visitLabel(nonNull);
         method.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
-        method.visitVarInsn(Opcodes.ALOAD, 0);
-        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, CHAT_FORMATTING, "isColor", "()Z", false);
-        method.visitJumpInsn(Opcodes.IFNE, isColor);
+        for (String color : TEAM_COLOR_NAMES) {
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Enum", "name",
+                    "()Ljava/lang/String;", false);
+            method.visitLdcInsn(color);
+            method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "equals",
+                    "(Ljava/lang/Object;)Z", false);
+            method.visitJumpInsn(Opcodes.IFNE, recognizedColor);
+        }
+        // Formatting values such as BOLD/ITALIC are not team colors.
         method.visitInsn(Opcodes.ACONST_NULL);
         method.visitInsn(Opcodes.ARETURN);
 
-        method.visitLabel(isColor);
+        method.visitLabel(recognizedColor);
         method.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
         method.visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder");
         method.visitInsn(Opcodes.DUP);
