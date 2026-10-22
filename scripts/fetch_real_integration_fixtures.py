@@ -26,6 +26,9 @@ INTERMEDIARY_URL = (
 # Small Items Mod 1.21.11, Modrinth version ID verified from its version page.
 MODRINTH_VERSION_ID = "oO030Ff9"
 MODRINTH_VERSION_URL = f"https://api.modrinth.com/v2/version/{MODRINTH_VERSION_ID}"
+# Fabric API 0.141.5 for Minecraft 1.21.11, pinned to its public Modrinth version ID.
+FABRIC_API_VERSION_ID = "zGF3drOQ"
+FABRIC_API_VERSION_URL = f"https://api.modrinth.com/v2/version/{FABRIC_API_VERSION_ID}"
 
 
 def request_bytes(url: str, attempts: int = 3) -> bytes:
@@ -134,11 +137,27 @@ def main() -> int:
         mod_file["url"], output / "small-items-mod-1.21.11.jar", mod_sha1
     )
 
+    fabric_api_version = get_json(FABRIC_API_VERSION_URL)
+    if not isinstance(fabric_api_version, dict) or fabric_api_version.get("id") != FABRIC_API_VERSION_ID:
+        raise RuntimeError("Invalid pinned Modrinth Fabric API version metadata")
+    if "1.21.11" not in fabric_api_version.get("game_versions", []):
+        raise RuntimeError("Pinned Fabric API version is not marked for Minecraft 1.21.11")
+    if "fabric" not in [loader.lower() for loader in fabric_api_version.get("loaders", [])]:
+        raise RuntimeError("Pinned Fabric API version is not marked for Fabric")
+    api_files = fabric_api_version.get("files", [])
+    api_file = next((file for file in api_files if file.get("primary")), api_files[0] if api_files else None)
+    if not api_file or not api_file.get("url"):
+        raise RuntimeError("Pinned Fabric API version has no downloadable JAR")
+    artifacts["fabric_api"] = download(
+        api_file["url"], output / "fabric-api-0.141.5+1.21.11.jar",
+        api_file.get("hashes", {}).get("sha1")
+    )
+
     provenance = {
-        "test_scope": "real production 1.21.11 mod against official Minecraft 26.2 API",
+        "test_scope": "official Minecraft 26.2 client, Fabric Loader, Fabric API and a production 1.21.11 mod",
         "warning": (
-            "This checks scanning and in-memory bytecode transformation only; it does not "
-            "claim a full Minecraft launch or semantic feature compatibility."
+            "The CI exercises startup/loading only; it does not prove the selected mod's "
+            "in-game feature or universal legacy-mod compatibility."
         ),
         "modrinth_version_id": MODRINTH_VERSION_ID,
         "mod_name": mod_version.get("name"),
@@ -156,6 +175,7 @@ def main() -> int:
             "GAFI_REAL_TARGET_GAME": artifacts["target_game"]["path"],
             "GAFI_REAL_LEGACY_GAME": artifacts["legacy_game"]["path"],
             "GAFI_REAL_LEGACY_MOD": artifacts["legacy_mod"]["path"],
+            "GAFI_REAL_FABRIC_API": artifacts["fabric_api"]["path"],
             "GAFI_REAL_INTERMEDIARY_MAPPINGS": artifacts["intermediary_mappings"]["path"],
             "GAFI_REAL_LEGACY_MAPPINGS": artifacts["legacy_mappings"]["path"],
             "GAFI_REAL_FIXTURE_METADATA": str(provenance_file),
