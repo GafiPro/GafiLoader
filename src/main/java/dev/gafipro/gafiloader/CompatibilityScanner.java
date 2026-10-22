@@ -161,20 +161,54 @@ public final class CompatibilityScanner {
     }
 
     private static boolean hasStructuralAdapter(Reference reference, Map<String, ClassInfo> gameClasses) {
+        if (reference.kind() != SymbolKind.METHOD) {
+            return false;
+        }
+
         String minecraft = "net/minecraft/client/Minecraft";
         String screen = "net/minecraft/client/gui/screens/Screen";
         String gui = "net/minecraft/client/gui/Gui";
         String screenDescriptor = "(L" + screen + ";)V";
-        if (reference.kind() != SymbolKind.METHOD
-                || !reference.owner().equals(minecraft)
-                || !reference.name().equals("setScreen")
-                || !reference.descriptor().equals(screenDescriptor)) {
-            return false;
+        if (reference.owner().equals(minecraft) && reference.name().equals("setScreen")
+                && reference.descriptor().equals(screenDescriptor)) {
+            return memberExists(gameClasses, minecraft,
+                            new Member("gui", "L" + gui + ";"), SymbolKind.FIELD, new HashSet<>())
+                    && memberExists(gameClasses, gui,
+                            new Member("setScreen", screenDescriptor), SymbolKind.METHOD, new HashSet<>());
         }
-        return memberExists(gameClasses, minecraft,
-                        new Member("gui", "L" + gui + ";"), SymbolKind.FIELD, new HashSet<>())
-                && memberExists(gameClasses, gui,
-                        new Member("setScreen", screenDescriptor), SymbolKind.METHOD, new HashSet<>());
+
+        String displaySlot = "net/minecraft/world/scores/DisplaySlot";
+        String chatFormatting = "net/minecraft/ChatFormatting";
+        String teamColorDescriptor = "(L" + chatFormatting + ";)L" + displaySlot + ";";
+        if (reference.owner().equals(displaySlot) && reference.name().equals("teamColorToSlot")
+                && reference.descriptor().equals(teamColorDescriptor)) {
+            for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
+                    "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
+                    "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
+                if (!memberExists(gameClasses, displaySlot,
+                            new Member("TEAM_" + color, "L" + displaySlot + ";"), SymbolKind.FIELD, new HashSet<>())
+                        || !memberExists(gameClasses, chatFormatting,
+                            new Member(color, "L" + chatFormatting + ";"), SymbolKind.FIELD, new HashSet<>())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        String readOnlyScoreInfo = "net/minecraft/world/scores/ReadOnlyScoreInfo";
+        String numberFormat = "net/minecraft/network/chat/numbers/NumberFormat";
+        String mutableComponent = "net/minecraft/network/chat/MutableComponent";
+        String safeDescriptor = "(L" + readOnlyScoreInfo + ";L" + numberFormat + ";)L"
+                + mutableComponent + ";";
+        String formatDescriptor = "(L" + numberFormat + ";)L" + mutableComponent + ";";
+        String commonComponents = "net/minecraft/network/chat/CommonComponents";
+        return reference.owner().equals(readOnlyScoreInfo)
+                && reference.name().equals("safeFormatValue")
+                && reference.descriptor().equals(safeDescriptor)
+                && memberExists(gameClasses, readOnlyScoreInfo,
+                        new Member("formatValue", formatDescriptor), SymbolKind.METHOD, new HashSet<>())
+                && memberExists(gameClasses, commonComponents,
+                        new Member("EMPTY", "L" + mutableComponent + ";"), SymbolKind.FIELD, new HashSet<>());
     }
 
     private static boolean memberExists(Map<String, ClassInfo> classes, String owner,
