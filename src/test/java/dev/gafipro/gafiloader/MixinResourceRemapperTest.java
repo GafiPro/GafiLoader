@@ -9,11 +9,13 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -171,6 +173,54 @@ class MixinResourceRemapperTest {
         method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    @Test
+    void remapsLegacyClassTweakerEntriesInMemoryWithoutMutatingTheSourceFile() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("classtweaker-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("classtweaker-intermediary.tiny");
+        Files.writeString(mojangFile, String.join("\\n",
+                "net.minecraft.Foo -> a:",
+                "    int oldField -> c",
+                "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
+                "net.minecraft.Bar -> d:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\\n",
+                "tiny\\t2\\t0\\tofficial\\tintermediary",
+                "c\\ta\\tnet/minecraft/class_1",
+                "\\tf\\tI\\tc\\tfield_1",
+                "\\tm\\t(Ld;)V\\tb\\tmethod_2",
+                "c\\td\\tnet/minecraft/class_2",
+                ""));
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty());
+
+        Path sourceFile = temporaryDirectory.resolve("legacy.classtweaker");
+        String original = String.join("\\n",
+                "classTweaker v1 intermediary",
+                "accessible class net/minecraft/class_1 # preserve this comment",
+                "accessible method net/minecraft/class_1 method_2 (Lnet/minecraft/class_2;)V",
+                "mutable field net/minecraft/class_1 field_1 I",
+                "inject-interface net/minecraft/class_1 example/LegacyInterface<Lnet/minecraft/class_2;>",
+                "");
+        Files.writeString(sourceFile, original, StandardCharsets.UTF_8);
+
+        String transformed;
+        try (BufferedReader reader = MixinResourceRemapper.openClassTweakerReader(sourceFile)) {
+            transformed = reader.lines().collect(Collectors.joining("\\n"));
+        }
+
+        assertTrue(transformed.startsWith("classTweaker v1 official"), transformed);
+        assertTrue(transformed.contains("accessible class net/minecraft/Foo # preserve this comment"), transformed);
+        assertTrue(transformed.contains(
+                "accessible method net/minecraft/Foo oldMethod (Lnet/minecraft/Bar;)V"), transformed);
+        assertTrue(transformed.contains("mutable field net/minecraft/Foo oldField I"), transformed);
+        assertTrue(transformed.contains(
+                "inject-interface net/minecraft/Foo example/LegacyInterface<Lnet/minecraft/Bar;>"), transformed);
+        assertEquals(original, Files.readString(sourceFile, StandardCharsets.UTF_8),
+                "The downloaded mod/API file must remain byte-for-byte intact");
     }
 
     @Test

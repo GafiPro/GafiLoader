@@ -75,6 +75,16 @@ public final class GameSideCompatibilityAgent {
                         return hooked;
                     }
 
+                    // Fabric reads legacy ClassTweaker files before its regular game launch.
+                    // Normalize those files in memory, before Fabric validates the header namespace.
+                    if (intermediaryMappings != null
+                            && ClassTweakerPatcher.TARGET_CLASS.equals(className)) {
+                        byte[] hookInput = transformed == null ? classfileBuffer : transformed;
+                        byte[] hooked = ClassTweakerPatcher.transform(className, hookInput);
+                        System.out.println("[Gafi Loader] Enabled in-memory ClassTweaker namespace remapping.");
+                        return hooked;
+                    }
+
                     if (intermediaryMappings == null || skipIntermediaryScan(className)) {
                         return transformed;
                     }

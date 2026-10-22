@@ -9,6 +9,10 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import org.objectweb.asm.ClassReader;
 
+import java.io.BufferedReader;
+import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,6 +54,156 @@ final class MixinResourceRemapper {
         aliases = bytecodeAliases == null
                 ? CompatibilityScanner.AliasSet.empty() : bytecodeAliases;
         targetApi = targetApiIndex;
+    }
+
+    /**
+     * Opens a legacy ClassTweaker/AccessWidener file remapped to the runtime namespace.
+     * The source path is only read; the upstream mod or API JAR is never modified.
+     */
+    public static BufferedReader openClassTweakerReader(Path path) throws IOException {
+        if (path == null) {
+            throw new IllegalArgumentException("ClassTweaker path is required.");
+        }
+
+        IntermediaryMappings currentMappings = mappings;
+        if (currentMappings == null) {
+            return Files.newBufferedReader(path, StandardCharsets.UTF_8);
+        }
+
+        String original = Files.readString(path, StandardCharsets.UTF_8);
+        String remapped = remapClassTweakerText(original, currentMappings, aliases, path.toString());
+        if (!remapped.equals(original)) {
+            System.out.println("[Gafi Loader] Remapped ClassTweaker file in memory: " + path.getFileName());
+        }
+        return new BufferedReader(new StringReader(remapped));
+    }
+
+    private static String remapClassTweakerText(String original, IntermediaryMappings mappings,
+                                                 CompatibilityScanner.AliasSet aliases,
+                                                 String sourceName) throws IOException {
+        String[] lines = original.split("\\R", -1);
+        if (lines.length == 0 || lines[0].isBlank()) {
+            throw new IOException("Empty ClassTweaker header in " + sourceName);
+        }
+
+        String[] header = lines[0].trim().split("\\s+");
+        if (header.length != 3
+                || !(header[0].equals("classTweaker") || header[0].equals("accessWidener"))
+                || !(header[1].equals("v1") || header[1].equals("v2"))) {
+            throw new IOException("Unsupported ClassTweaker header in " + sourceName
+                    + ": " + lines[0]);
+        }
+
+        if (header[2].equals("official")) {
+            return original;
+        }
+        if (!header[2].equals("intermediary")) {
+            throw new IOException("Gafi Loader can only remap ClassTweaker files from intermediary "
+                    + "to official; found namespace '" + header[2] + "' in " + sourceName);
+        }
+
+        header[2] = "official";
+        lines[0] = String.join(" ", header);
+        boolean classTweaker = header[0].equals("classTweaker");
+        boolean versionTwo = header[1].equals("v2");
+
+        for (int i = 1; i < lines.length; i++) {
+            String line = lines[i];
+            int commentIndex = line.indexOf('#');
+            String code = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
+            String comment = commentIndex >= 0 ? line.substring(commentIndex) : "";
+            String stripped = code.strip();
+            if (stripped.isEmpty()) {
+                continue;
+            }
+
+            String leading = code.substring(0, code.length() - code.stripLeading().length());
+            String trailing = code.substring(code.stripTrailing().length());
+            String[] tokens = stripped.split("\\s+");
+            String directive = tokens[0];
+            String operation = directive.startsWith("transitive-")
+                    ? directive.substring("transitive-".length()) : directive;
+
+            try {
+                switch (operation) {
+                    case "accessible", "extendable", "mutable" -> remapAccessEntry(
+                            tokens, mappings, aliases, sourceName, i + 1);
+                    case "inject-interface" -> {
+                        if (!classTweaker || tokens.length != 3) {
+                            throw entryError(sourceName, i + 1,
+                                    "Expected inject-interface <className> <interfaceName>");
+                        }
+                        tokens[1] = remapClassName(tokens[1], mappings, aliases);
+                        tokens[2] = remapText(tokens[2], mappings, aliases);
+                    }
+                    case "extend-enum" -> {
+                        if (!classTweaker || !versionTwo || tokens.length != 3) {
+                            throw entryError(sourceName, i + 1,
+                                    "Expected ClassTweaker v2 extend-enum <className> <constantName>");
+                        }
+                        tokens[1] = remapClassName(tokens[1], mappings, aliases);
+                    }
+                    default -> throw entryError(sourceName, i + 1,
+                            "Unsupported ClassTweaker directive '" + directive + "'");
+                }
+            } catch (IllegalArgumentException exception) {
+                throw entryError(sourceName, i + 1, exception.getMessage());
+            }
+
+            lines[i] = leading + String.join(" ", tokens) + trailing + comment;
+        }
+
+        return String.join("\\n", lines);
+    }
+
+    private static void remapAccessEntry(String[] tokens, IntermediaryMappings mappings,
+                                         CompatibilityScanner.AliasSet aliases,
+                                         String sourceName, int lineNumber) throws IOException {
+        if (tokens.length < 3) {
+            throw entryError(sourceName, lineNumber, "Expected class, field, or method after access directive");
+        }
+
+        switch (tokens[1]) {
+            case "class" -> {
+                if (tokens.length != 3) {
+                    throw entryError(sourceName, lineNumber, "Expected <access> class <className>");
+                }
+                tokens[2] = remapClassName(tokens[2], mappings, aliases);
+            }
+            case "field", "method" -> {
+                if (tokens.length != 5) {
+                    throw entryError(sourceName, lineNumber,
+                            "Expected <access> " + tokens[1] + " <owner> <name> <descriptor>");
+                }
+                String oldOwner = tokens[2];
+                CompatibilityScanner.SymbolKind kind = tokens[1].equals("method")
+                        ? CompatibilityScanner.SymbolKind.METHOD : CompatibilityScanner.SymbolKind.FIELD;
+                CompatibilityScanner.Reference normalized = mappings.normalize(
+                        new CompatibilityScanner.Reference(kind, oldOwner, tokens[3], tokens[4]));
+                CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
+                if (!mapped.owner().equals(normalized.owner())) {
+                    throw entryError(sourceName, lineNumber,
+                            "Owner-changing member aliases require a dedicated ClassTweaker adapter");
+                }
+                // ClassTweaker keeps the explicitly specified owner class. Member name/descriptor
+                // use mapped declarations, including the unambiguous inherited-member fallback.
+                tokens[2] = remapClassName(oldOwner, mappings, aliases);
+                tokens[3] = mapped.name();
+                tokens[4] = mapped.descriptor();
+            }
+            default -> throw entryError(sourceName, lineNumber,
+                    "Unsupported access target type '" + tokens[1] + "'");
+        }
+    }
+
+    private static String remapClassName(String intermediaryName, IntermediaryMappings mappings,
+                                         CompatibilityScanner.AliasSet aliases) {
+        return aliases.mapClass(mappings.mapClassName(intermediaryName));
+    }
+
+    private static IOException entryError(String sourceName, int lineNumber, String message) {
+        return new IOException("Cannot remap ClassTweaker entry at " + sourceName + ":" + lineNumber
+                + ": " + message);
     }
 
     /**
