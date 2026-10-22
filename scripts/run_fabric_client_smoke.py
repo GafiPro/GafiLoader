@@ -305,7 +305,9 @@ def main() -> int:
 
     index_id = prepare_assets(game, assets_dir)
     classpath = collect_libraries(game, fabric_profile, libraries_root, natives_dir)
-    classpath.extend([gafi_jar, target_game])
+    # The agent JAR must not also sit on Fabric's ordinary game classpath: it bundles ASM,
+    # and Fabric deliberately rejects duplicate ASM classes. -javaagent installs it separately.
+    classpath.append(target_game)
     classpath = list(dict.fromkeys(str(path.resolve()) for path in classpath))
     if not classpath:
         raise RuntimeError("The resolved Minecraft/Fabric classpath is empty")
