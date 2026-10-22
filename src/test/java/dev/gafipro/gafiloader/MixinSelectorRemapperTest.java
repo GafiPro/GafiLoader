@@ -60,6 +60,7 @@ class MixinSelectorRemapperTest {
 
         SelectorValues values = readSelectors(transformed);
         assertEquals("oldMethod(Lnet/minecraft/Bar;)V", values.implicitMethod());
+        assertEquals("oldMethod", values.implicitMethodWithoutDescriptor());
         assertEquals("Lnet/minecraft/Foo;oldMethod(Lnet/minecraft/Bar;)V", values.explicitAtTarget());
         assertEquals("connection", values.accessorFieldName());
         assertTrue(values.mixinTarget().contains("net/minecraft/Foo"),
@@ -89,6 +90,7 @@ class MixinSelectorRemapperTest {
                 "Lorg/spongepowered/asm/mixin/injection/Inject;", true);
         AnnotationVisitor methodSelectors = inject.visitArray("method");
         methodSelectors.visit(null, "method_2(Lnet/minecraft/class_2;)V");
+        methodSelectors.visit(null, "method_2");
         methodSelectors.visitEnd();
 
         AnnotationVisitor at = inject.visitAnnotation(
@@ -117,6 +119,7 @@ class MixinSelectorRemapperTest {
     private static SelectorValues readSelectors(byte[] bytes) {
         String[] mixinTarget = {""};
         String[] implicitMethod = {""};
+        String[] implicitMethodWithoutDescriptor = {""};
         String[] explicitAtTarget = {""};
         String[] accessorFieldName = {""};
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
@@ -169,7 +172,11 @@ class MixinSelectorRemapperTest {
                                     @Override
                                     public void visit(String ignored, Object value) {
                                         if (value instanceof String stringValue) {
-                                            implicitMethod[0] = stringValue;
+                                            if (stringValue.contains("(")) {
+                                                implicitMethod[0] = stringValue;
+                                            } else {
+                                                implicitMethodWithoutDescriptor[0] = stringValue;
+                                            }
                                         }
                                     }
                                 };
@@ -196,10 +203,11 @@ class MixinSelectorRemapperTest {
                 };
             }
         }, 0);
-        return new SelectorValues(mixinTarget[0], implicitMethod[0], explicitAtTarget[0],
-                accessorFieldName[0]);
+        return new SelectorValues(mixinTarget[0], implicitMethod[0], implicitMethodWithoutDescriptor[0],
+                explicitAtTarget[0], accessorFieldName[0]);
     }
 
-    private record SelectorValues(String mixinTarget, String implicitMethod, String explicitAtTarget,
+    private record SelectorValues(String mixinTarget, String implicitMethod,
+                                  String implicitMethodWithoutDescriptor, String explicitAtTarget,
                                   String accessorFieldName) {}
 }
