@@ -179,18 +179,18 @@ class MixinResourceRemapperTest {
     void remapsLegacyClassTweakerEntriesInMemoryWithoutMutatingTheSourceFile() throws Exception {
         Path mojangFile = temporaryDirectory.resolve("classtweaker-client.txt");
         Path intermediaryFile = temporaryDirectory.resolve("classtweaker-intermediary.tiny");
-        Files.writeString(mojangFile, String.join("\\n",
+        Files.writeString(mojangFile, String.join("\n",
                 "net.minecraft.Foo -> a:",
                 "    int oldField -> c",
                 "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
                 "net.minecraft.Bar -> d:",
                 ""));
-        Files.writeString(intermediaryFile, String.join("\\n",
-                "tiny\\t2\\t0\\tofficial\\tintermediary",
-                "c\\ta\\tnet/minecraft/class_1",
-                "\\tf\\tI\\tc\\tfield_1",
-                "\\tm\\t(Ld;)V\\tb\\tmethod_2",
-                "c\\td\\tnet/minecraft/class_2",
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "\tf\tI\tc\tfield_1",
+                "\tm\t(Ld;)V\tb\tmethod_2",
+                "c\td\tnet/minecraft/class_2",
                 ""));
 
         IntermediaryMappings mappings = IntermediaryMappings.load(
@@ -198,7 +198,7 @@ class MixinResourceRemapperTest {
         MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty());
 
         Path sourceFile = temporaryDirectory.resolve("legacy.classtweaker");
-        String original = String.join("\\n",
+        String original = String.join("\n",
                 "classTweaker v1 intermediary",
                 "accessible class net/minecraft/class_1 # preserve this comment",
                 "accessible method net/minecraft/class_1 method_2 (Lnet/minecraft/class_2;)V",
@@ -209,7 +209,7 @@ class MixinResourceRemapperTest {
 
         String transformed;
         try (BufferedReader reader = MixinResourceRemapper.openClassTweakerReader(sourceFile)) {
-            transformed = reader.lines().collect(Collectors.joining("\\n"));
+            transformed = reader.lines().collect(Collectors.joining("\n"));
         }
 
         assertTrue(transformed.startsWith("classTweaker v1 official"), transformed);

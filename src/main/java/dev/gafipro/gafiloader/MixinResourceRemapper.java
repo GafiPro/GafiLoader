@@ -153,7 +153,7 @@ final class MixinResourceRemapper {
             lines[i] = leading + String.join(" ", tokens) + trailing + comment;
         }
 
-        return String.join("\\n", lines);
+        return String.join("\n", lines);
     }
 
     private static void remapAccessEntry(String[] tokens, IntermediaryMappings mappings,
