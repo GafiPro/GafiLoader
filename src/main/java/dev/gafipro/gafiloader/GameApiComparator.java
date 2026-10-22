@@ -283,17 +283,15 @@ public final class GameApiComparator {
             if (targetSlot == null || targetFormatting == null) {
                 return false;
             }
-            Member isColor = findMember(targetFormatting, MojangMappings.SymbolKind.METHOD, "isColor", "()Z");
-            if (isColor == null || isStatic(isColor)
-                    || (isColor.access() & Opcodes.ACC_ABSTRACT) != 0) {
-                return false;
-            }
             for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
                     "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
                     "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
-                Member field = findMember(targetSlot, MojangMappings.SymbolKind.FIELD,
+                Member slotField = findMember(targetSlot, MojangMappings.SymbolKind.FIELD,
                         "TEAM_" + color, "L" + displaySlot + ";");
-                if (field == null || (field.access() & Opcodes.ACC_STATIC) == 0) {
+                Member formattingField = findMember(targetFormatting, MojangMappings.SymbolKind.FIELD,
+                        color, "L" + chatFormatting + ";");
+                if (slotField == null || (slotField.access() & Opcodes.ACC_STATIC) == 0
+                        || formattingField == null || (formattingField.access() & Opcodes.ACC_STATIC) == 0) {
                     return false;
                 }
             }
