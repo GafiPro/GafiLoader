@@ -368,7 +368,9 @@ final class MixinSelectorRemapper {
                 return optional ? null : "selector owner class " + owner + " is absent from Minecraft 26.2";
             }
             boolean exists = parsed.method()
-                    ? targetApi.methodAccess(owner, parsed.name(), parsed.descriptor()) != null
+                    ? (parsed.descriptor() == null
+                        ? targetApi.hasMethodNamed(owner, parsed.name())
+                        : targetApi.methodAccess(owner, parsed.name(), parsed.descriptor()) != null)
                     : targetApi.fieldAccess(owner, parsed.name(), parsed.descriptor()) != null;
             if (!exists && !optional) {
                 return "selector " + mapped + " does not exist in Minecraft 26.2";
@@ -378,6 +380,20 @@ final class MixinSelectorRemapper {
 
         int descriptorStart = mapped.indexOf('(');
         if (descriptorStart <= 0) {
+            if (mapped.contains("*") || mapped.contains("/") || mapped.contains(";")
+                    || mapped.startsWith("<") || mapped.contains(",")) {
+                return null;
+            }
+            for (String rawTarget : targets) {
+                String owner = aliases.mapClass(mappings.mapClassName(rawTarget));
+                if (!owner.startsWith("net/minecraft/")) {
+                    continue;
+                }
+                if (targetApi.hasClass(owner) && !targetApi.hasMethodNamed(owner, mapped) && !optional) {
+                    return "selector " + mapped + " does not resolve on " + owner
+                            + " in Minecraft 26.2";
+                }
+            }
             return null;
         }
         String name = mapped.substring(0, descriptorStart);
@@ -415,6 +431,9 @@ final class MixinSelectorRemapper {
             return new ParsedSelector(false, selector.substring(0, fieldSeparator),
                     selector.substring(fieldSeparator + 1));
         }
+        if (!selector.isBlank() && !selector.contains("*") && !selector.contains("/")) {
+            return new ParsedSelector(true, selector, null);
+        }
         return null;
     }
 
@@ -443,7 +462,20 @@ final class MixinSelectorRemapper {
         // Ownerless injection selectors are relative to @Mixin's target(s).
         int descriptorStart = selector.indexOf('(');
         if (descriptorStart <= 0) {
-            return optionalPrefix + selector;
+            if (selector.isBlank() || selector.contains("*") || selector.contains("/")
+                    || selector.contains(";") || selector.contains(":") || selector.startsWith("<")) {
+                return optionalPrefix + selector;
+            }
+            String mappedName = null;
+            for (String owner : targets) {
+                String candidate = mappings.mapMemberName(
+                        CompatibilityScanner.SymbolKind.METHOD, owner, selector);
+                if (mappedName != null && !mappedName.equals(candidate)) {
+                    return optionalPrefix + selector;
+                }
+                mappedName = candidate;
+            }
+            return optionalPrefix + (mappedName == null ? selector : mappedName);
         }
         String name = selector.substring(0, descriptorStart);
         String descriptor = selector.substring(descriptorStart);
@@ -495,6 +527,11 @@ final class MixinSelectorRemapper {
             CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
             return mapped.owner() + ";" + mapped.name() + ":" + mapped.descriptor();
         }
-        return null;
+        if (selector.isBlank() || selector.contains("*") || selector.contains("/")) {
+            return null;
+        }
+        String mappedName = mappings.mapMemberName(
+                CompatibilityScanner.SymbolKind.METHOD, owner, selector);
+        return aliases.mapClass(mappings.mapClassName(owner)) + ";" + mappedName;
     }
 }
