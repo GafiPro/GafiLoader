@@ -15,11 +15,34 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TargetApiIndexTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void distinguishesDirectMethodDeclarationsFromMethodsFoundThroughInterfaces() throws Exception {
+        Path targetJar = temporaryDirectory.resolve("inherited-static-method.jar");
+        String owner = "net/minecraft/world/scores/ReadOnlyScoreInfo";
+        String parent = "net/minecraft/example/ParentApi";
+        String numberFormat = "net/minecraft/network/chat/numbers/NumberFormat";
+        String mutableComponent = "net/minecraft/network/chat/MutableComponent";
+        String descriptor = "(L" + owner + ";L" + numberFormat + ";)L" + mutableComponent + ";";
+        writeJar(targetJar,
+                owner, interfaceWithParent(owner, parent),
+                parent, interfaceWithStaticMethod(parent, "safeFormatValue", descriptor),
+                numberFormat, emptyInterface(numberFormat),
+                mutableComponent, emptyInterface(mutableComponent));
+
+        TargetApiIndex api = TargetApiIndex.load(targetJar);
+        assertNotNull(api.methodAccess(owner, "safeFormatValue", descriptor),
+                "The general lookup traverses superinterfaces for diagnostics");
+        assertNull(api.declaredMethodAccess(owner, "safeFormatValue", descriptor),
+                "The structural bridge must only be suppressed for a direct declaration");
+    }
 
     @Test
     void acceptsAliasesOnlyWhenTargetsExistInTheRealGameApiIndex() throws Exception {
@@ -56,6 +79,37 @@ class TargetApiIndexTest {
                 () -> CompatibilityScanner.AliasSet.load(missingMethod).validateAgainstTarget(targetJar));
         assertThrows(IOException.class,
                 () -> CompatibilityScanner.AliasSet.load(missingClass).validateAgainstTarget(targetJar));
+    }
+
+    private static byte[] interfaceWithParent(String name, String parent) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                name, null, "java/lang/Object", new String[]{parent});
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] interfaceWithStaticMethod(String owner, String name, String descriptor) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                owner, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                name, descriptor, null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] emptyInterface(String name) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                name, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] targetFoo() {
