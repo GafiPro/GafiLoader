@@ -336,19 +336,38 @@ public final class MixinResourceRemapper {
                                             if (!shadow.prefix().isEmpty() && memberName.startsWith(shadow.prefix())) {
                                                 memberName = memberName.substring(shadow.prefix().length());
                                             }
+                                            CompatibilityScanner.SymbolKind kind = shadow.method()
+                                                    ? CompatibilityScanner.SymbolKind.METHOD
+                                                    : CompatibilityScanner.SymbolKind.FIELD;
+                                            CompatibilityScanner.Reference normalizedShadow = mappings.normalize(
+                                                    new CompatibilityScanner.Reference(kind, normalized,
+                                                            memberName, shadow.descriptor()));
+                                            CompatibilityScanner.Reference mappedShadow = aliases.normalize(normalizedShadow);
                                             boolean exists = shadow.method()
-                                                    ? targetApi.methodAccess(mappedTarget, memberName, shadow.descriptor()) != null
-                                                    : targetApi.fieldAccess(mappedTarget, memberName, shadow.descriptor()) != null;
+                                                    ? targetApi.methodAccess(mappedShadow.owner(), mappedShadow.name(),
+                                                            mappedShadow.descriptor()) != null
+                                                    : targetApi.fieldAccess(mappedShadow.owner(), mappedShadow.name(),
+                                                            mappedShadow.descriptor()) != null;
                                             if (!exists) {
-                                                String kind = shadow.method() ? "method" : "field";
-                                                incompatibility = "@Shadow " + kind + " " + mappedTarget + "#"
-                                                        + memberName + shadow.descriptor()
+                                                String memberKind = shadow.method() ? "method" : "field";
+                                                incompatibility = "@Shadow " + memberKind + " " + mappedShadow.owner() + "#"
+                                                        + mappedShadow.name() + mappedShadow.descriptor()
                                                         + " is not present with this signature in Minecraft 26.2";
                                                 break;
                                             }
                                         }
                                         if (incompatibility != null) {
                                             break;
+                                        }
+                                    }
+                                    if (incompatibility == null) {
+                                        for (MixinSelector selector : metadata.selectors()) {
+                                            String selectorProblem = MixinSelectorRemapper.incompatibilityReason(
+                                                    selector.value(), metadata.targets(), mappings, aliases, targetApi);
+                                            if (selectorProblem != null) {
+                                                incompatibility = selectorProblem;
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -401,6 +420,7 @@ public final class MixinResourceRemapper {
         int[] access = {0};
         List<String> targets = new ArrayList<>();
         List<ShadowMember> shadowMembers = new ArrayList<>();
+        List<MixinSelector> selectors = new ArrayList<>();
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public void visit(int version, int classAccess, String name, String signature,
@@ -468,24 +488,24 @@ public final class MixinResourceRemapper {
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
-                        if (!annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Shadow;")) {
-                            return null;
-                        }
-                        return new AnnotationVisitor(Opcodes.ASM9) {
-                            private String prefix = "shadow$";
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Shadow;")) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                private String prefix = "shadow$";
 
-                            @Override
-                            public void visit(String attribute, Object annotationValue) {
-                                if (attribute.equals("prefix") && annotationValue instanceof String stringValue) {
-                                    prefix = stringValue;
+                                @Override
+                                public void visit(String attribute, Object annotationValue) {
+                                    if (attribute.equals("prefix") && annotationValue instanceof String stringValue) {
+                                        prefix = stringValue;
+                                    }
                                 }
-                            }
 
-                            @Override
-                            public void visitEnd() {
-                                shadowMembers.add(new ShadowMember(true, name, descriptor, prefix));
-                            }
-                        };
+                                @Override
+                                public void visitEnd() {
+                                    shadowMembers.add(new ShadowMember(true, name, descriptor, prefix));
+                                }
+                            };
+                        }
+                        return selectorMetadataVisitor(selectors, annotationDescriptor);
                     }
                 };
             }
@@ -494,12 +514,54 @@ public final class MixinResourceRemapper {
             return null;
         }
         return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0,
-                List.copyOf(targets), List.copyOf(shadowMembers));
+                List.copyOf(targets), List.copyOf(shadowMembers), List.copyOf(selectors));
+    }
+
+    private static AnnotationVisitor selectorMetadataVisitor(List<MixinSelector> selectors,
+                                                              String annotationDescriptor) {
+        boolean atAnnotation = annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/injection/At;");
+        boolean injectionAnnotation = annotationDescriptor.startsWith(
+                "Lorg/spongepowered/asm/mixin/injection/")
+                || annotationDescriptor.startsWith("Lcom/llamalad7/mixinextras/injector/");
+        if (!atAnnotation && !injectionAnnotation) {
+            return null;
+        }
+        return new AnnotationVisitor(Opcodes.ASM9) {
+            @Override
+            public void visit(String name, Object value) {
+                if (value instanceof String stringValue
+                        && ((atAnnotation && name.equals("target"))
+                        || (injectionAnnotation && name.equals("method")))) {
+                    selectors.add(new MixinSelector(stringValue));
+                }
+            }
+
+            @Override
+            public AnnotationVisitor visitArray(String name) {
+                if (!injectionAnnotation || !name.equals("method")) {
+                    return null;
+                }
+                return new AnnotationVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visit(String ignored, Object value) {
+                        if (value instanceof String stringValue) {
+                            selectors.add(new MixinSelector(stringValue));
+                        }
+                    }
+                };
+            }
+
+            @Override
+            public AnnotationVisitor visitAnnotation(String name, String nestedDescriptor) {
+                return selectorMetadataVisitor(selectors, nestedDescriptor);
+            }
+        };
     }
 
     private record ShadowMember(boolean method, String name, String descriptor, String prefix) {}
+    private record MixinSelector(String value) {}
     private record MixinClassMetadata(boolean isInterface, List<String> targets,
-                                      List<ShadowMember> shadowMembers) {}
+                                      List<ShadowMember> shadowMembers, List<MixinSelector> selectors) {}
 
     static boolean isMixinResource(String resourceName) {
         if (resourceName == null) {
