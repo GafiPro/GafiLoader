@@ -35,7 +35,7 @@ jobs:
       - name: Run compatibility scan on real Minecraft and mod artifacts
         run: |
           mkdir -p build/real-artifact-test
-          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' -print -quit)"
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
           test -n "$agent_jar"
           java -jar "$agent_jar" \
             --game "$GAFI_REAL_TARGET_GAME" \
@@ -58,7 +58,7 @@ jobs:
           sudo apt-get install --yes xvfb libgl1-mesa-dri libglx-mesa0
       - name: Launch actual Fabric client with the legacy mod and Gafi Loader
         run: |
-          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' -print -quit)"
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
           test -n "$agent_jar"
           python3 scripts/run_fabric_client_smoke.py \
             "$RUNNER_TEMP/gafi-real-fixture" \
