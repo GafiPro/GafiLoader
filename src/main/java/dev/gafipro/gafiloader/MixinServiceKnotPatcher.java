@@ -42,7 +42,7 @@ final class MixinServiceKnotPatcher {
         AtomicBoolean patchedResourceReader = new AtomicBoolean(false);
         AtomicBoolean patchedClassBytecodeReader = new AtomicBoolean(false);
         ClassReader reader = new ClassReader(classBytes);
-        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
             @Override
             public org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
