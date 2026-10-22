@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest verification run for this branch/PR. Repeated compatibility
+# adapter commits should not leave stale queued runs behind the current result.
+concurrency:
+  group: gafi-loader-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
