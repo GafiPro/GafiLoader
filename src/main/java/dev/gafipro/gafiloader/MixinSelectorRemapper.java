@@ -70,7 +70,7 @@ final class MixinSelectorRemapper {
                     public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
                                                                  String annotationDescriptor, boolean visible) {
                         return wrap(super.visitTypeAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed);
+                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
                     }
                 };
             }
@@ -84,7 +84,7 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         return wrap(super.visitAnnotation(annotationDescriptor, visible), annotationDescriptor,
-                                targets, mappings, aliases, changed);
+                                targets, mappings, aliases, changed, descriptor);
                     }
 
                     @Override
