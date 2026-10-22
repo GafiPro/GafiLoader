@@ -10,6 +10,8 @@ import com.google.gson.JsonPrimitive;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
@@ -305,7 +307,7 @@ public final class MixinResourceRemapper {
             JsonArray retained = new JsonArray();
             boolean changedGroup = false;
             for (JsonElement entry : groupValue.getAsJsonArray()) {
-                String incompatibleTarget = null;
+                String incompatibility = null;
                 if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
                     String mixinName = entry.getAsString();
                     String classResource = mixinClassResource(mixinPackage, mixinName);
@@ -313,15 +315,39 @@ public final class MixinResourceRemapper {
                         try (InputStream input = loader.getResourceAsStream(classResource)) {
                             if (input != null) {
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
-                                if (metadata != null && !metadata.isInterface()) {
+                                if (metadata != null) {
                                     for (String targetName : metadata.targets()) {
                                         String normalized = targetName.replace('.', '/');
                                         if (normalized.startsWith("L") && normalized.endsWith(";")) {
                                             normalized = normalized.substring(1, normalized.length() - 1);
                                         }
                                         String mappedTarget = aliases.mapClass(mappings.mapClassName(normalized));
-                                        if (targetApi.isInterface(mappedTarget)) {
-                                            incompatibleTarget = mappedTarget;
+                                        if (!metadata.isInterface() && targetApi.isInterface(mappedTarget)) {
+                                            incompatibility = "target " + mappedTarget
+                                                    + " is an interface in Minecraft 26.2, but the mixin bytecode is a class";
+                                            break;
+                                        }
+                                        if (!targetApi.hasClass(mappedTarget)) {
+                                            continue;
+                                        }
+
+                                        for (ShadowMember shadow : metadata.shadowMembers()) {
+                                            String memberName = shadow.name();
+                                            if (!shadow.prefix().isEmpty() && memberName.startsWith(shadow.prefix())) {
+                                                memberName = memberName.substring(shadow.prefix().length());
+                                            }
+                                            boolean exists = shadow.method()
+                                                    ? targetApi.methodAccess(mappedTarget, memberName, shadow.descriptor()) != null
+                                                    : targetApi.fieldAccess(mappedTarget, memberName, shadow.descriptor()) != null;
+                                            if (!exists) {
+                                                String kind = shadow.method() ? "method" : "field";
+                                                incompatibility = "@Shadow " + kind + " " + mappedTarget + "#"
+                                                        + memberName + shadow.descriptor()
+                                                        + " is not present with this signature in Minecraft 26.2";
+                                                break;
+                                            }
+                                        }
+                                        if (incompatibility != null) {
                                             break;
                                         }
                                     }
@@ -334,11 +360,10 @@ public final class MixinResourceRemapper {
                     }
                 }
 
-                if (incompatibleTarget != null) {
+                if (incompatibility != null) {
                     System.err.println("[Gafi Loader] Skipping structurally incompatible mixin "
-                            + entry.getAsString() + " from " + resourceName + ": target "
-                            + incompatibleTarget + " is an interface in Minecraft 26.2, but the "
-                            + "mixin bytecode is a class. The skipped behavior is not emulated.");
+                            + entry.getAsString() + " from " + resourceName + ": "
+                            + incompatibility + ". The skipped behavior is not emulated.");
                     changedGroup = true;
                     pruned++;
                 } else {
@@ -375,6 +400,7 @@ public final class MixinResourceRemapper {
     private static MixinClassMetadata readMixinMetadata(byte[] bytes) {
         int[] access = {0};
         List<String> targets = new ArrayList<>();
+        List<ShadowMember> shadowMembers = new ArrayList<>();
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public void visit(int version, int classAccess, String name, String signature,
@@ -407,14 +433,73 @@ public final class MixinResourceRemapper {
                     }
                 };
             }
+
+            @Override
+            public FieldVisitor visitField(int fieldAccess, String name, String descriptor,
+                                           String signature, Object value) {
+                return new FieldVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Shadow;")) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            private String prefix = "shadow$";
+
+                            @Override
+                            public void visit(String attribute, Object annotationValue) {
+                                if (attribute.equals("prefix") && annotationValue instanceof String stringValue) {
+                                    prefix = stringValue;
+                                }
+                            }
+
+                            @Override
+                            public void visitEnd() {
+                                shadowMembers.add(new ShadowMember(false, name, descriptor, prefix));
+                            }
+                        };
+                    }
+                };
+            }
+
+            @Override
+            public MethodVisitor visitMethod(int methodAccess, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Shadow;")) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            private String prefix = "shadow$";
+
+                            @Override
+                            public void visit(String attribute, Object annotationValue) {
+                                if (attribute.equals("prefix") && annotationValue instanceof String stringValue) {
+                                    prefix = stringValue;
+                                }
+                            }
+
+                            @Override
+                            public void visitEnd() {
+                                shadowMembers.add(new ShadowMember(true, name, descriptor, prefix));
+                            }
+                        };
+                    }
+                };
+            }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         if (targets.isEmpty()) {
             return null;
         }
-        return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0, List.copyOf(targets));
+        return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0,
+                List.copyOf(targets), List.copyOf(shadowMembers));
     }
 
-    private record MixinClassMetadata(boolean isInterface, List<String> targets) {}
+    private record ShadowMember(boolean method, String name, String descriptor, String prefix) {}
+    private record MixinClassMetadata(boolean isInterface, List<String> targets,
+                                      List<ShadowMember> shadowMembers) {}
 
     static boolean isMixinResource(String resourceName) {
         if (resourceName == null) {
