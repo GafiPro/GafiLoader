@@ -313,9 +313,10 @@ def main() -> int:
     fabric_loader_download = Path(sys.argv[3]).resolve()
     target_game = Path(os.environ["GAFI_REAL_TARGET_GAME"]).resolve()
     mod_jar = Path(os.environ["GAFI_REAL_LEGACY_MOD"]).resolve()
+    fabric_api_jar = Path(os.environ["GAFI_REAL_FABRIC_API"]).resolve()
     intermediary_mappings = Path(os.environ["GAFI_REAL_INTERMEDIARY_MAPPINGS"]).resolve()
     legacy_mappings = Path(os.environ["GAFI_REAL_LEGACY_MAPPINGS"]).resolve()
-    for required in (target_game, mod_jar, intermediary_mappings, legacy_mappings, gafi_jar, fabric_loader_download):
+    for required in (target_game, mod_jar, fabric_api_jar, intermediary_mappings, legacy_mappings, gafi_jar, fabric_loader_download):
         if not required.is_file():
             raise RuntimeError(f"Required launch artifact not found: {required}")
 
@@ -337,9 +338,12 @@ def main() -> int:
     config_dir = game_dir / "config"
     mods_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
-    mod_destination = mods_dir / mod_jar.name
-    if not mod_destination.exists() or sha1_file(mod_destination) != sha1_file(mod_jar):
-        shutil.copy2(mod_jar, mod_destination)
+    # Keep every upstream artifact byte-for-byte intact. Fabric API is required by the
+    # pinned production mod; without it, Fabric rejects the fixture before testing the agent.
+    for source_jar in (mod_jar, fabric_api_jar):
+        destination = mods_dir / source_jar.name
+        if not destination.exists() or sha1_file(destination) != sha1_file(source_jar):
+            shutil.copy2(source_jar, destination)
 
     index_id = prepare_assets(game, assets_dir)
     classpath = collect_libraries(game, fabric_profile, libraries_root, natives_dir)
