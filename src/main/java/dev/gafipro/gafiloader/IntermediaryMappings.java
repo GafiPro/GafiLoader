@@ -37,6 +37,10 @@ final class IntermediaryMappings {
     // precomputed index instead of scanning every mapped member for every bytecode reference.
     private final Map<MemberLookupKey, MappedMember> unambiguousMembersByNameAndDescriptor;
     private final Set<MemberLookupKey> ambiguousMembersByNameAndDescriptor;
+    private final Map<MemberOwnerNameKey, String> memberNamesByOwnerAndName;
+    private final Set<MemberOwnerNameKey> ambiguousMemberNamesByOwnerAndName;
+    private final Map<MemberNameKey, String> memberNamesByName;
+    private final Set<MemberNameKey> ambiguousMemberNamesByName;
 
     private IntermediaryMappings(Map<String, String> intermediaryToNamedClasses,
                                  Map<MemberKey, MappedMember> intermediaryToNamedMembers) {
@@ -65,6 +69,37 @@ final class IntermediaryMappings {
         }
         this.unambiguousMembersByNameAndDescriptor = Map.copyOf(unambiguous);
         this.ambiguousMembersByNameAndDescriptor = Set.copyOf(ambiguous);
+
+        Map<MemberOwnerNameKey, String> byOwnerAndName = new HashMap<>();
+        Set<MemberOwnerNameKey> ambiguousByOwnerAndName = new HashSet<>();
+        Map<MemberNameKey, String> byName = new HashMap<>();
+        Set<MemberNameKey> ambiguousByName = new HashSet<>();
+        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+            MemberKey source = entry.getKey();
+            String mappedName = entry.getValue().name();
+            MemberOwnerNameKey ownerNameKey = new MemberOwnerNameKey(
+                    source.kind(), source.owner(), source.name());
+            if (!ambiguousByOwnerAndName.contains(ownerNameKey)) {
+                String previous = byOwnerAndName.putIfAbsent(ownerNameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byOwnerAndName.remove(ownerNameKey);
+                    ambiguousByOwnerAndName.add(ownerNameKey);
+                }
+            }
+
+            MemberNameKey nameKey = new MemberNameKey(source.kind(), source.name());
+            if (!ambiguousByName.contains(nameKey)) {
+                String previous = byName.putIfAbsent(nameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byName.remove(nameKey);
+                    ambiguousByName.add(nameKey);
+                }
+            }
+        }
+        this.memberNamesByOwnerAndName = Map.copyOf(byOwnerAndName);
+        this.ambiguousMemberNamesByOwnerAndName = Set.copyOf(ambiguousByOwnerAndName);
+        this.memberNamesByName = Map.copyOf(byName);
+        this.ambiguousMemberNamesByName = Set.copyOf(ambiguousByName);
     }
 
     static IntermediaryMappings load(Path tinyFileOrJar, MojangMappings mojangMappings) throws IOException {
@@ -280,8 +315,32 @@ final class IntermediaryMappings {
     }
 
     String mapMethodName(String owner, String name, String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return mapMemberName(CompatibilityScanner.SymbolKind.METHOD, owner, name);
+        }
         return normalize(new CompatibilityScanner.Reference(
                 CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    /**
+     * Remap a selector that has only a member name and no descriptor. Such selectors are legal
+     * in Mixin annotations. Prefer the direct owner/name row, then fall back only when the mapping
+     * is globally unambiguous for this Intermediary name.
+     */
+    String mapMemberName(CompatibilityScanner.SymbolKind kind, String owner, String name) {
+        MemberOwnerNameKey ownerKey = new MemberOwnerNameKey(kind, owner, name);
+        if (!ambiguousMemberNamesByOwnerAndName.contains(ownerKey)) {
+            String direct = memberNamesByOwnerAndName.get(ownerKey);
+            if (direct != null) {
+                return direct;
+            }
+        }
+
+        MemberNameKey nameKey = new MemberNameKey(kind, name);
+        if (!ambiguousMemberNamesByName.contains(nameKey)) {
+            return memberNamesByName.getOrDefault(nameKey, name);
+        }
+        return name;
     }
 
     String mapFieldName(String owner, String name, String descriptor) {
@@ -387,5 +446,9 @@ final class IntermediaryMappings {
     private record MemberLookupKey(CompatibilityScanner.SymbolKind kind, String name, String descriptor) {}
 
     private record MappedMember(String owner, String name, String descriptor) {}
+
+    private record MemberOwnerNameKey(CompatibilityScanner.SymbolKind kind, String owner, String name) {}
+
+    private record MemberNameKey(CompatibilityScanner.SymbolKind kind, String name) {}
 
 }
