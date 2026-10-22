@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * <p>Only recognized Mixin resources and class-byte reads are considered. Mapping is performed in
  * memory; no resource entry or mod JAR is modified on disk.</p>
  */
-final class MixinResourceRemapper {
+public final class MixinResourceRemapper {
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Pattern INTERNAL_CLASS = Pattern.compile(
             "net/minecraft/class_\\d+(?:\\$[A-Za-z0-9_$]+)*");
