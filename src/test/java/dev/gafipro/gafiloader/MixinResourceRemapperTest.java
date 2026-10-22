@@ -260,6 +260,10 @@ class MixinResourceRemapperTest {
 
         byte[] incompatibleClass = classMixinTargeting("example/mixins/BlockModelMixin",
                 "net/minecraft/class_1");
+        byte[] skippedBaseMixin = classMixinTargeting("example/mixins/SkippedBaseMixin",
+                "net/minecraft/class_1");
+        byte[] childOfSkippedMixin = classMixinTargetingWithSuper("example/mixins/ChildMixin",
+                "example/mixins/SkippedBaseMixin", "net/minecraft/class_2");
         byte[] missingShadowClass = classMixinWithShadow("example/mixins/SystemReportMixin",
                 "net/minecraft/class_2", "setDetail", "(Ljava/lang/String;Ljava/util/function/Supplier;)V");
         byte[] missingInjectionClass = classMixinWithMissingInjection(
@@ -270,6 +274,12 @@ class MixinResourceRemapperTest {
             public InputStream getResourceAsStream(String name) {
                 if (name.equals("example/mixins/BlockModelMixin.class")) {
                     return new ByteArrayInputStream(incompatibleClass);
+                }
+                if (name.equals("example/mixins/SkippedBaseMixin.class")) {
+                    return new ByteArrayInputStream(skippedBaseMixin);
+                }
+                if (name.equals("example/mixins/ChildMixin.class")) {
+                    return new ByteArrayInputStream(childOfSkippedMixin);
                 }
                 if (name.equals("example/mixins/SystemReportMixin.class")) {
                     return new ByteArrayInputStream(missingShadowClass);
@@ -284,7 +294,8 @@ class MixinResourceRemapperTest {
         String config = """
                 {
                   "package": "example.mixins",
-                  "client": ["BlockModelMixin", "SystemReportMixin", "SystemReportInjectionMixin", "UnchangedMixin"]
+                  "client": ["BlockModelMixin", "SkippedBaseMixin", "SystemReportMixin",
+                             "SystemReportInjectionMixin", "ChildMixin", "UnchangedMixin"]
                 }
                 """;
         String transformed;
@@ -300,6 +311,8 @@ class MixinResourceRemapperTest {
         }
 
         assertFalse(transformed.contains("BlockModelMixin"), transformed);
+        assertFalse(transformed.contains("SkippedBaseMixin"), transformed);
+        assertFalse(transformed.contains("ChildMixin"), transformed);
         assertFalse(transformed.contains("SystemReportMixin"), transformed);
         assertFalse(transformed.contains("SystemReportInjectionMixin"), transformed);
         assertTrue(transformed.contains("UnchangedMixin"), transformed);
@@ -360,6 +373,19 @@ class MixinResourceRemapperTest {
                 shadowName, shadowDescriptor, null, null);
         shadow.visitAnnotation("Lorg/spongepowered/asm/mixin/Shadow;", false).visitEnd();
         shadow.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinTargetingWithSuper(String internalName, String superName,
+                                                       String targetInternalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, internalName, null, superName, null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
