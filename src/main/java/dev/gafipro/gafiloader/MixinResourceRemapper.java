@@ -507,8 +507,8 @@ public final class MixinResourceRemapper {
         }
         String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
         String lower = normalized.toLowerCase(java.util.Locale.ROOT);
-        return lower.endsWith(".refmap.json")
-                || (lower.endsWith(".json") && lower.contains("mixin"));
+        return lower.endsWith(".json")
+                && (lower.contains("mixin") || lower.contains("refmap"));
     }
 
     static boolean isClassResource(String resourceName) {
@@ -538,14 +538,19 @@ public final class MixinResourceRemapper {
                 return original;
             }
 
+            // Mixin selector strings are ordinary annotation strings, so ASM's standard
+            // class remapper will not normalize them. Convert the supported selector attributes
+            // first, then remap the surrounding descriptors and Type values as usual.
+            byte[] selectorsRemapped = MixinSelectorRemapper.remap(original, currentMappings, aliases);
+            byte[] bytecodeInput = selectorsRemapped == null ? original : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
-                    original, currentMappings, aliases, targetApi);
-            if (remapped == null) {
+                    bytecodeInput, currentMappings, aliases, targetApi);
+            if (remapped == null && selectorsRemapped == null) {
                 return original;
             }
             System.out.println("[Gafi Loader] Normalized legacy bytecode for Mixin inspection: "
                     + requestedClassName + " (" + actualClassName + ")");
-            return remapped;
+            return remapped == null ? selectorsRemapped : remapped;
         } catch (IOException | RuntimeException exception) {
             System.err.println("[Gafi Loader] Could not normalize class bytes for Mixin inspection: "
                     + requestedClassName + "; original bytes retained: " + exception.getMessage());
