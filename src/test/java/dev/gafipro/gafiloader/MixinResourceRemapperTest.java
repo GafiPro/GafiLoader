@@ -404,6 +404,30 @@ class MixinResourceRemapperTest {
     }
 
     @Test
+    void fallsBackToAnotherClassLoaderWhenTheContextLoaderCannotResolveMixinClassResources() throws Exception {
+        byte[] expected = "mixin-bytecode".getBytes(StandardCharsets.UTF_8);
+        ClassLoader contextLoader = new ClassLoader(null) {
+            @Override
+            public InputStream getResourceAsStream(String name) {
+                return null;
+            }
+        };
+        ClassLoader modClassLoader = new ClassLoader(null) {
+            @Override
+            public InputStream getResourceAsStream(String name) {
+                return name.equals("example/mixins/MinecraftMixin.class")
+                        ? new ByteArrayInputStream(expected) : null;
+            }
+        };
+
+        try (InputStream input = MixinResourceRemapper.openMixinClassResource(
+                "example/mixins/MinecraftMixin.class", contextLoader, modClassLoader)) {
+            assertTrue(input != null, "The fallback classloader should resolve mod mixin bytes");
+            assertArrayEquals(expected, input.readAllBytes());
+        }
+    }
+
+    @Test
     void leavesUnrelatedResourcesAlone() {
         InputStream original = new ByteArrayInputStream("unchanged".getBytes(StandardCharsets.UTF_8));
         MixinResourceRemapper.configure(null, CompatibilityScanner.AliasSet.empty());
