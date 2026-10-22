@@ -55,14 +55,14 @@ final class LegacyApiBridgePatcher {
         }
 
         if (DISPLAY_SLOT.equals(className)
-                && targetApi.methodAccess(DISPLAY_SLOT, "teamColorToSlot", DISPLAY_SLOT_BRIDGE) == null
+                && targetApi.declaredMethodAccess(DISPLAY_SLOT, "teamColorToSlot", DISPLAY_SLOT_BRIDGE) == null
                 && supportsDisplaySlotBridge(targetApi)) {
             return addBridgeMethod(original, "teamColorToSlot", DISPLAY_SLOT_BRIDGE,
                     LegacyApiBridgePatcher::writeTeamColorToSlotBridge);
         }
 
         if (READ_ONLY_SCORE_INFO.equals(className)
-                && targetApi.methodAccess(READ_ONLY_SCORE_INFO, "safeFormatValue", SAFE_FORMAT_VALUE) == null
+                && targetApi.declaredMethodAccess(READ_ONLY_SCORE_INFO, "safeFormatValue", SAFE_FORMAT_VALUE) == null
                 && supportsSafeFormatValueBridge(targetApi)) {
             return addBridgeMethod(original, "safeFormatValue", SAFE_FORMAT_VALUE,
                     LegacyApiBridgePatcher::writeSafeFormatValueBridge);
