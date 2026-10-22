@@ -23,6 +23,8 @@ final class MixinSelectorRemapper {
     private static final int API = Opcodes.ASM9;
     private static final String MIXIN = "Lorg/spongepowered/asm/mixin/Mixin;";
     private static final String AT = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String ACCESSOR = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
+    private static final String INVOKER = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
     private static final String SPONGE_INJECTION_PREFIX =
             "Lorg/spongepowered/asm/mixin/injection/";
     private static final String MIXINEXTRAS_INJECTOR_PREFIX =
@@ -61,7 +63,7 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         return wrap(super.visitAnnotation(annotationDescriptor, visible), annotationDescriptor,
-                                targets, mappings, aliases, changed);
+                                targets, mappings, aliases, changed, descriptor);
                     }
 
                     @Override
@@ -96,21 +98,21 @@ final class MixinSelectorRemapper {
                     public AnnotationVisitor visitParameterAnnotation(int parameter, String annotationDescriptor,
                                                                        boolean visible) {
                         return wrap(super.visitParameterAnnotation(parameter, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed);
+                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
                     }
 
                     @Override
                     public org.objectweb.asm.AnnotationVisitor visitInsnAnnotation(int typeRef,
                             org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
                         return wrap(super.visitInsnAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed);
+                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
                     }
 
                     @Override
                     public org.objectweb.asm.AnnotationVisitor visitTryCatchAnnotation(int typeRef,
                             org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
                         return wrap(super.visitTryCatchAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed);
+                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
                     }
 
                     @Override
@@ -120,7 +122,7 @@ final class MixinSelectorRemapper {
                             boolean visible) {
                         return wrap(super.visitLocalVariableAnnotation(typeRef, typePath, start, end, index,
                                 annotationDescriptor, visible), annotationDescriptor, targets,
-                                mappings, aliases, changed);
+                                mappings, aliases, changed, descriptor);
                     }
                 };
             }
@@ -186,6 +188,13 @@ final class MixinSelectorRemapper {
                                           List<String> targets, IntermediaryMappings mappings,
                                           CompatibilityScanner.AliasSet aliases,
                                           AtomicBoolean changed) {
+        return wrap(delegate, annotationDescriptor, targets, mappings, aliases, changed, null);
+    }
+
+    private static AnnotationVisitor wrap(AnnotationVisitor delegate, String annotationDescriptor,
+                                          List<String> targets, IntermediaryMappings mappings,
+                                          CompatibilityScanner.AliasSet aliases,
+                                          AtomicBoolean changed, String enclosingMethodDescriptor) {
         if (delegate == null) {
             return null;
         }
@@ -249,7 +258,7 @@ final class MixinSelectorRemapper {
 
     private static String mapStringValue(String annotationDescriptor, String elementName, String value,
                                          List<String> targets, IntermediaryMappings mappings,
-                                         CompatibilityScanner.AliasSet aliases) {
+                                         CompatibilityScanner.AliasSet aliases, String enclosingMethodDescriptor) {
         if (value.isEmpty()) {
             return value;
         }
@@ -260,6 +269,15 @@ final class MixinSelectorRemapper {
             return value.indexOf('/') >= 0 ? mapped : mapped.replace('/', '.');
         }
 
+        if (elementName.equals("value") && annotationDescriptor.equals(ACCESSOR)) {
+            return remapAccessorOrInvoker(value, targets, mappings, aliases,
+                    enclosingMethodDescriptor, false);
+        }
+        if (elementName.equals("value") && annotationDescriptor.equals(INVOKER)) {
+            return remapAccessorOrInvoker(value, targets, mappings, aliases,
+                    enclosingMethodDescriptor, true);
+        }
+
         boolean methodSelector = elementName.equals("method")
                 && (annotationDescriptor.startsWith(SPONGE_INJECTION_PREFIX)
                     || annotationDescriptor.startsWith(MIXINEXTRAS_INJECTOR_PREFIX));
@@ -268,6 +286,48 @@ final class MixinSelectorRemapper {
             return value;
         }
         return remapSelector(value, targets, mappings, aliases);
+    }
+
+    private static String remapAccessorOrInvoker(String value, List<String> targets,
+                                                 IntermediaryMappings mappings,
+                                                 CompatibilityScanner.AliasSet aliases,
+                                                 String enclosingMethodDescriptor,
+                                                 boolean invoker) {
+        if (enclosingMethodDescriptor == null || value.isBlank()
+                || value.indexOf('(') >= 0 || value.indexOf(':') >= 0) {
+            return value;
+        }
+
+        String memberDescriptor;
+        CompatibilityScanner.SymbolKind kind;
+        if (invoker) {
+            memberDescriptor = enclosingMethodDescriptor;
+            kind = CompatibilityScanner.SymbolKind.METHOD;
+        } else {
+            Type accessor = Type.getMethodType(enclosingMethodDescriptor);
+            Type[] arguments = accessor.getArgumentTypes();
+            if (arguments.length == 0 && accessor.getReturnType().getSort() != Type.VOID) {
+                memberDescriptor = accessor.getReturnType().getDescriptor();
+            } else if (arguments.length == 1 && accessor.getReturnType().getSort() == Type.VOID) {
+                memberDescriptor = arguments[0].getDescriptor();
+            } else {
+                // This is not a simple field getter or setter; leave Mixin's normal inference alone.
+                return value;
+            }
+            kind = CompatibilityScanner.SymbolKind.FIELD;
+        }
+
+        String result = null;
+        for (String owner : targets) {
+            CompatibilityScanner.Reference normalized = mappings.normalize(
+                    new CompatibilityScanner.Reference(kind, owner, value, memberDescriptor));
+            CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
+            if (result != null && !result.equals(mapped.name())) {
+                return value;
+            }
+            result = mapped.name();
+        }
+        return result == null ? value : result;
     }
 
     /**
