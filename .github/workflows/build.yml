@@ -26,6 +26,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Validate Python integration scripts
+        run: python3 -m py_compile scripts/fetch_real_integration_fixtures.py scripts/run_fabric_client_smoke.py
       - name: Download released Fabric Loader binary for Mixin hook validation
         run: curl --fail --location --retry 3 --silent --show-error https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar --output "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
       - name: Download official Minecraft and real legacy mod fixtures
