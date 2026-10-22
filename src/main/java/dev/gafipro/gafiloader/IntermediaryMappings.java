@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -30,10 +32,39 @@ final class IntermediaryMappings {
     private final Map<String, String> intermediaryToNamedClasses;
     private final Map<MemberKey, MappedMember> intermediaryToNamedMembers;
 
+    // The inherited-member fallback is used for bytecode which names a subclass as the owner
+    // even though Intermediary records the method only on its declaring superclass. Keep a
+    // precomputed index instead of scanning every mapped member for every bytecode reference.
+    private final Map<MemberLookupKey, MappedMember> unambiguousMembersByNameAndDescriptor;
+    private final Set<MemberLookupKey> ambiguousMembersByNameAndDescriptor;
+
     private IntermediaryMappings(Map<String, String> intermediaryToNamedClasses,
                                  Map<MemberKey, MappedMember> intermediaryToNamedMembers) {
         this.intermediaryToNamedClasses = Map.copyOf(intermediaryToNamedClasses);
         this.intermediaryToNamedMembers = Map.copyOf(intermediaryToNamedMembers);
+
+        Map<MemberLookupKey, MappedMember> unambiguous = new HashMap<>();
+        Set<MemberLookupKey> ambiguous = new HashSet<>();
+        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+            MemberKey source = entry.getKey();
+            MemberLookupKey lookupKey = new MemberLookupKey(
+                    source.kind(), source.name(), source.descriptor());
+            if (ambiguous.contains(lookupKey)) {
+                continue;
+            }
+
+            MappedMember candidate = entry.getValue();
+            MappedMember previous = unambiguous.putIfAbsent(lookupKey, candidate);
+            // Owners may differ for inherited/overridden methods; only a disagreement on the
+            // resulting member name or descriptor makes the owner-less fallback unsafe.
+            if (previous != null && (!previous.name().equals(candidate.name())
+                    || !previous.descriptor().equals(candidate.descriptor()))) {
+                unambiguous.remove(lookupKey);
+                ambiguous.add(lookupKey);
+            }
+        }
+        this.unambiguousMembersByNameAndDescriptor = Map.copyOf(unambiguous);
+        this.ambiguousMembersByNameAndDescriptor = Set.copyOf(ambiguous);
     }
 
     static IntermediaryMappings load(Path tinyFileOrJar, MojangMappings mojangMappings) throws IOException {
@@ -219,23 +250,12 @@ final class IntermediaryMappings {
     }
 
     private MappedMember findUnambiguousMemberByIntermediaryName(MemberKey requested) {
-        MappedMember candidate = null;
-        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
-            MemberKey key = entry.getKey();
-            if (key.kind() != requested.kind()
-                    || !key.name().equals(requested.name())
-                    || !key.descriptor().equals(requested.descriptor())) {
-                continue;
-            }
-            MappedMember mapped = entry.getValue();
-            if (candidate == null) {
-                candidate = mapped;
-            } else if (!candidate.name().equals(mapped.name())
-                    || !candidate.descriptor().equals(mapped.descriptor())) {
-                return null;
-            }
+        MemberLookupKey key = new MemberLookupKey(
+                requested.kind(), requested.name(), requested.descriptor());
+        if (ambiguousMembersByNameAndDescriptor.contains(key)) {
+            return null;
         }
-        return candidate;
+        return unambiguousMembersByNameAndDescriptor.get(key);
     }
 
     /**
@@ -363,6 +383,8 @@ final class IntermediaryMappings {
 
     private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
                              String name, String descriptor) {}
+
+    private record MemberLookupKey(CompatibilityScanner.SymbolKind kind, String name, String descriptor) {}
 
     private record MappedMember(String owner, String name, String descriptor) {}
 
