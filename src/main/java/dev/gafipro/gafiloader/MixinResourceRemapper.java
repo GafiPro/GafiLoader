@@ -312,9 +312,10 @@ public final class MixinResourceRemapper {
             boolean changedGroup = false;
             for (JsonElement entry : groupValue.getAsJsonArray()) {
                 String incompatibility = null;
+                String classResource = null;
                 if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
                     String mixinName = entry.getAsString();
-                    String classResource = mixinClassResource(mixinPackage, mixinName);
+                    classResource = mixinClassResource(mixinPackage, mixinName);
                     if (classResource != null) {
                         try (InputStream input = loader.getResourceAsStream(classResource)) {
                             if (input != null) {
