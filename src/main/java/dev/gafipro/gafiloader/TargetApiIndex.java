@@ -101,6 +101,17 @@ final class TargetApiIndex {
         return classes.containsKey(owner);
     }
 
+    /**
+     * Looks up a method declared directly by this class, without walking its superclass
+     * or superinterfaces. Structural bridge injection uses this because static interface
+     * methods are not inherited, even if a general symbolic lookup finds a matching parent
+     * declaration.
+     */
+    Integer declaredMethodAccess(String owner, String name, String descriptor) {
+        TargetClass target = classes.get(owner);
+        return target == null ? null : target.methods().get(new MemberKey(name, descriptor));
+    }
+
     Integer methodAccess(String owner, String name, String descriptor) {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
