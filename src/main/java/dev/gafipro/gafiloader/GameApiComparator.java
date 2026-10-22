@@ -317,7 +317,8 @@ public final class GameApiComparator {
             Member empty = findMember(targetCommon, MojangMappings.SymbolKind.FIELD,
                     "EMPTY", "L" + mutableComponent + ";");
             return format != null
-                    && (format.access() & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT)) == 0
+                    // Interface implementations may be supplied by concrete score-info records.
+                    && (format.access() & Opcodes.ACC_STATIC) == 0
                     && empty != null && (empty.access() & Opcodes.ACC_STATIC) != 0;
         }
         return false;
