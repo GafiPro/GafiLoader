@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.AnnotationVisitor;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -15,6 +17,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.jar.JarOutputStream;
+import java.util.zip.ZipEntry;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -221,6 +225,90 @@ class MixinResourceRemapperTest {
                 "inject-interface net/minecraft/Foo example/LegacyInterface<Lnet/minecraft/Bar;>"), transformed);
         assertEquals(original, Files.readString(sourceFile, StandardCharsets.UTF_8),
                 "The downloaded mod/API file must remain byte-for-byte intact");
+    }
+
+    @Test
+    void skipsClassMixinWhenItsTargetBecameAnInterfaceInTheTargetGame() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("interface-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("interface-intermediary.tiny");
+        Path targetJar = temporaryDirectory.resolve("interface-target.jar");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.BlockModel -> a:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                ""));
+
+        byte[] targetInterface = interfaceClass("net/minecraft/BlockModel");
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
+            jar.putNextEntry(new ZipEntry("net/minecraft/BlockModel.class"));
+            jar.write(targetInterface);
+            jar.closeEntry();
+        }
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        byte[] incompatibleClass = classMixinTargeting("example/mixins/BlockModelMixin",
+                "net/minecraft/class_1");
+        ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
+        ClassLoader resourceLoader = new ClassLoader(originalLoader) {
+            @Override
+            public InputStream getResourceAsStream(String name) {
+                if (name.equals("example/mixins/BlockModelMixin.class")) {
+                    return new ByteArrayInputStream(incompatibleClass);
+                }
+                return super.getResourceAsStream(name);
+            }
+        };
+
+        String config = """
+                {
+                  "package": "example.mixins",
+                  "client": ["BlockModelMixin", "UnchangedMixin"]
+                }
+                """;
+        String transformed;
+        try {
+            Thread.currentThread().setContextClassLoader(resourceLoader);
+            try (InputStream stream = MixinResourceRemapper.transform(
+                    "fabric-model-loading-api-v1.mixins.json",
+                    new ByteArrayInputStream(config.getBytes(StandardCharsets.UTF_8)))) {
+                transformed = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalLoader);
+        }
+
+        assertFalse(transformed.contains("BlockModelMixin"), transformed);
+        assertTrue(transformed.contains("UnchangedMixin"), transformed);
+        assertTrue(transformed.contains("\"client\""), transformed);
+        assertTrue(config.contains("BlockModelMixin"),
+                "The original mixin-config text must remain unchanged");
+    }
+
+    private static byte[] interfaceClass(String internalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                internalName, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinTargeting(String internalName, String targetInternalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, internalName, null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     @Test
