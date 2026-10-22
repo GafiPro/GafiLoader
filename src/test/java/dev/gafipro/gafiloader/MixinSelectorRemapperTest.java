@@ -35,12 +35,14 @@ class MixinSelectorRemapperTest {
         Path intermediaryFile = temporaryDirectory.resolve("intermediary.tiny");
         Files.writeString(mojangFile, String.join("\n",
                 "net.minecraft.Foo -> a:",
+                "    net.minecraft.Bar connection -> c",
                 "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
                 "net.minecraft.Bar -> d:",
                 ""));
         Files.writeString(intermediaryFile, String.join("\n",
                 "tiny\t2\t0\tofficial\tintermediary",
                 "c\ta\tnet/minecraft/class_1",
+                "\tf\tLd;\tc\tfield_3",
                 "\tm\t(Ld;)V\tb\tmethod_2",
                 "c\td\tnet/minecraft/class_2",
                 ""));
@@ -59,6 +61,7 @@ class MixinSelectorRemapperTest {
         SelectorValues values = readSelectors(transformed);
         assertEquals("oldMethod(Lnet/minecraft/Bar;)V", values.implicitMethod());
         assertEquals("Lnet/minecraft/Foo;oldMethod(Lnet/minecraft/Bar;)V", values.explicitAtTarget());
+        assertEquals("connection", values.accessorFieldName());
         assertTrue(values.mixinTarget().contains("net/minecraft/Foo"),
                 "The standard ASM remapper should also normalize the class-valued @Mixin target");
     }
@@ -95,6 +98,14 @@ class MixinSelectorRemapperTest {
         at.visitEnd();
         inject.visitEnd();
 
+        MethodVisitor accessorMethod = writer.visitMethod(Opcodes.ACC_PUBLIC, "getConnection",
+                "()Lnet/minecraft/class_2;", null, null);
+        AnnotationVisitor accessor = accessorMethod.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/gen/Accessor;", true);
+        accessor.visit("value", "field_3");
+        accessor.visitEnd();
+        accessorMethod.visitEnd();
+
         method.visitCode();
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(0, 0);
@@ -107,6 +118,7 @@ class MixinSelectorRemapperTest {
         String[] mixinTarget = {""};
         String[] implicitMethod = {""};
         String[] explicitAtTarget = {""};
+        String[] accessorFieldName = {""};
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
@@ -134,6 +146,16 @@ class MixinSelectorRemapperTest {
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/gen/Accessor;")) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                @Override
+                                public void visit(String name, Object value) {
+                                    if (name.equals("value") && value instanceof String stringValue) {
+                                        accessorFieldName[0] = stringValue;
+                                    }
+                                }
+                            };
+                        }
                         if (!annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")) {
                             return null;
                         }
@@ -174,8 +196,10 @@ class MixinSelectorRemapperTest {
                 };
             }
         }, 0);
-        return new SelectorValues(mixinTarget[0], implicitMethod[0], explicitAtTarget[0]);
+        return new SelectorValues(mixinTarget[0], implicitMethod[0], explicitAtTarget[0],
+                accessorFieldName[0]);
     }
 
-    private record SelectorValues(String mixinTarget, String implicitMethod, String explicitAtTarget) {}
+    private record SelectorValues(String mixinTarget, String implicitMethod, String explicitAtTarget,
+                                  String accessorFieldName) {}
 }
