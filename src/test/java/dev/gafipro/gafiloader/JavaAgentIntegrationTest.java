@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JavaAgentIntegrationTest {
@@ -52,4 +53,25 @@ class JavaAgentIntegrationTest {
         assertTrue(output.contains("Runtime game-side compatibility agent active"),
                 "Agent premain did not run. Output:\n" + output);
     }
+    @Test
+    void shadedAgentRelocatesAsmAwayFromFabricReservedNamespace() throws Exception {
+        String agentJarSetting = System.getProperty("gafi.loader.agent.jar");
+        assertNotNull(agentJarSetting, "Gradle must provide the built self-contained agent JAR");
+        Path agentJar = Path.of(agentJarSetting);
+        assertTrue(Files.isRegularFile(agentJar), "Agent JAR not found: " + agentJar);
+
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(agentJar.toFile())) {
+            assertNull(jar.getJarEntry("org/objectweb/asm/ClassReader.class"),
+                    "The javaagent must not publish ASM in Fabric's reserved package");
+            assertNotNull(jar.getJarEntry("dev/gafipro/gafiloader/internal/asm/ClassReader.class"),
+                    "The javaagent must contain the relocated ASM runtime");
+            java.util.jar.Manifest manifest = jar.getManifest();
+            assertNotNull(manifest, "The executable agent JAR needs a manifest");
+            assertEquals("dev.gafipro.gafiloader.GameSideCompatibilityAgent",
+                    manifest.getMainAttributes().getValue("Premain-Class"));
+            assertEquals("dev.gafipro.gafiloader.Main",
+                    manifest.getMainAttributes().getValue("Main-Class"));
+        }
+    }
+
 }
