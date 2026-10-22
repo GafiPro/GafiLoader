@@ -169,6 +169,13 @@ class LegacyApiBridgePatcherTest {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ENUM,
                 CHAT_FORMATTING, null, "java/lang/Enum", null);
+        String[] colors = {"BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA", "DARK_RED",
+                "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE", "GREEN", "AQUA",
+                "RED", "LIGHT_PURPLE", "YELLOW", "WHITE"};
+        for (String color : colors) {
+            writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM,
+                    color, "L" + CHAT_FORMATTING + ";", null, null).visitEnd();
+        }
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "isColor", "()Z", null, null);
         method.visitCode();
         method.visitInsn(Opcodes.ICONST_1);
