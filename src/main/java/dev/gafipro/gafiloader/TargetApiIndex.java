@@ -116,6 +116,29 @@ final class TargetApiIndex {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
 
+    boolean hasMethodNamed(String owner, String name) {
+        return hasMethodNamed(owner, name, new HashSet<>());
+    }
+
+    private boolean hasMethodNamed(String owner, String name, Set<String> visited) {
+        if (owner == null || !visited.add(owner)) {
+            return false;
+        }
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return false;
+        }
+        if (target.methods().keySet().stream().anyMatch(member -> member.name().equals(name))) {
+            return true;
+        }
+        for (String interfaceName : target.interfaces()) {
+            if (hasMethodNamed(interfaceName, name, visited)) {
+                return true;
+            }
+        }
+        return hasMethodNamed(target.superName(), name, visited);
+    }
+
     private Integer methodAccess(String owner, MemberKey key, Set<String> visited) {
         if (owner == null || !visited.add(owner)) {
             return null;
