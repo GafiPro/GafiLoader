@@ -177,6 +177,10 @@ class RealModArtifactIntegrationTest {
         }
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
+        if (!exited || process.exitValue() != 0) {
+            System.err.println("REAL_TARGET_AGENT_SMOKE_FAILURE_BEGIN\\n" + output
+                    + "\\nREAL_TARGET_AGENT_SMOKE_FAILURE_END");
+        }
         assertTrue(exited, "Official target agent smoke subprocess timed out. Output:\n" + output);
         assertEquals(0, process.exitValue(), "Official target agent smoke subprocess failed. Output:\n" + output);
         assertTrue(output.contains("Added in-memory legacy API bridge to net/minecraft/world/scores/DisplaySlot"),
