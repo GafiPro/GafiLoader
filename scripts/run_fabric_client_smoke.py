@@ -447,7 +447,7 @@ def main() -> int:
     env = os.environ.copy()
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
     env["MESA_GL_VERSION_OVERRIDE"] = "4.6"
-    mod_id = read_mod_id(mod_destination).lower()
+    mod_id = read_mod_id(mods_dir / mod_jar.name).lower()
 
     print(f"Starting actual Fabric client with mod id '{mod_id}' (timeout {LAUNCH_TIMEOUT_SECONDS}s)...", flush=True)
     print("Launch main class: " + main_class, flush=True)
