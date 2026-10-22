@@ -32,6 +32,7 @@ class LegacyApiBridgePatcherTest {
     private static final String NUMBER_FORMAT = "net/minecraft/network/chat/numbers/NumberFormat";
     private static final String MUTABLE_COMPONENT = "net/minecraft/network/chat/MutableComponent";
     private static final String COMMON_COMPONENTS = "net/minecraft/network/chat/CommonComponents";
+    private static final String COMPONENT = "net/minecraft/network/chat/Component";
     private static final String SAFE_DESC =
             "(Lnet/minecraft/world/scores/ReadOnlyScoreInfo;"
                     + "Lnet/minecraft/network/chat/numbers/NumberFormat;)"
@@ -70,7 +71,7 @@ class LegacyApiBridgePatcherTest {
         assertNotNull(api.methodAccess(READ_ONLY_SCORE_INFO, "formatValue",
                 "(L" + NUMBER_FORMAT + ";)L" + MUTABLE_COMPONENT + ";"),
                 "Official target is missing ReadOnlyScoreInfo.formatValue");
-        Integer commonEmpty = api.fieldAccess(COMMON_COMPONENTS, "EMPTY", "L" + MUTABLE_COMPONENT + ";");
+        Integer commonEmpty = api.fieldAccess(COMMON_COMPONENTS, "EMPTY", "L" + COMPONENT + ";");
         assertNotNull(commonEmpty, "Official target is missing CommonComponents.EMPTY");
         assertTrue((commonEmpty & Opcodes.ACC_STATIC) != 0, "CommonComponents.EMPTY is not static");
         assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(READ_ONLY_SCORE_INFO, scoreBytes, api),
@@ -102,7 +103,8 @@ class LegacyApiBridgePatcherTest {
         assertNotNull(patched);
         List<String> instructions = methodInstructions(patched, "safeFormatValue", SAFE_DESC);
         assertTrue(instructions.contains("FIELD " + COMMON_COMPONENTS + "#EMPTY:L"
-                + MUTABLE_COMPONENT + ";"));
+                + COMPONENT + ";"));
+        assertTrue(instructions.contains("TYPE " + Opcodes.CHECKCAST + " " + MUTABLE_COMPONENT));
         assertTrue(instructions.contains("CALL " + READ_ONLY_SCORE_INFO + "#formatValue"
                 + "(L" + NUMBER_FORMAT + ";)L" + MUTABLE_COMPONENT + ";"));
         assertTrue(instructions.contains("JUMP " + Opcodes.IFNONNULL));
@@ -136,7 +138,8 @@ class LegacyApiBridgePatcherTest {
         entries.add(new Entry(CHAT_FORMATTING + ".class", chatFormattingClass()));
         entries.add(new Entry(READ_ONLY_SCORE_INFO + ".class", readOnlyScoreInfoClass()));
         entries.add(new Entry(NUMBER_FORMAT + ".class", emptyClass(NUMBER_FORMAT, Opcodes.ACC_PUBLIC)));
-        entries.add(new Entry(MUTABLE_COMPONENT + ".class", emptyClass(MUTABLE_COMPONENT, Opcodes.ACC_PUBLIC)));
+        entries.add(new Entry(COMPONENT + ".class", componentClass()));
+        entries.add(new Entry(MUTABLE_COMPONENT + ".class", mutableComponentClass()));
         entries.add(new Entry(COMMON_COMPONENTS + ".class", commonComponentsClass()));
         if (!includeFormatBridge) {
             entries.removeIf(entry -> entry.name().equals(COMMON_COMPONENTS + ".class"));
@@ -205,7 +208,23 @@ class LegacyApiBridgePatcherTest {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, COMMON_COMPONENTS, null, "java/lang/Object", null);
         writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
-                "EMPTY", "L" + MUTABLE_COMPONENT + ";", null, null).visitEnd();
+                "EMPTY", "L" + COMPONENT + ";", null, null).visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] componentClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                COMPONENT, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] mutableComponentClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, MUTABLE_COMPONENT, null, "java/lang/Object",
+                new String[]{COMPONENT});
         writer.visitEnd();
         return writer.toByteArray();
     }
@@ -227,6 +246,9 @@ class LegacyApiBridgePatcherTest {
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override public void visitFieldInsn(int opcode, String owner, String name, String desc) {
                         instructions.add("FIELD " + owner + "#" + name + ":" + desc);
+                    }
+                    @Override public void visitTypeInsn(int opcode, String type) {
+                        instructions.add("TYPE " + opcode + " " + type);
                     }
                     @Override public void visitMethodInsn(int opcode, String owner, String name,
                                                           String desc, boolean isInterface) {
