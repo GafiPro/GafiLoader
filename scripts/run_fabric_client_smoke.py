@@ -285,7 +285,7 @@ def capture_runtime_diagnostics() -> str:
         sections.append("===== jcmd -l =====\n" + listing.stdout)
         pids: list[str] = []
         for line in listing.stdout.splitlines():
-            match = re.match(r"^\\s*(\\d+)\\s+(.*)$", line)
+            match = re.match(r"^\s*(\d+)\s+(.*)$", line)
             if match and "jdk.jcmd" not in match.group(2):
                 pids.append(match.group(1))
         for pid in pids[:5]:
@@ -295,12 +295,12 @@ def capture_runtime_diagnostics() -> str:
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=20, check=False,
                 )
-                sections.append(f"===== JVM {pid} Thread.print -l (exit {dump.returncode}) =====\\n" + dump.stdout)
+                sections.append(f"===== JVM {pid} Thread.print -l (exit {dump.returncode}) =====\n" + dump.stdout)
             except (OSError, subprocess.TimeoutExpired) as error:
                 sections.append(f"Could not capture JVM {pid} thread dump: {error}")
     except (OSError, subprocess.TimeoutExpired) as error:
         sections.append(f"Could not list JVMs with jcmd: {error}")
-    return "\\n\\n".join(sections) + "\\n"
+    return "\n\n".join(sections) + "\n"
 
 
 def main() -> int:
@@ -496,8 +496,8 @@ def main() -> int:
     console_text = console_path.read_text(encoding="utf-8", errors="replace")
     if runtime_diagnostics:
         with console_path.open("a", encoding="utf-8") as console:
-            console.write("\\n\\n" + runtime_diagnostics)
-        console_text += "\\n\\n" + runtime_diagnostics
+            console.write("\n\n" + runtime_diagnostics)
+        console_text += "\n\n" + runtime_diagnostics
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
     if not success_reason:
         print("===== Minecraft latest.log =====", flush=True)
