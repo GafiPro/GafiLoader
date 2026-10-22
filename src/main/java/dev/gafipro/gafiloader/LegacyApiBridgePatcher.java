@@ -29,6 +29,7 @@ final class LegacyApiBridgePatcher {
     private static final String NUMBER_FORMAT = "net/minecraft/network/chat/numbers/NumberFormat";
     private static final String MUTABLE_COMPONENT = "net/minecraft/network/chat/MutableComponent";
     private static final String COMMON_COMPONENTS = "net/minecraft/network/chat/CommonComponents";
+    private static final String COMPONENT = "net/minecraft/network/chat/Component";
     private static final String SAFE_FORMAT_VALUE =
             "(Lnet/minecraft/world/scores/ReadOnlyScoreInfo;"
                     + "Lnet/minecraft/network/chat/numbers/NumberFormat;)"
@@ -94,10 +95,12 @@ final class LegacyApiBridgePatcher {
 
     private static boolean supportsSafeFormatValueBridge(TargetApiIndex targetApi) {
         Integer formatAccess = targetApi.methodAccess(READ_ONLY_SCORE_INFO, "formatValue", FORMAT_VALUE);
-        Integer emptyAccess = targetApi.fieldAccess(COMMON_COMPONENTS, "EMPTY", "L" + MUTABLE_COMPONENT + ";");
+        Integer emptyAccess = targetApi.fieldAccess(COMMON_COMPONENTS, "EMPTY", "L" + COMPONENT + ";");
         return targetApi.hasClass(READ_ONLY_SCORE_INFO)
                 && targetApi.isInterface(READ_ONLY_SCORE_INFO)
                 && targetApi.hasClass(COMMON_COMPONENTS)
+                && targetApi.hasClass(COMPONENT)
+                && targetApi.hasClass(MUTABLE_COMPONENT)
                 && formatAccess != null
                 // formatValue is legitimately abstract on the ReadOnlyScoreInfo interface.
                 // INVOKEINTERFACE dispatches to the concrete implementation at runtime.
@@ -209,7 +212,10 @@ final class LegacyApiBridgePatcher {
         Label nonNull = new Label();
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitJumpInsn(Opcodes.IFNONNULL, nonNull);
-        method.visitFieldInsn(Opcodes.GETSTATIC, COMMON_COMPONENTS, "EMPTY", "L" + MUTABLE_COMPONENT + ";");
+        method.visitFieldInsn(Opcodes.GETSTATIC, COMMON_COMPONENTS, "EMPTY", "L" + COMPONENT + ";");
+        // 26.2 exposes EMPTY as Component, while the removed 1.21.11 method returns MutableComponent.
+        // The constant is initialized via Component.empty(), which creates a MutableComponent.
+        method.visitTypeInsn(Opcodes.CHECKCAST, MUTABLE_COMPONENT);
         method.visitInsn(Opcodes.ARETURN);
 
         method.visitLabel(nonNull);
