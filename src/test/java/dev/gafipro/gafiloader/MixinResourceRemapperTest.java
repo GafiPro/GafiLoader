@@ -262,6 +262,8 @@ class MixinResourceRemapperTest {
                 "net/minecraft/class_1");
         byte[] missingShadowClass = classMixinWithShadow("example/mixins/SystemReportMixin",
                 "net/minecraft/class_2", "setDetail", "(Ljava/lang/String;Ljava/util/function/Supplier;)V");
+        byte[] missingInjectionClass = classMixinWithMissingInjection(
+                "example/mixins/SystemReportInjectionMixin", "net/minecraft/class_2", "destroy()V");
         ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
         ClassLoader resourceLoader = new ClassLoader(originalLoader) {
             @Override
@@ -272,6 +274,9 @@ class MixinResourceRemapperTest {
                 if (name.equals("example/mixins/SystemReportMixin.class")) {
                     return new ByteArrayInputStream(missingShadowClass);
                 }
+                if (name.equals("example/mixins/SystemReportInjectionMixin.class")) {
+                    return new ByteArrayInputStream(missingInjectionClass);
+                }
                 return super.getResourceAsStream(name);
             }
         };
@@ -279,7 +284,7 @@ class MixinResourceRemapperTest {
         String config = """
                 {
                   "package": "example.mixins",
-                  "client": ["BlockModelMixin", "SystemReportMixin", "UnchangedMixin"]
+                  "client": ["BlockModelMixin", "SystemReportMixin", "SystemReportInjectionMixin", "UnchangedMixin"]
                 }
                 """;
         String transformed;
@@ -296,6 +301,7 @@ class MixinResourceRemapperTest {
 
         assertFalse(transformed.contains("BlockModelMixin"), transformed);
         assertFalse(transformed.contains("SystemReportMixin"), transformed);
+        assertFalse(transformed.contains("SystemReportInjectionMixin"), transformed);
         assertTrue(transformed.contains("UnchangedMixin"), transformed);
         assertTrue(transformed.contains("\"client\""), transformed);
         assertTrue(config.contains("BlockModelMixin"),
@@ -314,6 +320,28 @@ class MixinResourceRemapperTest {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, internalName, null,
                 "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinWithMissingInjection(String internalName, String targetInternalName,
+                                                         String selector) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, internalName, null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+        MethodVisitor injectMethod = writer.visitMethod(Opcodes.ACC_PUBLIC, "injected", "()V", null, null);
+        AnnotationVisitor inject = injectMethod.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;", false);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, selector);
+        methods.visitEnd();
+        inject.visitEnd();
+        injectMethod.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
