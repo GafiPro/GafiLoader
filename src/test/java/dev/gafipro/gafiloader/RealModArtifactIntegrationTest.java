@@ -2,20 +2,27 @@ package dev.gafipro.gafiloader;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassReader;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -28,6 +35,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * to the stored JAR.</p>
  */
 class RealModArtifactIntegrationTest {
+    @TempDir
+    Path temporaryDirectory;
+
     private static final String TARGET_GAME_PROPERTY = "gafi.loader.real.target.jar";
     private static final String LEGACY_MOD_PROPERTY = "gafi.loader.real.mod.jar";
     private static final String INTERMEDIARY_PROPERTY = "gafi.loader.real.intermediary.jar";
@@ -120,6 +130,61 @@ class RealModArtifactIntegrationTest {
                 summary.targetClassesIndexed(), classFiles, transformedClasses,
                 summary.referencesInspected(), summary.findingCount(), mixinJsonResources);
         System.out.println("This verifies real artifact scanning and in-memory normalization; it does not prove in-game behavior.");
+    }
+
+    @Test
+    void packagedAgentInjectsBridgesIntoClassesFromOfficialMinecraft262() throws Exception {
+        String targetValue = System.getProperty(TARGET_GAME_PROPERTY);
+        String intermediaryValue = System.getProperty(INTERMEDIARY_PROPERTY);
+        String mappingsValue = System.getProperty(LEGACY_MAPPINGS_PROPERTY);
+        assumeTrue(targetValue != null && intermediaryValue != null && mappingsValue != null,
+                "Official Minecraft fixture properties are only configured by real-artifact CI.");
+
+        Path targetGame = requireFile(targetValue);
+        Path intermediaryJar = requireFile(intermediaryValue);
+        Path legacyMappingsFile = requireFile(mappingsValue);
+        String agentJarValue = System.getProperty("gafi.loader.agent.jar");
+        assertNotNull(agentJarValue, "Gradle must provide the self-contained agent JAR");
+        Path agentJar = requireFile(agentJarValue);
+
+        Properties config = new Properties();
+        config.setProperty("targetGameJar", targetGame.toString());
+        config.setProperty("intermediaryMappings", intermediaryJar.toString());
+        config.setProperty("legacyMappings", legacyMappingsFile.toString());
+        Path configPath = temporaryDirectory.resolve("official-26.2-agent.properties");
+        try (OutputStream output = Files.newOutputStream(configPath)) {
+            config.store(output, "Gafi Loader official Minecraft 26.2 agent smoke test");
+        }
+
+        Path javaExecutable = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")
+                        ? "java.exe" : "java");
+        String classpath = System.getProperty("java.class.path")
+                + File.pathSeparator + targetGame;
+        Process process = new ProcessBuilder(
+                javaExecutable.toString(),
+                "-Xverify:all",
+                "-javaagent:" + agentJar + "=" + configPath,
+                "-cp", classpath,
+                "dev.gafipro.gafiloader.RealTargetAgentSmokeMain")
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(60, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(5, TimeUnit.SECONDS);
+        }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertTrue(exited, "Official target agent smoke subprocess timed out. Output:\n" + output);
+        assertEquals(0, process.exitValue(), "Official target agent smoke subprocess failed. Output:\n" + output);
+        assertTrue(output.contains("Added in-memory legacy API bridge to net/minecraft/world/scores/DisplaySlot"),
+                "The packaged agent did not inject the DisplaySlot bridge. Output:\n" + output);
+        assertTrue(output.contains("Added in-memory legacy API bridge to net/minecraft/world/scores/ReadOnlyScoreInfo"),
+                "The packaged agent did not inject the ReadOnlyScoreInfo bridge. Output:\n" + output);
+        assertTrue(output.contains("REAL_TARGET_AGENT_BRIDGES_OK"),
+                "The real target classes did not expose both injected methods. Output:\n" + output);
     }
 
     private static Path requireFile(String value) {
