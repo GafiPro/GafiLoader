@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -50,8 +51,6 @@ class LegacyApiBridgePatcherTest {
 
         assertTrue(api.hasClass(DISPLAY_SLOT), "Official target is missing " + DISPLAY_SLOT);
         assertTrue(api.hasClass(CHAT_FORMATTING), "Official target is missing " + CHAT_FORMATTING);
-        assertNotNull(api.methodAccess(CHAT_FORMATTING, "isColor", "()Z"),
-                "Official target is missing ChatFormatting.isColor()Z");
         for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
                 "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
                 "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
@@ -59,6 +58,11 @@ class LegacyApiBridgePatcherTest {
             assertNotNull(access, "Official target is missing DisplaySlot.TEAM_" + color);
             assertTrue((access & Opcodes.ACC_STATIC) != 0,
                     "DisplaySlot.TEAM_" + color + " is not static in the target");
+            Integer formattingAccess = api.fieldAccess(CHAT_FORMATTING, color,
+                    "L" + CHAT_FORMATTING + ";");
+            assertNotNull(formattingAccess, "Official target is missing ChatFormatting." + color);
+            assertTrue((formattingAccess & Opcodes.ACC_STATIC) != 0,
+                    "ChatFormatting." + color + " is not static in the target");
         }
         assertNotNull(LegacyApiBridgePatcher.transformClassForRuntime(DISPLAY_SLOT, displayBytes, api),
                 "Official target should support the verified DisplaySlot bridge");
@@ -82,7 +86,9 @@ class LegacyApiBridgePatcherTest {
         assertNotNull(patched);
         List<String> instructions = methodInstructions(patched, "teamColorToSlot", "(L"
                 + CHAT_FORMATTING + ";)L" + DISPLAY_SLOT + ";");
-        assertTrue(instructions.contains("CALL " + CHAT_FORMATTING + "#isColor()Z"));
+        assertTrue(instructions.contains("CALL java/lang/Enum#name()Ljava/lang/String;"));
+        assertTrue(instructions.contains("CALL java/lang/String#equals(Ljava/lang/Object;)Z"));
+        assertFalse(instructions.contains("CALL " + CHAT_FORMATTING + "#isColor()Z"));
         assertTrue(instructions.contains("CALL java/lang/Enum#name()Ljava/lang/String;"));
         assertTrue(instructions.contains("CALL java/lang/Enum#valueOf(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;"));
     }
