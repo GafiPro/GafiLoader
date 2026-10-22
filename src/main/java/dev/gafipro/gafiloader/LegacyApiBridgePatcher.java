@@ -99,7 +99,9 @@ final class LegacyApiBridgePatcher {
                 && targetApi.isInterface(READ_ONLY_SCORE_INFO)
                 && targetApi.hasClass(COMMON_COMPONENTS)
                 && formatAccess != null
-                && (formatAccess & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_STATIC)) == 0
+                // formatValue is legitimately abstract on the ReadOnlyScoreInfo interface.
+                // INVOKEINTERFACE dispatches to the concrete implementation at runtime.
+                && (formatAccess & Opcodes.ACC_STATIC) == 0
                 && emptyAccess != null
                 && (emptyAccess & Opcodes.ACC_STATIC) != 0;
     }
