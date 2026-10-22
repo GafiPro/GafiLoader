@@ -270,9 +270,103 @@ final class MixinSelectorRemapper {
         return remapSelector(value, targets, mappings, aliases);
     }
 
+    /**
+     * Returns a reason when a fully specified Minecraft member selector cannot resolve in the
+     * current target game. Unsupported/wildcard selectors are left to Mixin's own parser.
+     */
+    static String incompatibilityReason(String selector, List<String> targets,
+                                        IntermediaryMappings mappings,
+                                        CompatibilityScanner.AliasSet aliases,
+                                        TargetApiIndex targetApi) {
+        if (selector == null || selector.isBlank() || targetApi == null) {
+            return null;
+        }
+        boolean optional = selector.startsWith("?");
+        String unwrapped = optional ? selector.substring(1) : selector;
+        String mapped = remapSelector(unwrapped, targets, mappings, aliases);
+        if (mapped == null || mapped.equals(unwrapped)) {
+            // A selector that only needs descriptor normalization may still change even if the
+            // member name stays the same; remapSelector handles that. If no full signature exists,
+            // we deliberately do not guess.
+        }
+
+        if (mapped.startsWith("L")) {
+            int ownerEnd = mapped.indexOf(';');
+            if (ownerEnd <= 1 || ownerEnd + 1 >= mapped.length()) {
+                return null;
+            }
+            String owner = mapped.substring(1, ownerEnd);
+            if (!owner.startsWith("net/minecraft/")) {
+                return null;
+            }
+            String member = mapped.substring(ownerEnd + 1);
+            ParsedSelector parsed = parseMember(member);
+            if (parsed == null) {
+                return null;
+            }
+            if (!targetApi.hasClass(owner)) {
+                return optional ? null : "selector owner class " + owner + " is absent from Minecraft 26.2";
+            }
+            boolean exists = parsed.method()
+                    ? targetApi.methodAccess(owner, parsed.name(), parsed.descriptor()) != null
+                    : targetApi.fieldAccess(owner, parsed.name(), parsed.descriptor()) != null;
+            if (!exists && !optional) {
+                return "selector " + mapped + " does not exist in Minecraft 26.2";
+            }
+            return null;
+        }
+
+        int descriptorStart = mapped.indexOf('(');
+        if (descriptorStart <= 0) {
+            return null;
+        }
+        String name = mapped.substring(0, descriptorStart);
+        String descriptor = mapped.substring(descriptorStart);
+        if (name.contains("*") || name.contains("/") || name.contains(";")) {
+            return null;
+        }
+        for (String rawTarget : targets) {
+            String owner = aliases.mapClass(mappings.mapClassName(rawTarget));
+            if (!owner.startsWith("net/minecraft/")) {
+                continue;
+            }
+            if (!targetApi.hasClass(owner)) {
+                if (!optional) {
+                    return "target class " + owner + " is absent from Minecraft 26.2";
+                }
+                continue;
+            }
+            if (targetApi.methodAccess(owner, name, descriptor) == null && !optional) {
+                return "selector " + name + descriptor + " does not resolve on " + owner
+                        + " in Minecraft 26.2";
+            }
+        }
+        return null;
+    }
+
+    private static ParsedSelector parseMember(String selector) {
+        int methodStart = selector.indexOf('(');
+        int fieldSeparator = selector.indexOf(':');
+        if (methodStart > 0 && (fieldSeparator < 0 || methodStart < fieldSeparator)) {
+            return new ParsedSelector(true, selector.substring(0, methodStart),
+                    selector.substring(methodStart));
+        }
+        if (fieldSeparator > 0) {
+            return new ParsedSelector(false, selector.substring(0, fieldSeparator),
+                    selector.substring(fieldSeparator + 1));
+        }
+        return null;
+    }
+
+    private record ParsedSelector(boolean method, String name, String descriptor) {}
+
     private static String remapSelector(String selector, List<String> targets,
                                         IntermediaryMappings mappings,
                                         CompatibilityScanner.AliasSet aliases) {
+        String optionalPrefix = selector.startsWith("?") ? "?" : "";
+        if (!optionalPrefix.isEmpty()) {
+            selector = selector.substring(1);
+        }
         // Explicit-owner member selectors use Mixin's Lowner;name(desc) or Lowner;field:desc syntax.
         if (selector.startsWith("L")) {
             int ownerEnd = selector.indexOf(';');
@@ -281,7 +375,7 @@ final class MixinSelectorRemapper {
                 String memberSelector = selector.substring(ownerEnd + 1);
                 String mapped = remapOwnedMember(owner, memberSelector, mappings, aliases);
                 if (mapped != null) {
-                    return "L" + mapped;
+                    return optionalPrefix + "L" + mapped;
                 }
             }
         }
@@ -289,12 +383,12 @@ final class MixinSelectorRemapper {
         // Ownerless injection selectors are relative to @Mixin's target(s).
         int descriptorStart = selector.indexOf('(');
         if (descriptorStart <= 0) {
-            return selector;
+            return optionalPrefix + selector;
         }
         String name = selector.substring(0, descriptorStart);
         String descriptor = selector.substring(descriptorStart);
         if (name.contains("*") || name.contains("/") || name.contains(";")) {
-            return selector;
+            return optionalPrefix + selector;
         }
 
         String result = null;
@@ -305,11 +399,11 @@ final class MixinSelectorRemapper {
             CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
             String candidate = mapped.name() + mapped.descriptor();
             if (result != null && !result.equals(candidate)) {
-                return selector;
+                return optionalPrefix + selector;
             }
             result = candidate;
         }
-        return result == null ? selector : result;
+        return optionalPrefix + (result == null ? selector : result);
     }
 
     private static String remapOwnedMember(String owner, String selector,
