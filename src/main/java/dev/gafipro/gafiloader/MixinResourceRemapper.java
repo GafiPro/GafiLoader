@@ -26,6 +26,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,6 +49,7 @@ public final class MixinResourceRemapper {
     private static volatile CompatibilityScanner.AliasSet aliases =
             CompatibilityScanner.AliasSet.empty();
     private static volatile TargetApiIndex targetApi;
+    private static final Set<String> STRUCTURALLY_SKIPPED_MIXINS = ConcurrentHashMap.newKeySet();
 
     private MixinResourceRemapper() {}
 
@@ -62,6 +65,7 @@ public final class MixinResourceRemapper {
         aliases = bytecodeAliases == null
                 ? CompatibilityScanner.AliasSet.empty() : bytecodeAliases;
         targetApi = targetApiIndex;
+        STRUCTURALLY_SKIPPED_MIXINS.clear();
     }
 
     /**
@@ -316,7 +320,15 @@ public final class MixinResourceRemapper {
                             if (input != null) {
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
                                 if (metadata != null) {
+                                    if (metadata.superName() != null
+                                            && STRUCTURALLY_SKIPPED_MIXINS.contains(metadata.superName())) {
+                                        incompatibility = "superclass Mixin " + metadata.superName()
+                                                + " was skipped because its target is incompatible with Minecraft 26.2";
+                                    }
                                     for (String targetName : metadata.targets()) {
+                                        if (incompatibility != null) {
+                                            break;
+                                        }
                                         String normalized = targetName.replace('.', '/');
                                         if (normalized.startsWith("L") && normalized.endsWith(";")) {
                                             normalized = normalized.substring(1, normalized.length() - 1);
@@ -359,6 +371,31 @@ public final class MixinResourceRemapper {
                                         if (incompatibility != null) {
                                             break;
                                         }
+                                        for (AccessorTarget accessor : metadata.accessorTargets()) {
+                                            CompatibilityScanner.SymbolKind kind = accessor.method()
+                                                    ? CompatibilityScanner.SymbolKind.METHOD
+                                                    : CompatibilityScanner.SymbolKind.FIELD;
+                                            CompatibilityScanner.Reference normalizedAccessor = mappings.normalize(
+                                                    new CompatibilityScanner.Reference(kind, normalized,
+                                                            accessor.name(), accessor.descriptor()));
+                                            CompatibilityScanner.Reference mappedAccessor = aliases.normalize(normalizedAccessor);
+                                            boolean exists = accessor.method()
+                                                    ? targetApi.methodAccess(mappedAccessor.owner(), mappedAccessor.name(),
+                                                            mappedAccessor.descriptor()) != null
+                                                    : targetApi.fieldAccess(mappedAccessor.owner(), mappedAccessor.name(),
+                                                            mappedAccessor.descriptor()) != null;
+                                            if (!exists) {
+                                                String memberKind = accessor.method() ? "method" : "field";
+                                                incompatibility = "@Accessor/@Invoker " + memberKind + " "
+                                                        + mappedAccessor.owner() + "#" + mappedAccessor.name()
+                                                        + mappedAccessor.descriptor()
+                                                        + " is not present with this signature in Minecraft 26.2";
+                                                break;
+                                            }
+                                        }
+                                        if (incompatibility != null) {
+                                            break;
+                                        }
                                     }
                                     if (incompatibility == null) {
                                         for (MixinSelector selector : metadata.selectors()) {
@@ -384,6 +421,12 @@ public final class MixinResourceRemapper {
                             + entry.getAsString() + " from " + resourceName + ": "
                             + incompatibility + ". The skipped behavior is not emulated.");
                     changedGroup = true;
+                    if (classResource != null) {
+                        String internalName = classResource.endsWith(".class")
+                                ? classResource.substring(0, classResource.length() - ".class".length())
+                                : classResource;
+                        STRUCTURALLY_SKIPPED_MIXINS.add(internalName);
+                    }
                     pruned++;
                 } else {
                     retained.add(entry);
@@ -418,14 +461,17 @@ public final class MixinResourceRemapper {
 
     private static MixinClassMetadata readMixinMetadata(byte[] bytes) {
         int[] access = {0};
+        String[] superNameHolder = {null};
         List<String> targets = new ArrayList<>();
         List<ShadowMember> shadowMembers = new ArrayList<>();
+        List<AccessorTarget> accessorTargets = new ArrayList<>();
         List<MixinSelector> selectors = new ArrayList<>();
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public void visit(int version, int classAccess, String name, String signature,
                               String superName, String[] interfaces) {
                 access[0] = classAccess;
+                superNameHolder[0] = superName;
             }
 
             @Override
@@ -505,6 +551,12 @@ public final class MixinResourceRemapper {
                                 }
                             };
                         }
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/gen/Accessor;")) {
+                            return accessorMetadataVisitor(accessorTargets, name, descriptor, false);
+                        }
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/gen/Invoker;")) {
+                            return accessorMetadataVisitor(accessorTargets, name, descriptor, true);
+                        }
                         return selectorMetadataVisitor(selectors, annotationDescriptor);
                     }
                 };
@@ -514,7 +566,65 @@ public final class MixinResourceRemapper {
             return null;
         }
         return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0,
-                List.copyOf(targets), List.copyOf(shadowMembers), List.copyOf(selectors));
+                List.copyOf(targets), List.copyOf(shadowMembers), List.copyOf(selectors),
+                List.copyOf(accessorTargets), superNameHolder[0]);
+    }
+
+    private static AnnotationVisitor accessorMetadataVisitor(List<AccessorTarget> members,
+                                                             String methodName,
+                                                             String methodDescriptor,
+                                                             boolean invoker) {
+        return new AnnotationVisitor(Opcodes.ASM9) {
+            private String explicitName;
+
+            @Override
+            public void visit(String attribute, Object value) {
+                if (attribute.equals("value") && value instanceof String stringValue
+                        && !stringValue.isBlank()) {
+                    explicitName = stringValue;
+                }
+            }
+
+            @Override
+            public void visitEnd() {
+                String targetName = explicitName == null
+                        ? inferredAccessorName(methodName, invoker) : explicitName;
+                String memberDescriptor = invoker ? methodDescriptor
+                        : inferredAccessorDescriptor(methodDescriptor);
+                if (targetName != null && memberDescriptor != null) {
+                    members.add(new AccessorTarget(invoker, targetName, memberDescriptor));
+                }
+            }
+        };
+    }
+
+    private static String inferredAccessorDescriptor(String methodDescriptor) {
+        org.objectweb.asm.Type methodType = org.objectweb.asm.Type.getMethodType(methodDescriptor);
+        org.objectweb.asm.Type[] arguments = methodType.getArgumentTypes();
+        if (arguments.length == 0 && methodType.getReturnType().getSort() != org.objectweb.asm.Type.VOID) {
+            return methodType.getReturnType().getDescriptor();
+        }
+        if (arguments.length == 1 && methodType.getReturnType().getSort() == org.objectweb.asm.Type.VOID) {
+            return arguments[0].getDescriptor();
+        }
+        return null;
+    }
+
+    private static String inferredAccessorName(String methodName, boolean invoker) {
+        String[] prefixes = invoker ? new String[]{"call", "invoke"}
+                : new String[]{"get", "is", "set"};
+        for (String prefix : prefixes) {
+            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()
+                    && Character.isUpperCase(methodName.charAt(prefix.length()))) {
+                String property = methodName.substring(prefix.length());
+                if (property.length() > 1 && Character.isUpperCase(property.charAt(0))
+                        && Character.isUpperCase(property.charAt(1))) {
+                    return property;
+                }
+                return Character.toLowerCase(property.charAt(0)) + property.substring(1);
+            }
+        }
+        return methodName;
     }
 
     private static AnnotationVisitor selectorMetadataVisitor(List<MixinSelector> selectors,
@@ -559,9 +669,11 @@ public final class MixinResourceRemapper {
     }
 
     private record ShadowMember(boolean method, String name, String descriptor, String prefix) {}
+    private record AccessorTarget(boolean method, String name, String descriptor) {}
     private record MixinSelector(String value) {}
     private record MixinClassMetadata(boolean isInterface, List<String> targets,
-                                      List<ShadowMember> shadowMembers, List<MixinSelector> selectors) {}
+                                      List<ShadowMember> shadowMembers, List<MixinSelector> selectors,
+                                      List<AccessorTarget> accessorTargets, String superName) {}
 
     static boolean isMixinResource(String resourceName) {
         if (resourceName == null) {
