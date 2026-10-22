@@ -27,6 +27,8 @@ import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -296,10 +298,9 @@ public final class MixinResourceRemapper {
         }
 
         String mixinPackage = packageValue.getAsString().replace('.', '/');
-        ClassLoader loader = Thread.currentThread().getContextClassLoader();
-        if (loader == null) {
-            loader = ClassLoader.getSystemClassLoader();
-        }
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        ClassLoader targetLoader = fabricTargetClassLoader();
+        List<String> uninspectableMixins = new ArrayList<>();
 
         int pruned = 0;
         for (String group : List.of("mixins", "client", "server")) {
@@ -317,8 +318,13 @@ public final class MixinResourceRemapper {
                     String mixinName = entry.getAsString();
                     classResource = mixinClassResource(mixinPackage, mixinName);
                     if (classResource != null) {
-                        try (InputStream input = loader.getResourceAsStream(classResource)) {
+                        boolean inspected = false;
+                        try (InputStream input = openMixinClassResource(
+                                classResource, contextLoader, targetLoader,
+                                MixinResourceRemapper.class.getClassLoader(),
+                                ClassLoader.getSystemClassLoader())) {
                             if (input != null) {
+                                inspected = true;
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
                                 if (metadata != null) {
                                     if (metadata.superName() != null
@@ -414,6 +420,9 @@ public final class MixinResourceRemapper {
                             System.err.println("[Gafi Loader] Could not inspect mixin structure for "
                                     + mixinName + " in " + resourceName + ": " + exception.getMessage());
                         }
+                        if (!inspected) {
+                            uninspectableMixins.add(classResource);
+                        }
                     }
                 }
 
@@ -442,7 +451,53 @@ public final class MixinResourceRemapper {
             System.out.println("[Gafi Loader] Removed " + pruned
                     + " structurally incompatible mixin entry/entries from " + resourceName);
         }
+        if (!uninspectableMixins.isEmpty()) {
+            List<String> examples = uninspectableMixins.subList(0, Math.min(3, uninspectableMixins.size()));
+            System.err.println("[Gafi Loader] Could not resolve " + uninspectableMixins.size()
+                    + " Mixin class resource(s) while validating " + resourceName
+                    + "; structural compatibility checks may be incomplete. Examples: "
+                    + String.join(", ", examples));
+        }
         return pruned;
+    }
+
+    /**
+     * Gets the launcher's actual game classloader when Fabric is present. The Java agent's
+     * system classloader is not necessarily the Knot classloader that can read classes from mods.
+     */
+    private static ClassLoader fabricTargetClassLoader() {
+        try {
+            ClassLoader ownLoader = MixinResourceRemapper.class.getClassLoader();
+            Class<?> launcherBase = Class.forName(
+                    "net.fabricmc.loader.impl.launch.FabricLauncherBase", false, ownLoader);
+            Object launcher = launcherBase.getMethod("getLauncher").invoke(null);
+            if (launcher == null) {
+                return null;
+            }
+            Object targetLoader = launcher.getClass().getMethod("getTargetClassLoader").invoke(launcher);
+            return targetLoader instanceof ClassLoader classLoader ? classLoader : null;
+        } catch (ReflectiveOperationException | LinkageError exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolves a Mixin class from the target game/mod classpath first, then tries the explicitly
+     * supplied fallback classloaders. Returning null means the bytes truly weren't available from
+     * any supported classpath route.
+     */
+    static InputStream openMixinClassResource(String resourceName, ClassLoader... candidates) {
+        Set<ClassLoader> tried = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (ClassLoader candidate : candidates) {
+            if (candidate == null || !tried.add(candidate)) {
+                continue;
+            }
+            InputStream stream = candidate.getResourceAsStream(resourceName);
+            if (stream != null) {
+                return stream;
+            }
+        }
+        return ClassLoader.getSystemResourceAsStream(resourceName);
     }
 
     private static String mixinClassResource(String mixinPackage, String mixinName) {
