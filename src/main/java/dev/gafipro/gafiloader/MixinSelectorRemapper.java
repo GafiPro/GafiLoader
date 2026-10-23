@@ -290,7 +290,8 @@ final class MixinSelectorRemapper {
         // owner;member syntax handled by remapSelector. Leaving intermediary class names here
         // makes Mixin scan zero allocations even when the target allocation exists.
         if (atTarget && value.startsWith("(")) {
-            mapped = aliases.mapDescriptor(mappings.mapDescriptor(value));
+            mapped = LegacyClassAliases.mapDescriptor(
+                    aliases.mapDescriptor(mappings.mapDescriptor(value)), targetApi);
         }
         return atTarget ? remapKnownTargetSelector(mapped, targetApi) : mapped;
     }
