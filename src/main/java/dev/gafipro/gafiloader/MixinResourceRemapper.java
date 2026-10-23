@@ -1154,7 +1154,7 @@ public final class MixinResourceRemapper {
             return original;
         }
         MixinClassMetadata metadata = readMixinMetadata(original);
-        if (metadata == null || metadata.atTargets().isEmpty()) {
+        if (metadata == null) {
             return original;
         }
 
@@ -1168,6 +1168,12 @@ public final class MixinResourceRemapper {
                 reasons.putIfAbsent(anchor.mixinMethodName(), reason);
             }
         }
+
+        // Some injectors use the default @At("HEAD") and therefore have no explicit At metadata.
+        // Validate their method selectors too, so changed constructors/methods are removed before
+        // Mixin's required-injection check can abort the entire client.
+        collectIncompatibleInjectorMethods(original, metadata.targets(), mappings, aliases,
+                targetApi, methodsToRemove, reasons);
         if (methodsToRemove.isEmpty()) {
             return original;
         }
@@ -1191,6 +1197,65 @@ public final class MixinResourceRemapper {
                     + entry.getValue() + ". Its behavior is not emulated.");
         }
         return writer.toByteArray();
+    }
+
+    private static void collectIncompatibleInjectorMethods(byte[] original, List<String> targets,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi, Set<String> methodsToRemove, Map<String, String> reasons) {
+        if (targetApi == null) {
+            return;
+        }
+        new ClassReader(original).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String methodName, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    private void checkSelector(String selector) {
+                        String reason = MixinSelectorRemapper.incompatibilityReason(
+                                selector, targets, mappings, aliases, targetApi);
+                        if (reason != null) {
+                            methodsToRemove.add(methodName);
+                            reasons.putIfAbsent(methodName, reason
+                                    + "; this injector's behavior is not emulated");
+                        }
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!annotationDescriptor.startsWith("Lorg/spongepowered/asm/mixin/injection/")
+                                && !annotationDescriptor.startsWith("Lcom/llamalad7/mixinextras/injector/")) {
+                            return null;
+                        }
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/injection/At;")) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String name, Object value) {
+                                if (name.equals("method") && value instanceof String selector) {
+                                    checkSelector(selector);
+                                }
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitArray(String name) {
+                                if (!name.equals("method")) {
+                                    return null;
+                                }
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        if (value instanceof String selector) {
+                                            checkSelector(selector);
+                                        }
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
     }
 
     private static String injectionAnchorIncompatibility(MixinAtTarget anchor, List<String> rawTargets,
