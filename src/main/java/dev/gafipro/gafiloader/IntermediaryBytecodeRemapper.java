@@ -354,7 +354,10 @@ final class IntermediaryBytecodeRemapper {
         CompatibilityScanner.Reference normalized = mappings.normalize(new CompatibilityScanner.Reference(
                 CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor));
         CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
-        if (mapped.equals(normalized)) {
+        // A class-only alias may change a descriptor in a Fabric API/library method call.
+        // That does not make the library method a Minecraft alias target. Validate only explicit
+        // member aliases here; class moves are checked separately against the actual target JAR.
+        if (!aliases.hasExplicitMemberAlias(normalized)) {
             return;
         }
 
