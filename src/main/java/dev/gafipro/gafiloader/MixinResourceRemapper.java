@@ -257,6 +257,9 @@ public final class MixinResourceRemapper {
             JsonElement root = JsonParser.parseString(new String(source, StandardCharsets.UTF_8));
             AtomicBoolean changed = new AtomicBoolean(false);
             JsonElement remapped = remapJson(root, currentMappings, aliases, changed);
+            if (resourceName.contains("fabric-particles-v1")) {
+                System.out.println("[Gafi Loader] DEBUG particles config=" + GSON.toJson(remapped));
+            }
             int prunedMixins = pruneStructurallyIncompatibleMixins(
                     remapped, resourceName, currentMappings, aliases, targetApi);
             if (prunedMixins > 0) {
