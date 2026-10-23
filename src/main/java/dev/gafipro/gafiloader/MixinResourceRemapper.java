@@ -23,6 +23,10 @@ import java.nio.file.Path;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLStreamHandler;
+import java.net.MalformedURLException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.ArrayList;
@@ -69,6 +73,37 @@ public final class MixinResourceRemapper {
                 ? CompatibilityScanner.AliasSet.empty() : bytecodeAliases;
         targetApi = targetApiIndex;
         STRUCTURALLY_SKIPPED_MIXINS.clear();
+    }
+
+    /**
+     * Wraps Mixin JSON/refmap/class resource URLs so callers that use URL.openStream rather than
+     * getResourceAsStream still receive the in-memory compatibility view.
+     */
+    public static URL transformUrl(String resourceName, URL original) {
+        if (original == null || mappings == null
+                || (!isMixinResource(resourceName) && !isClassResource(resourceName))) {
+            return original;
+        }
+        try {
+            return new URL(null, original.toExternalForm(), new URLStreamHandler() {
+                @Override
+                protected URLConnection openConnection(URL url) {
+                    return new URLConnection(url) {
+                        @Override
+                        public void connect() {}
+
+                        @Override
+                        public InputStream getInputStream() throws IOException {
+                            return MixinResourceRemapper.transform(resourceName, original.openStream());
+                        }
+                    };
+                }
+            });
+        } catch (MalformedURLException exception) {
+            System.err.println("[Gafi Loader] Could not wrap resource URL " + resourceName
+                    + " for in-memory compatibility: " + exception.getMessage());
+            return original;
+        }
     }
 
     /**
