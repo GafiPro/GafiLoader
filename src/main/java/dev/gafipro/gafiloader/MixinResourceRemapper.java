@@ -418,31 +418,64 @@ public final class MixinResourceRemapper {
                                         for (MixinAtTarget anchor : metadata.atTargets()) {
                                             String atValue = anchor.atValue();
                                             String mappedAnchor = remapText(anchor.target(), mappings, aliases);
-                                            if (atValue.equals("NEW") && anchor.target().startsWith("(")) {
-                                                String targetDescriptor = aliases.mapDescriptor(
-                                                        mappings.mapDescriptor(anchor.target()));
+                                            if (atValue.equals("NEW")) {
                                                 String methodName = MixinSelectorRemapper.normalizedMethodSelector(
                                                         anchor.methodSelector(), metadata.targets(), mappings, aliases);
-                                                for (String rawTarget : metadata.targets()) {
-                                                    String normalizedTarget = rawTarget.replace('.', '/');
-                                                    if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
-                                                        normalizedTarget = normalizedTarget.substring(
-                                                                1, normalizedTarget.length() - 1);
+                                                String allocationType = null;
+                                                String constructorDescriptor = null;
+                                                String displayTarget = mappedAnchor;
+                                                if (anchor.target().startsWith("(")) {
+                                                    String targetDescriptor = aliases.mapDescriptor(
+                                                            mappings.mapDescriptor(anchor.target()));
+                                                    Type allocation = Type.getMethodType(targetDescriptor).getReturnType();
+                                                    if (allocation.getSort() == Type.OBJECT) {
+                                                        allocationType = allocation.getInternalName();
+                                                        constructorDescriptor = Type.getMethodDescriptor(
+                                                                Type.VOID_TYPE, Type.getMethodType(targetDescriptor).getArgumentTypes());
                                                     }
-                                                    String mappedTarget = aliases.mapClass(
-                                                            mappings.mapClassName(normalizedTarget));
-                                                    if (!targetApi.hasClass(mappedTarget)
-                                                            || !targetApi.hasMethodNamed(mappedTarget, methodName)) {
-                                                        continue;
+                                                    displayTarget = targetDescriptor;
+                                                } else if (mappedAnchor.startsWith("L")) {
+                                                    int newOwnerEnd = mappedAnchor.indexOf(';');
+                                                    if (newOwnerEnd > 1) {
+                                                        String explicitOwner = mappedAnchor.substring(1, newOwnerEnd);
+                                                        String explicitMember = mappedAnchor.substring(newOwnerEnd + 1);
+                                                        if (explicitMember.startsWith("<init>(")) {
+                                                            allocationType = explicitOwner;
+                                                            constructorDescriptor = explicitMember.substring("<init>".length());
+                                                        } else if (explicitMember.isBlank()) {
+                                                            allocationType = explicitOwner;
+                                                        }
                                                     }
-                                                    if (!targetApi.hasNewExpression(
-                                                            mappedTarget, methodName, targetDescriptor)) {
-                                                        incompatibility = "@At(value=\"NEW\", target=\""
-                                                                + targetDescriptor + "\") has no matching object "
-                                                                + "allocation in Minecraft 26.2 method "
-                                                                + mappedTarget + "#" + methodName
-                                                                + "; this Mixin's behavior is not emulated";
-                                                        break;
+                                                } else {
+                                                    String normalizedAllocation = mappedAnchor.replace('.', '/');
+                                                    if (normalizedAllocation.startsWith("net/minecraft/")) {
+                                                        allocationType = normalizedAllocation;
+                                                    }
+                                                }
+                                                if (allocationType != null) {
+                                                    for (String rawTarget : metadata.targets()) {
+                                                        String normalizedTarget = rawTarget.replace('.', '/');
+                                                        if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                                                            normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+                                                        }
+                                                        String mappedTarget = aliases.mapClass(
+                                                                mappings.mapClassName(normalizedTarget));
+                                                        if (!targetApi.hasClass(mappedTarget)
+                                                                || !targetApi.hasMethodNamed(mappedTarget, methodName)) {
+                                                            continue;
+                                                        }
+                                                        boolean hasAllocation = constructorDescriptor != null
+                                                                ? targetApi.hasNewExpression(mappedTarget, methodName,
+                                                                        allocationType, constructorDescriptor)
+                                                                : targetApi.hasNewExpressionOfType(mappedTarget, methodName, allocationType);
+                                                        if (!hasAllocation) {
+                                                            incompatibility = "@At(value=\"NEW\", target=\""
+                                                                    + displayTarget + "\") has no matching object "
+                                                                    + "allocation in Minecraft 26.2 method "
+                                                                    + mappedTarget + "#" + methodName
+                                                                    + "; this Mixin's behavior is not emulated";
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                                 if (incompatibility != null) {
