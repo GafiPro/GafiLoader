@@ -40,7 +40,9 @@ class IntermediaryAgentIntegrationTest {
         Path targetGameJar = temporaryDirectory.resolve("minecraft-26.2-fixture.jar");
         writeJar(targetGameJar,
                 "net/minecraft/Foo", fooClass(),
-                "net/minecraft/Bar", emptyPublicClass("net/minecraft/Bar"));
+                "net/minecraft/Bar", emptyPublicClass("net/minecraft/Bar"),
+                "net/minecraft/client/renderer/block/BlockAndTintGetter",
+                emptyPublicClass("net/minecraft/client/renderer/block/BlockAndTintGetter"));
         assertTrue(Files.exists(gameFoo));
         assertTrue(Files.exists(gameBar));
         Path mojang = temporaryDirectory.resolve("client.txt");
