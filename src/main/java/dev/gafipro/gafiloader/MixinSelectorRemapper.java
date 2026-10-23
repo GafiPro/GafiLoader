@@ -223,7 +223,7 @@ final class MixinSelectorRemapper {
                     public void visit(String ignored, Object value) {
                         if (value instanceof String stringValue) {
                             String mapped = mapStringValue(annotationDescriptor, name, stringValue,
-                                    targets, mappings, aliases, enclosingMethodDescriptor);
+                                    targets, mappings, aliases, enclosingMethodDescriptor, targetApi);
                             if (!mapped.equals(stringValue)) {
                                 changed.set(true);
                             }
