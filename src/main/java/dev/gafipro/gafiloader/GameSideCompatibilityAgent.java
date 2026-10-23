@@ -75,6 +75,16 @@ public final class GameSideCompatibilityAgent {
                         return hooked;
                     }
 
+                    // KnotClassLoader also serves Mixin JSON/resources directly. Hooking only
+                    // MixinServiceKnot misses configurations loaded through this classloader path.
+                    if (intermediaryMappings != null
+                            && KnotClassLoaderPatcher.TARGET_CLASS.equals(className)) {
+                        byte[] hookInput = transformed == null ? classfileBuffer : transformed;
+                        byte[] hooked = KnotClassLoaderPatcher.transform(className, hookInput);
+                        System.out.println("[Gafi Loader] Enabled in-memory Knot resource remapping.");
+                        return hooked;
+                    }
+
                     // Fabric reads legacy ClassTweaker files before its regular game launch.
                     // Normalize those files in memory, before Fabric validates the header namespace.
                     if (intermediaryMappings != null
