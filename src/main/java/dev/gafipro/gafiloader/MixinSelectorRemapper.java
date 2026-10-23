@@ -286,6 +286,9 @@ final class MixinSelectorRemapper {
             return value;
         }
         String mapped = remapSelector(value, targets, mappings, aliases);
+        if (methodSelector && targetApi != null) {
+            mapped = remapUniqueDescriptorMatch(mapped, targets, mappings, aliases, targetApi);
+        }
         // NEW selectors use a constructor descriptor in the form (args)ReturnType, not the
         // owner;member syntax handled by remapSelector. Leaving intermediary class names here
         // makes Mixin scan zero allocations even when the target allocation exists.
@@ -294,6 +297,70 @@ final class MixinSelectorRemapper {
                     aliases.mapDescriptor(mappings.mapDescriptor(value)), targetApi);
         }
         return atTarget ? remapKnownTargetSelector(mapped, targetApi) : mapped;
+    }
+
+    /**
+     * If a legacy selector's method name changed but its exact descriptor remains unique on
+     * the 26.2 target, replace only that name. Never guess when multiple target methods share
+     * the descriptor, and leave selectors without a descriptor untouched.
+     */
+    private static String remapUniqueDescriptorMatch(String selector, List<String> targets,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        if (selector == null || selector.isBlank() || targetApi == null) {
+            return selector;
+        }
+        String optionalPrefix = selector.startsWith("?") ? "?" : "";
+        String value = optionalPrefix.isEmpty() ? selector : selector.substring(1);
+        String owner = null;
+        String member = value;
+        if (value.startsWith("L")) {
+            int ownerEnd = value.indexOf(';');
+            if (ownerEnd <= 1 || ownerEnd + 1 >= value.length()) {
+                return selector;
+            }
+            owner = value.substring(1, ownerEnd);
+            member = value.substring(ownerEnd + 1);
+        }
+        int descriptorStart = member.indexOf('(');
+        if (descriptorStart <= 0) {
+            return selector;
+        }
+        String name = member.substring(0, descriptorStart);
+        String descriptor = member.substring(descriptorStart);
+        if (name.contains("*") || name.contains("/") || name.contains(";")
+                || targetApi.declaredMethodAccess(owner == null ? "" : owner, name, descriptor) != null) {
+            return selector;
+        }
+        List<String> owners = new ArrayList<>();
+        if (owner != null) {
+            owners.add(owner);
+        } else {
+            for (String rawTarget : targets) {
+                String normalized = rawTarget.replace('.', '/');
+                if (normalized.startsWith("L") && normalized.endsWith(";")) {
+                    normalized = normalized.substring(1, normalized.length() - 1);
+                }
+                owners.add(aliases.mapClass(mappings.mapClassName(normalized)));
+            }
+        }
+        String replacement = null;
+        for (String candidateOwner : owners) {
+            if (!targetApi.hasClass(candidateOwner)) {
+                return selector;
+            }
+            String candidate = targetApi.uniqueDeclaredMethodName(candidateOwner, descriptor);
+            if (candidate == null || (replacement != null && !replacement.equals(candidate))) {
+                return selector;
+            }
+            replacement = candidate;
+        }
+        if (replacement == null || replacement.equals(name)) {
+            return selector;
+        }
+        String mapped = owner == null ? replacement + descriptor
+                : "L" + owner + ";" + replacement + descriptor;
+        return optionalPrefix + mapped;
     }
 
     /**
@@ -376,7 +443,8 @@ final class MixinSelectorRemapper {
         boolean optional = selector.startsWith("?");
         String unwrapped = optional ? selector.substring(1) : selector;
         String mapped = remapKnownTargetSelector(
-                remapSelector(unwrapped, targets, mappings, aliases), targetApi);
+                remapUniqueDescriptorMatch(remapSelector(unwrapped, targets, mappings, aliases),
+                        targets, mappings, aliases, targetApi), targetApi);
         if (mapped == null || mapped.equals(unwrapped)) {
             // A selector that only needs descriptor normalization may still change even if the
             // member name stays the same; remapSelector handles that. If no full signature exists,
