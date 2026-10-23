@@ -17,6 +17,7 @@ class KnotClassLoaderPatcherTest {
         byte[] transformed = KnotClassLoaderPatcher.transform(
                 KnotClassLoaderPatcher.TARGET_CLASS, classWithResourceMethod());
         AtomicBoolean foundAdapter = new AtomicBoolean();
+        AtomicBoolean foundUrlAdapter = new AtomicBoolean();
         new ClassReader(transformed).accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
@@ -32,11 +33,19 @@ class KnotClassLoaderPatcherTest {
                                         "(Ljava/lang/String;Ljava/io/InputStream;)Ljava/io/InputStream;")) {
                             foundAdapter.set(true);
                         }
+                        if (opcode == Opcodes.INVOKESTATIC
+                                && owner.equals("dev/gafipro/gafiloader/MixinResourceRemapper")
+                                && methodName.equals("transformUrl")
+                                && methodDescriptor.equals(
+                                        "(Ljava/lang/String;Ljava/net/URL;)Ljava/net/URL;")) {
+                            foundUrlAdapter.set(true);
+                        }
                     }
                 };
             }
         }, 0);
-        assertTrue(foundAdapter.get(), "Expected KnotClassLoader resource hook to invoke the in-memory adapter");
+        assertTrue(foundAdapter.get(), "Expected KnotClassLoader stream hook to invoke the in-memory adapter");
+        assertTrue(foundUrlAdapter.get(), "Expected KnotClassLoader URL hook to invoke the in-memory adapter");
     }
 
     @Test
@@ -55,6 +64,14 @@ class KnotClassLoaderPatcherTest {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, KnotClassLoaderPatcher.TARGET_CLASS,
                 null, "java/lang/Object", null);
+        MethodVisitor urlMethod = writer.visitMethod(Opcodes.ACC_PUBLIC, "getResource",
+                "(Ljava/lang/String;)Ljava/net/URL;", null, null);
+        urlMethod.visitCode();
+        urlMethod.visitInsn(Opcodes.ACONST_NULL);
+        urlMethod.visitInsn(Opcodes.ARETURN);
+        urlMethod.visitMaxs(0, 0);
+        urlMethod.visitEnd();
+
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "getResourceAsStream",
                 "(Ljava/lang/String;)Ljava/io/InputStream;", null, null);
         method.visitCode();
