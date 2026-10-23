@@ -592,11 +592,13 @@ class MixinResourceRemapperTest {
         AnnotationVisitor methods = injection.visitArray("method");
         methods.visit(null, targetMethod);
         methods.visitEnd();
-        AnnotationVisitor at = injection.visitAnnotation(
-                "at", "Lorg/spongepowered/asm/mixin/injection/At;");
+        AnnotationVisitor ats = injection.visitArray("at");
+        AnnotationVisitor at = ats.visitAnnotation(
+                null, "Lorg/spongepowered/asm/mixin/injection/At;");
         at.visit("value", "INVOKE");
         at.visit("target", invocationSelector);
         at.visitEnd();
+        ats.visitEnd();
         injection.visitEnd();
         method.visitEnd();
         writer.visitEnd();
