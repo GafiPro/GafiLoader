@@ -45,6 +45,27 @@ class TargetApiIndexTest {
     }
 
     @Test
+    void detectsConstructorAllocationAnchorsInsideTheSelectedTargetMethod() throws Exception {
+        Path targetJar = temporaryDirectory.resolve("new-expression-index.jar");
+        String owner = "net/minecraft/world/entity/LivingEntity";
+        String allocated = "net/minecraft/core/particles/BlockParticleOption";
+        String descriptor = "(Lnet/minecraft/core/particles/ParticleType;"
+                + "Lnet/minecraft/world/level/block/state/BlockState;)"
+                + "Lnet/minecraft/core/particles/BlockParticleOption;";
+        writeJar(targetJar,
+                owner, classWithNewExpression(owner, "checkFallDamage", allocated,
+                        "(Lnet/minecraft/core/particles/ParticleType;"
+                                + "Lnet/minecraft/world/level/block/state/BlockState;)V"),
+                allocated, emptyClass(allocated));
+
+        TargetApiIndex api = TargetApiIndex.load(targetJar);
+        assertTrue(api.hasNewExpression(owner, "checkFallDamage", descriptor));
+        assertFalse(api.hasNewExpression(owner, "otherMethod", descriptor));
+        assertFalse(api.hasNewExpression(owner, "checkFallDamage",
+                "(Lnet/minecraft/core/particles/ParticleType;)Lnet/minecraft/core/particles/BlockParticleOption;"));
+    }
+
+    @Test
     void acceptsAliasesOnlyWhenTargetsExistInTheRealGameApiIndex() throws Exception {
         Path targetJar = temporaryDirectory.resolve("minecraft-26.2-fixture.jar");
         Path aliasesFile = temporaryDirectory.resolve("aliases.tsv");
@@ -108,6 +129,28 @@ class TargetApiIndexTest {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
                 name, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classWithNewExpression(String owner, String methodName,
+                                                String allocatedType, String constructorDescriptor) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, methodName, "()V", null, null);
+        method.visitCode();
+        method.visitTypeInsn(Opcodes.NEW, allocatedType);
+        method.visitInsn(Opcodes.DUP);
+        org.objectweb.asm.Type constructorType = org.objectweb.asm.Type.getMethodType(constructorDescriptor);
+        for (org.objectweb.asm.Type ignored : constructorType.getArgumentTypes()) {
+            method.visitInsn(Opcodes.ACONST_NULL);
+        }
+        method.visitMethodInsn(Opcodes.INVOKESPECIAL, allocatedType, "<init>",
+                constructorDescriptor, false);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
