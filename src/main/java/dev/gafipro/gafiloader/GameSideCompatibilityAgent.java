@@ -48,8 +48,11 @@ public final class GameSideCompatibilityAgent {
                 if (className == null) {
                     return null;
                 }
-                if (KnotClassLoaderPatcher.TARGET_CLASS.equals(className)) {
-                    System.out.println("[Gafi Loader] DEBUG transformer received KnotClassLoader bytes.");
+                if (KnotClassLoaderPatcher.TARGET_CLASS.equals(className)
+                        || KnotLauncherPatcher.TARGET_CLASS.equals(className)
+                        || MixinServiceKnotPatcher.TARGET_CLASS.equals(className)) {
+                    System.out.println("[Gafi Loader] DEBUG transformer received " + className
+                            + " bytes; redefining=" + (classBeingRedefined != null));
                 }
 
                 try {
