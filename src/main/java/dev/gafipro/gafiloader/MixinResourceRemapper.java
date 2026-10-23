@@ -488,7 +488,8 @@ public final class MixinResourceRemapper {
                                                 break;
                                             }
                                             String atValue = anchor.atValue();
-                                            String mappedAnchor = remapText(anchor.target(), mappings, aliases);
+                                            String mappedAnchor = LegacyClassAliases.mapDescriptor(
+                remapText(anchor.target(), mappings, aliases), targetApi);
                                             if (atValue.equals("NEW")) {
                                                 String methodName = MixinSelectorRemapper.normalizedMethodSelector(
                                                         anchor.methodSelector(), metadata.targets(), mappings, aliases);
