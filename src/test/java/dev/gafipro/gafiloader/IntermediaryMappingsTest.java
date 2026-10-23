@@ -62,6 +62,15 @@ class IntermediaryMappingsTest {
         assertEquals("net/minecraft/Foo$1", loaded.mapClassName("net/minecraft/class_1$1"));
         assertEquals("(Lnet/minecraft/Foo$Nested;)V",
                 loaded.mapDescriptor("(Lnet/minecraft/class_1$Nested;)V"));
+        assertEquals("oldMethod", loaded.mapMethodName(
+                "net/minecraft/Foo", "method_2", null),
+                "A named owner must still resolve a legacy Intermediary method selector.");
+        CompatibilityScanner.Reference mixedNamespaceMethod = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/Foo", "method_2", "(Lnet/minecraft/class_2;)V"));
+        assertEquals("net/minecraft/Foo", mixedNamespaceMethod.owner());
+        assertEquals("oldMethod", mixedNamespaceMethod.name());
+        assertEquals("(Lnet/minecraft/Bar;)V", mixedNamespaceMethod.descriptor());
 
         CompatibilityScanner.Reference inheritedMethod = loaded.normalize(
                 new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
