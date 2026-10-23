@@ -49,7 +49,7 @@ def gafiManifestAttributes = [
     'Main-Class': application.mainClass.get(),
     'Premain-Class': 'dev.gafipro.gafiloader.GameSideCompatibilityAgent',
     'Can-Redefine-Classes': 'false',
-    'Can-Retransform-Classes': 'false'
+    'Can-Retransform-Classes': 'true'
 ]
 
 // Keep the ordinary project JAR available for Gradle's application distribution.
