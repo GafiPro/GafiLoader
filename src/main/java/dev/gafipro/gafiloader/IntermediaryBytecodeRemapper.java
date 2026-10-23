@@ -207,6 +207,7 @@ final class IntermediaryBytecodeRemapper {
         CompatibilityScanner.Reference normalized = aliases.normalize(mappings.normalize(
                 new CompatibilityScanner.Reference(kind, owner, name, descriptor)));
         CompatibilityScanner.Reference mapped = new CompatibilityScanner.Reference(
+                kind,
                 LegacyClassAliases.mapClass(normalized.owner(), targetApi),
                 normalized.name(),
                 LegacyClassAliases.mapDescriptor(normalized.descriptor(), targetApi));
