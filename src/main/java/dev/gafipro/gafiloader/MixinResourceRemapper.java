@@ -1373,20 +1373,117 @@ public final class MixinResourceRemapper {
             byte[] bytecodeInput = selectorsRemapped == null ? pruned : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
                     bytecodeInput, currentMappings, aliases, targetApi);
-            if (remapped == null && selectorsRemapped == null && pruned == original) {
-                return original;
+            byte[] result = remapped != null ? remapped
+                    : selectorsRemapped == null ? pruned : selectorsRemapped;
+            byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
+            if (overwriteAdjusted != original || remapped != null
+                    || selectorsRemapped != null || pruned != original) {
+                System.out.println("[Gafi Loader] Normalized legacy bytecode for Mixin inspection: "
+                        + requestedClassName + " (" + actualClassName + ")");
             }
-            System.out.println("[Gafi Loader] Normalized legacy bytecode for Mixin inspection: "
-                    + requestedClassName + " (" + actualClassName + ")");
-            if (remapped != null) {
-                return remapped;
-            }
-            return selectorsRemapped == null ? pruned : selectorsRemapped;
+            return overwriteAdjusted;
         } catch (IOException | RuntimeException exception) {
             System.err.println("[Gafi Loader] Could not normalize class bytes for Mixin inspection: "
                     + requestedClassName + "; original bytes retained: " + exception.getMessage());
             return original;
         }
+    }
+
+    /**
+     * In older game versions a Mixin can add a method that did not yet exist on its target.
+     * If a newer target adds that exact signature, Mixin treats the unannotated method as an
+     * accidental overwrite and rejects it. Mark the collision as @Overwrite in memory when the
+     * same method signature exists on every declared target and staticness matches. The source
+     * Mixin class and its containing JAR remain untouched.
+     */
+    private static byte[] addRequiredOverwriteAnnotations(byte[] original) {
+        if (original == null || targetApi == null) {
+            return original;
+        }
+        MixinClassMetadata metadata = readMixinMetadata(original);
+        if (metadata == null || metadata.targets().isEmpty()) {
+            return original;
+        }
+
+        Set<String> overwriteCandidates = new java.util.HashSet<>();
+        new ClassReader(original).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (name.equals("<init>") || name.equals("<clinit>")) {
+                    return null;
+                }
+                boolean everyTargetDeclaresMethod = true;
+                for (String target : metadata.targets()) {
+                    String normalized = target.replace('.', '/');
+                    if (normalized.startsWith("L") && normalized.endsWith(";")) {
+                        normalized = normalized.substring(1, normalized.length() - 1);
+                    }
+                    normalized = LegacyClassAliases.mapClass(normalized, targetApi);
+                    Integer targetAccess = targetApi.declaredMethodAccess(normalized, name, descriptor);
+                    if (targetAccess == null
+                            || ((targetAccess ^ access) & Opcodes.ACC_STATIC) != 0) {
+                        everyTargetDeclaresMethod = false;
+                        break;
+                    }
+                }
+                if (everyTargetDeclaresMethod) {
+                    overwriteCandidates.add(name + descriptor);
+                }
+                return null;
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        if (overwriteCandidates.isEmpty()) {
+            return original;
+        }
+        java.util.concurrent.atomic.AtomicBoolean changed = new java.util.concurrent.atomic.AtomicBoolean();
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(reader, 0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!overwriteCandidates.contains(name + descriptor)) {
+                    return delegate;
+                }
+                return new MethodVisitor(Opcodes.ASM9, delegate) {
+                    private boolean overwrite;
+                    private boolean shadow;
+                    private boolean injector;
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Overwrite;")) {
+                            overwrite = true;
+                        } else if (annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/Shadow;")) {
+                            shadow = true;
+                        } else if (annotationDescriptor.startsWith("Lorg/spongepowered/asm/mixin/injection/")
+                                || annotationDescriptor.startsWith("Lcom/llamalad7/mixinextras/injector/")) {
+                            injector = true;
+                        }
+                        return super.visitAnnotation(annotationDescriptor, visible);
+                    }
+
+                    @Override
+                    public void visitEnd() {
+                        if (!overwrite && !shadow && !injector) {
+                            AnnotationVisitor annotation = super.visitAnnotation(
+                                    "Lorg/spongepowered/asm/mixin/Overwrite;", true);
+                            if (annotation != null) {
+                                annotation.visitEnd();
+                            }
+                            changed.set(true);
+                            System.out.println("[Gafi Loader] Preserved legacy-added Mixin method as @Overwrite: "
+                                    + reader.getClassName() + "#" + name + descriptor);
+                        }
+                        super.visitEnd();
+                    }
+                };
+            }
+        }, 0);
+        return changed.get() ? writer.toByteArray() : original;
     }
 
     private static boolean skipClassResource(String internalName) {
