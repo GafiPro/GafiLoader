@@ -840,6 +840,10 @@ public final class CompatibilityScanner {
                     mapDescriptor(reference.descriptor()));
         }
 
+        boolean hasExplicitMemberAlias(Reference reference) {
+            return members.containsKey(reference);
+        }
+
         int classAliasCount() {
             return classes.size();
         }
