@@ -757,11 +757,15 @@ public final class CompatibilityScanner {
          * Applies narrowly reviewed class moves that are known to exist in the pinned target
          * game. These are runtime namespace aliases, not mod-JAR rewrites.
          */
-        AliasSet withBuiltInCompatibilityAliases() {
+        AliasSet withBuiltInCompatibilityAliases(TargetApiIndex targetApi) {
             Map<String, String> merged = new HashMap<>(classes);
-            putBuiltInClassAlias(merged,
-                    "net/minecraft/world/level/BlockAndTintGetter",
-                    "net/minecraft/client/renderer/block/BlockAndTintGetter");
+            String legacy = "net/minecraft/world/level/BlockAndTintGetter";
+            String replacement = "net/minecraft/client/renderer/block/BlockAndTintGetter";
+            // Synthetic/unit-test game JARs may not include the replacement class. Only enable
+            // the built-in alias when the real configured target actually contains that class.
+            if (targetApi != null && !targetApi.hasClass(legacy) && targetApi.hasClass(replacement)) {
+                putBuiltInClassAlias(merged, legacy, replacement);
+            }
             return new AliasSet(merged, members);
         }
 
