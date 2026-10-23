@@ -972,7 +972,7 @@ public final class MixinResourceRemapper {
                                     }
                                     for (String methodSelector : methodSelectors) {
                                         result.add(new MixinAtTarget(
-                                                methodSelector, pending.atValue, pending.target));
+                                                name, methodSelector, pending.atValue, pending.target));
                                     }
                                 }
                             }
@@ -1033,7 +1033,7 @@ public final class MixinResourceRemapper {
     private record ShadowMember(boolean method, String name, String descriptor, String prefix) {}
     private record AccessorTarget(boolean method, String name, String descriptor) {}
     private record MixinSelector(String value) {}
-    private record MixinAtTarget(String methodSelector, String atValue, String target) {}
+    private record MixinAtTarget(String mixinMethodName, String methodSelector, String atValue, String target) {}
     private record MixinClassMetadata(boolean isInterface, List<String> targets,
                                       List<ShadowMember> shadowMembers, List<MixinSelector> selectors,
                                       List<AccessorTarget> accessorTargets, String superName,
@@ -1058,6 +1058,186 @@ public final class MixinResourceRemapper {
     }
 
     /**
+     * Removes only injector callback methods whose explicit injection anchors are absent from the
+     * configured target game. This also covers dynamically registered Mixins that do not appear in
+     * a static JSON mixin list and therefore cannot be pruned at the resource boundary.
+     */
+    private static byte[] pruneIncompatibleInjectionMethods(byte[] original,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        if (original == null || mappings == null || targetApi == null) {
+            return original;
+        }
+        MixinClassMetadata metadata = readMixinMetadata(original);
+        if (metadata == null || metadata.atTargets().isEmpty()) {
+            return original;
+        }
+
+        Set<String> methodsToRemove = new java.util.HashSet<>();
+        Map<String, String> reasons = new java.util.LinkedHashMap<>();
+        for (MixinAtTarget anchor : metadata.atTargets()) {
+            String reason = injectionAnchorIncompatibility(
+                    anchor, metadata.targets(), mappings, aliases, targetApi);
+            if (reason != null) {
+                methodsToRemove.add(anchor.mixinMethodName());
+                reasons.putIfAbsent(anchor.mixinMethodName(), reason);
+            }
+        }
+        if (methodsToRemove.isEmpty()) {
+            return original;
+        }
+
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(reader, 0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (methodsToRemove.contains(name)) {
+                    return null;
+                }
+                return super.visitMethod(access, name, descriptor, signature, exceptions);
+            }
+        }, 0);
+
+        for (Map.Entry<String, String> entry : reasons.entrySet()) {
+            System.err.println("[Gafi Loader] Removed incompatible Mixin injector method "
+                    + entry.getKey() + " from " + reader.getClassName() + ": "
+                    + entry.getValue() + ". Its behavior is not emulated.");
+        }
+        return writer.toByteArray();
+    }
+
+    private static String injectionAnchorIncompatibility(MixinAtTarget anchor, List<String> rawTargets,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        String methodName = MixinSelectorRemapper.normalizedMethodSelector(
+                anchor.methodSelector(), rawTargets, mappings, aliases);
+        String atValue = anchor.atValue();
+        String mappedAnchor = remapText(anchor.target(), mappings, aliases);
+
+        if (atValue.equals("NEW")) {
+            String allocatedType = null;
+            String constructorDescriptor = null;
+            String display = mappedAnchor;
+            if (anchor.target().startsWith("(")) {
+                try {
+                    String descriptor = aliases.mapDescriptor(mappings.mapDescriptor(anchor.target()));
+                    Type allocation = Type.getMethodType(descriptor).getReturnType();
+                    if (allocation.getSort() == Type.OBJECT) {
+                        allocatedType = allocation.getInternalName();
+                        constructorDescriptor = Type.getMethodDescriptor(
+                                Type.VOID_TYPE, Type.getMethodType(descriptor).getArgumentTypes());
+                    }
+                    display = descriptor;
+                } catch (IllegalArgumentException ignored) {
+                    return null;
+                }
+            } else if (mappedAnchor.startsWith("L")) {
+                int ownerEnd = mappedAnchor.indexOf(';');
+                if (ownerEnd > 1) {
+                    String owner = mappedAnchor.substring(1, ownerEnd);
+                    String member = mappedAnchor.substring(ownerEnd + 1);
+                    if (member.startsWith("<init>(")) {
+                        allocatedType = owner;
+                        constructorDescriptor = member.substring("<init>".length());
+                    } else if (member.isBlank()) {
+                        allocatedType = owner;
+                    }
+                }
+            } else {
+                String normalized = mappedAnchor.replace('.', '/');
+                if (normalized.startsWith("net/minecraft/")) {
+                    allocatedType = normalized;
+                }
+            }
+            if (allocatedType == null || !allocatedType.startsWith("net/minecraft/")) {
+                return null;
+            }
+            for (String rawTarget : rawTargets) {
+                String normalizedTarget = rawTarget.replace('.', '/');
+                if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                    normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+                }
+                String target = aliases.mapClass(mappings.mapClassName(normalizedTarget));
+                if (!targetApi.hasClass(target) || !targetApi.hasMethodNamed(target, methodName)) {
+                    continue;
+                }
+                boolean found = constructorDescriptor == null
+                        ? targetApi.hasNewExpressionOfType(target, methodName, allocatedType)
+                        : targetApi.hasNewExpression(target, methodName, allocatedType, constructorDescriptor);
+                if (!found) {
+                    return "@At(value=\"NEW\", target=\"" + display + "\") has no matching allocation in "
+                            + target + "#" + methodName + " in Minecraft 26.2";
+                }
+            }
+            return null;
+        }
+
+        if (!(atValue.equals("INVOKE") || atValue.equals("INVOKE_ASSIGN")
+                || atValue.equals("FIELD")) || !mappedAnchor.startsWith("L")) {
+            return null;
+        }
+        int ownerEnd = mappedAnchor.indexOf(';');
+        if (ownerEnd <= 1 || ownerEnd + 1 >= mappedAnchor.length()) {
+            return null;
+        }
+        String anchorOwner = mappedAnchor.substring(1, ownerEnd);
+        if (!anchorOwner.startsWith("net/minecraft/")) {
+            return null;
+        }
+        String member = mappedAnchor.substring(ownerEnd + 1);
+        boolean field = atValue.equals("FIELD");
+        String memberName;
+        String descriptor;
+        if (field) {
+            int separator = member.indexOf(':');
+            if (separator <= 0) {
+                return null;
+            }
+            memberName = member.substring(0, separator);
+            descriptor = member.substring(separator + 1);
+            if (targetApi.fieldAccess(anchorOwner, memberName, descriptor) == null) {
+                return "@At(value=\"FIELD\", target=\"" + mappedAnchor
+                        + "\") references a missing field in Minecraft 26.2";
+            }
+        } else {
+            int descriptorStart = member.indexOf('(');
+            if (descriptorStart <= 0) {
+                return null;
+            }
+            memberName = member.substring(0, descriptorStart);
+            descriptor = member.substring(descriptorStart);
+            if (targetApi.methodAccess(anchorOwner, memberName, descriptor) == null) {
+                return "@At(value=\"" + atValue + "\", target=\"" + mappedAnchor
+                        + "\") references a missing method in Minecraft 26.2";
+            }
+        }
+
+        for (String rawTarget : rawTargets) {
+            String normalizedTarget = rawTarget.replace('.', '/');
+            if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+            }
+            String target = aliases.mapClass(mappings.mapClassName(normalizedTarget));
+            if (!targetApi.hasClass(target) || !targetApi.hasMethodNamed(target, methodName)) {
+                continue;
+            }
+            boolean found = field
+                    ? targetApi.hasFieldAccessInNamedMethod(target, methodName,
+                            anchorOwner, memberName, descriptor)
+                    : targetApi.hasInvocationInNamedMethod(target, methodName,
+                            anchorOwner, memberName, descriptor);
+            if (!found) {
+                return "@At(value=\"" + atValue + "\", target=\"" + mappedAnchor
+                        + "\") is absent from target method " + target + "#" + methodName
+                        + " in Minecraft 26.2";
+            }
+        }
+        return null;
+    }
+
+    /**
      * Normalize legacy bytecode when Mixin asks Fabric for class metadata. This is separate from
      * Instrumentation: Mixin can inspect a class before the JVM invokes the Java-agent transformer.
      * Returning the input on failure is intentional; the regular definition-time transformer will
@@ -1076,11 +1256,15 @@ public final class MixinResourceRemapper {
                 return original;
             }
 
+            // Mixin may register some entries dynamically, bypassing the static JSON pruning
+            // hook. Remove only callback methods with proven-stale injection anchors before Mixin
+            // inspects the class metadata.
+            byte[] pruned = pruneIncompatibleInjectionMethods(original, currentMappings, aliases, targetApi);
             // Mixin selector strings are ordinary annotation strings, so ASM's standard
             // class remapper will not normalize them. Convert the supported selector attributes
             // first, then remap the surrounding descriptors and Type values as usual.
-            byte[] selectorsRemapped = MixinSelectorRemapper.remap(original, currentMappings, aliases, targetApi);
-            byte[] bytecodeInput = selectorsRemapped == null ? original : selectorsRemapped;
+            byte[] selectorsRemapped = MixinSelectorRemapper.remap(pruned, currentMappings, aliases, targetApi);
+            byte[] bytecodeInput = selectorsRemapped == null ? pruned : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
                     bytecodeInput, currentMappings, aliases, targetApi);
             if (remapped == null && selectorsRemapped == null) {
