@@ -492,6 +492,32 @@ final class MixinSelectorRemapper {
         return descriptorStart > 0 ? mapped.substring(0, descriptorStart) : mapped;
     }
 
+    static String normalizedMethodSelectorWithDescriptor(String selector, List<String> targets,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        if (selector == null || selector.isBlank()) {
+            return selector;
+        }
+        String mapped = remapSelector(selector, targets, mappings, aliases);
+        if (mapped.startsWith("?")) {
+            mapped = mapped.substring(1);
+        }
+        if (mapped.startsWith("L")) {
+            int ownerEnd = mapped.indexOf(';');
+            if (ownerEnd >= 0 && ownerEnd + 1 < mapped.length()) {
+                mapped = mapped.substring(ownerEnd + 1);
+            }
+        }
+        int descriptorStart = mapped.indexOf('(');
+        if (descriptorStart <= 0) {
+            return mapped;
+        }
+        String name = mapped.substring(0, descriptorStart);
+        String descriptor = LegacyClassAliases.mapDescriptor(
+                aliases.mapDescriptor(mappings.mapDescriptor(mapped.substring(descriptorStart))), targetApi);
+        return name + descriptor;
+    }
+
     private static String remapSelector(String selector, List<String> targets,
                                         IntermediaryMappings mappings,
                                         CompatibilityScanner.AliasSet aliases) {
