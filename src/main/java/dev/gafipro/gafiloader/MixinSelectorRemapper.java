@@ -35,6 +35,11 @@ final class MixinSelectorRemapper {
     /** @return transformed bytes, or null when no selector/class string was changed */
     static byte[] remap(byte[] original, IntermediaryMappings mappings,
                         CompatibilityScanner.AliasSet aliases) {
+        return remap(original, mappings, aliases, null);
+    }
+
+    static byte[] remap(byte[] original, IntermediaryMappings mappings,
+                        CompatibilityScanner.AliasSet aliases, TargetApiIndex targetApi) {
         if (original == null || mappings == null || aliases == null) {
             return null;
         }
@@ -51,7 +56,7 @@ final class MixinSelectorRemapper {
             @Override
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                 return wrap(super.visitAnnotation(descriptor, visible), descriptor, targets,
-                        mappings, aliases, changed);
+                        mappings, aliases, changed, targetApi, null);
             }
 
             @Override
@@ -63,14 +68,14 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         return wrap(super.visitAnnotation(annotationDescriptor, visible), annotationDescriptor,
-                                targets, mappings, aliases, changed, descriptor);
+                                targets, mappings, aliases, changed, targetApi, descriptor);
                     }
 
                     @Override
                     public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
                                                                  String annotationDescriptor, boolean visible) {
                         return wrap(super.visitTypeAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
+                                annotationDescriptor, targets, mappings, aliases, changed, targetApi, descriptor);
                     }
                 };
             }
@@ -91,28 +96,28 @@ final class MixinSelectorRemapper {
                     public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
                                                                  String annotationDescriptor, boolean visible) {
                         return wrap(super.visitTypeAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed);
+                                annotationDescriptor, targets, mappings, aliases, changed, targetApi, null);
                     }
 
                     @Override
                     public AnnotationVisitor visitParameterAnnotation(int parameter, String annotationDescriptor,
                                                                        boolean visible) {
                         return wrap(super.visitParameterAnnotation(parameter, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
+                                annotationDescriptor, targets, mappings, aliases, changed, targetApi, descriptor);
                     }
 
                     @Override
                     public org.objectweb.asm.AnnotationVisitor visitInsnAnnotation(int typeRef,
                             org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
                         return wrap(super.visitInsnAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
+                                annotationDescriptor, targets, mappings, aliases, changed, targetApi, descriptor);
                     }
 
                     @Override
                     public org.objectweb.asm.AnnotationVisitor visitTryCatchAnnotation(int typeRef,
                             org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
                         return wrap(super.visitTryCatchAnnotation(typeRef, typePath, annotationDescriptor, visible),
-                                annotationDescriptor, targets, mappings, aliases, changed, descriptor);
+                                annotationDescriptor, targets, mappings, aliases, changed, targetApi, descriptor);
                     }
 
                     @Override
@@ -122,7 +127,7 @@ final class MixinSelectorRemapper {
                             boolean visible) {
                         return wrap(super.visitLocalVariableAnnotation(typeRef, typePath, start, end, index,
                                 annotationDescriptor, visible), annotationDescriptor, targets,
-                                mappings, aliases, changed, descriptor);
+                                mappings, aliases, changed, targetApi, descriptor);
                     }
                 };
             }
@@ -187,14 +192,8 @@ final class MixinSelectorRemapper {
     private static AnnotationVisitor wrap(AnnotationVisitor delegate, String annotationDescriptor,
                                           List<String> targets, IntermediaryMappings mappings,
                                           CompatibilityScanner.AliasSet aliases,
-                                          AtomicBoolean changed) {
-        return wrap(delegate, annotationDescriptor, targets, mappings, aliases, changed, null);
-    }
-
-    private static AnnotationVisitor wrap(AnnotationVisitor delegate, String annotationDescriptor,
-                                          List<String> targets, IntermediaryMappings mappings,
-                                          CompatibilityScanner.AliasSet aliases,
-                                          AtomicBoolean changed, String enclosingMethodDescriptor) {
+                                          AtomicBoolean changed, TargetApiIndex targetApi,
+                                          String enclosingMethodDescriptor) {
         if (delegate == null) {
             return null;
         }
@@ -203,7 +202,7 @@ final class MixinSelectorRemapper {
             public void visit(String name, Object value) {
                 if (value instanceof String stringValue) {
                     String mapped = mapStringValue(annotationDescriptor, name, stringValue,
-                            targets, mappings, aliases, enclosingMethodDescriptor);
+                            targets, mappings, aliases, enclosingMethodDescriptor, targetApi);
                     if (!mapped.equals(stringValue)) {
                         changed.set(true);
                     }
@@ -237,13 +236,13 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String nestedName, String nestedDescriptor) {
                         return wrap(super.visitAnnotation(nestedName, nestedDescriptor), nestedDescriptor,
-                                targets, mappings, aliases, changed, enclosingMethodDescriptor);
+                                targets, mappings, aliases, changed, targetApi, enclosingMethodDescriptor);
                     }
 
                     @Override
                     public AnnotationVisitor visitArray(String nestedName) {
                         return wrap(super.visitArray(nestedName), annotationDescriptor,
-                                targets, mappings, aliases, changed, enclosingMethodDescriptor);
+                                targets, mappings, aliases, changed, targetApi, enclosingMethodDescriptor);
                     }
                 };
             }
@@ -251,14 +250,15 @@ final class MixinSelectorRemapper {
             @Override
             public AnnotationVisitor visitAnnotation(String name, String nestedDescriptor) {
                 return wrap(super.visitAnnotation(name, nestedDescriptor), nestedDescriptor,
-                        targets, mappings, aliases, changed, enclosingMethodDescriptor);
+                        targets, mappings, aliases, changed, targetApi, enclosingMethodDescriptor);
             }
         };
     }
 
     private static String mapStringValue(String annotationDescriptor, String elementName, String value,
                                          List<String> targets, IntermediaryMappings mappings,
-                                         CompatibilityScanner.AliasSet aliases, String enclosingMethodDescriptor) {
+                                         CompatibilityScanner.AliasSet aliases, String enclosingMethodDescriptor,
+                                         TargetApiIndex targetApi) {
         if (value.isEmpty()) {
             return value;
         }
@@ -285,7 +285,32 @@ final class MixinSelectorRemapper {
         if (!methodSelector && !atTarget) {
             return value;
         }
-        return remapSelector(value, targets, mappings, aliases);
+        String mapped = remapSelector(value, targets, mappings, aliases);
+        return atTarget ? remapKnownTargetSelector(mapped, targetApi) : mapped;
+    }
+
+    /**
+     * Fabric API 1.21.11 injected into MultiPlayerGameMode.interactAt. In the newer
+     * target game, the same use-entity flow is anchored on interact. Only apply this reviewed
+     * selector adaptation when the target JAR proves the replacement signature exists.
+     */
+    private static String remapKnownTargetSelector(String selector, TargetApiIndex targetApi) {
+        if (targetApi == null || selector == null || selector.isBlank()) {
+            return selector;
+        }
+        String optional = selector.startsWith("?") ? "?" : "";
+        String value = optional.isEmpty() ? selector : selector.substring(1);
+        String owner = "net/minecraft/client/multiplayer/MultiPlayerGameMode";
+        String prefix = "L" + owner + ";interactAt";
+        if (!value.startsWith(prefix)) {
+            return selector;
+        }
+        String descriptor = value.substring(prefix.length());
+        if (!descriptor.startsWith("(") || !targetApi.hasClass(owner)
+                || targetApi.methodAccess(owner, "interact", descriptor) == null) {
+            return selector;
+        }
+        return optional + "L" + owner + ";interact" + descriptor;
     }
 
     private static String remapAccessorOrInvoker(String value, List<String> targets,
@@ -343,7 +368,8 @@ final class MixinSelectorRemapper {
         }
         boolean optional = selector.startsWith("?");
         String unwrapped = optional ? selector.substring(1) : selector;
-        String mapped = remapSelector(unwrapped, targets, mappings, aliases);
+        String mapped = remapKnownTargetSelector(
+                remapSelector(unwrapped, targets, mappings, aliases), targetApi);
         if (mapped == null || mapped.equals(unwrapped)) {
             // A selector that only needs descriptor normalization may still change even if the
             // member name stays the same; remapSelector handles that. If no full signature exists,
