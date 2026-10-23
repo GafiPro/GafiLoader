@@ -182,6 +182,24 @@ public final class GameSideCompatibilityAgent {
             }
         }
 
+        // The JVM may load the main Knot launcher class before premain. Retransform it as
+        // well, because MixinServiceKnot delegates config reads to Knot.getResourceAsStream.
+        if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
+            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+                if (loadedClass.getName().equals(
+                        KnotLauncherPatcher.TARGET_CLASS.replace('/', '.'))
+                        && instrumentation.isModifiableClass(loadedClass)) {
+                    try {
+                        instrumentation.retransformClasses(loadedClass);
+                        System.out.println("[Gafi Loader] Installed Knot launcher resource hook on an already-loaded class.");
+                    } catch (UnmodifiableClassException exception) {
+                        throw new IOException("Could not retransform already-loaded Knot launcher", exception);
+                    }
+                    break;
+                }
+            }
+        }
+
         // MixinServiceKnot may also be initialized by the launcher before premain.
         // Retransform it when possible so JSON/refmap resource reads receive the compatibility hook.
         if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
