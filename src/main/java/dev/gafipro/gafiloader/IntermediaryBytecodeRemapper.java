@@ -63,7 +63,7 @@ final class IntermediaryBytecodeRemapper {
             @Override
             public String map(String internalName) {
                 String normalized = mappings.mapClassName(internalName);
-                String mapped = aliases.mapClass(normalized);
+                String mapped = LegacyClassAliases.mapClass(aliases.mapClass(normalized), targetApi);
                 if (!mapped.equals(internalName)) {
                     changed.set(true);
                 }
@@ -124,7 +124,7 @@ final class IntermediaryBytecodeRemapper {
                                                 String descriptor, boolean isInterface) {
                         CompatibilityScanner.Reference mapped = mapReference(
                                 CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor,
-                                mappings, aliases, changed);
+                                mappings, aliases, targetApi, changed);
                         // A small number of removed convenience methods can be adapted by
                         // rewriting the call sequence in memory. This adapter is only enabled when
                         // the configured target JAR proves the replacement field and method exist.
@@ -142,26 +142,26 @@ final class IntermediaryBytecodeRemapper {
                     public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
                         CompatibilityScanner.Reference mapped = mapReference(
                                 CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor,
-                                mappings, aliases, changed);
+                                mappings, aliases, targetApi, changed);
                         mv.visitFieldInsn(opcode, mapped.owner(), mapped.name(), mapped.descriptor());
                     }
 
                     @Override
                     public void visitLdcInsn(Object value) {
-                        mv.visitLdcInsn(mapAliasAwareConstant(value, mappings, aliases, remapper, changed));
+                        mv.visitLdcInsn(mapAliasAwareConstant(value, mappings, aliases, remapper, targetApi, changed));
                     }
 
                     @Override
                     public void visitInvokeDynamicInsn(String name, String descriptor,
                                                        Handle bootstrapMethodHandle,
                                                        Object... bootstrapMethodArguments) {
-                        String mappedDescriptor = mapDescriptor(descriptor, mappings, aliases, changed);
+                        String mappedDescriptor = mapDescriptor(descriptor, mappings, aliases, targetApi, changed);
                         Handle mappedBootstrap = (Handle) mapAliasAwareConstant(
-                                bootstrapMethodHandle, mappings, aliases, remapper, changed);
+                                bootstrapMethodHandle, mappings, aliases, remapper, targetApi, changed);
                         Object[] mappedArguments = new Object[bootstrapMethodArguments.length];
                         for (int i = 0; i < bootstrapMethodArguments.length; i++) {
                             mappedArguments[i] = mapAliasAwareConstant(bootstrapMethodArguments[i],
-                                    mappings, aliases, remapper, changed);
+                                    mappings, aliases, remapper, targetApi, changed);
                         }
                         mv.visitInvokeDynamicInsn(name, mappedDescriptor, mappedBootstrap, mappedArguments);
                     }
@@ -203,9 +203,13 @@ final class IntermediaryBytecodeRemapper {
     private static CompatibilityScanner.Reference mapReference(
             CompatibilityScanner.SymbolKind kind, String owner, String name, String descriptor,
             IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
-            AtomicBoolean changed) {
-        CompatibilityScanner.Reference mapped = aliases.normalize(mappings.normalize(
+            TargetApiIndex targetApi, AtomicBoolean changed) {
+        CompatibilityScanner.Reference normalized = aliases.normalize(mappings.normalize(
                 new CompatibilityScanner.Reference(kind, owner, name, descriptor)));
+        CompatibilityScanner.Reference mapped = new CompatibilityScanner.Reference(
+                LegacyClassAliases.mapClass(normalized.owner(), targetApi),
+                normalized.name(),
+                LegacyClassAliases.mapDescriptor(normalized.descriptor(), targetApi));
         CompatibilityScanner.Reference original = new CompatibilityScanner.Reference(kind, owner, name, descriptor);
         if (!mapped.equals(original)) {
             changed.set(true);
@@ -214,8 +218,10 @@ final class IntermediaryBytecodeRemapper {
     }
 
     private static String mapDescriptor(String descriptor, IntermediaryMappings mappings,
-                                        CompatibilityScanner.AliasSet aliases, AtomicBoolean changed) {
-        String mapped = aliases.mapDescriptor(mappings.mapDescriptor(descriptor));
+                                        CompatibilityScanner.AliasSet aliases, TargetApiIndex targetApi,
+                                        AtomicBoolean changed) {
+        String mapped = LegacyClassAliases.mapDescriptor(
+                aliases.mapDescriptor(mappings.mapDescriptor(descriptor)), targetApi);
         if (!Objects.equals(mapped, descriptor)) {
             changed.set(true);
         }
@@ -224,25 +230,26 @@ final class IntermediaryBytecodeRemapper {
 
     private static Object mapAliasAwareConstant(Object value, IntermediaryMappings mappings,
                                                 CompatibilityScanner.AliasSet aliases,
-                                                Remapper remapper, AtomicBoolean changed) {
+                                                Remapper remapper, TargetApiIndex targetApi,
+                                                AtomicBoolean changed) {
         if (value instanceof Handle handle) {
             CompatibilityScanner.SymbolKind kind = handle.getTag() >= Opcodes.H_GETFIELD
                     && handle.getTag() <= Opcodes.H_PUTSTATIC
                     ? CompatibilityScanner.SymbolKind.FIELD : CompatibilityScanner.SymbolKind.METHOD;
             CompatibilityScanner.Reference mapped = mapReference(kind, handle.getOwner(), handle.getName(),
-                    handle.getDesc(), mappings, aliases, changed);
+                    handle.getDesc(), mappings, aliases, targetApi, changed);
             return new Handle(handle.getTag(), mapped.owner(), mapped.name(), mapped.descriptor(),
                     handle.isInterface());
         }
         if (value instanceof ConstantDynamic dynamic) {
             Handle bootstrap = (Handle) mapAliasAwareConstant(dynamic.getBootstrapMethod(),
-                    mappings, aliases, remapper, changed);
+                    mappings, aliases, remapper, targetApi, changed);
             Object[] arguments = new Object[dynamic.getBootstrapMethodArgumentCount()];
             for (int i = 0; i < arguments.length; i++) {
                 arguments[i] = mapAliasAwareConstant(dynamic.getBootstrapMethodArgument(i),
-                        mappings, aliases, remapper, changed);
+                        mappings, aliases, remapper, targetApi, changed);
             }
-            String descriptor = mapDescriptor(dynamic.getDescriptor(), mappings, aliases, changed);
+            String descriptor = mapDescriptor(dynamic.getDescriptor(), mappings, aliases, targetApi, changed);
             return new ConstantDynamic(dynamic.getName(), descriptor, bootstrap, arguments);
         }
         Object mapped = remapper.mapValue(value);
