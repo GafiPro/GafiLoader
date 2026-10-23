@@ -258,7 +258,7 @@ public final class GameSideCompatibilityAgent {
                 : CompatibilityScanner.AliasSet.load(bytecodeAliasesPath);
         TargetApiIndex targetApi = targetGameJarPath == null ? null : TargetApiIndex.load(targetGameJarPath);
         if (hasIntermediary) {
-            bytecodeAliases = bytecodeAliases.withBuiltInCompatibilityAliases();
+            bytecodeAliases = bytecodeAliases.withBuiltInCompatibilityAliases(targetApi);
         }
         if (targetApi != null && (bytecodeAliasesPath != null || hasIntermediary)) {
             bytecodeAliases.validateAgainstTarget(targetApi);
