@@ -174,6 +174,24 @@ public final class GameSideCompatibilityAgent {
             }
         }
 
+        // MixinServiceKnot may also be initialized by the launcher before premain.
+        // Retransform it when possible so JSON/refmap resource reads receive the compatibility hook.
+        if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
+            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+                if (loadedClass.getName().equals(
+                        MixinServiceKnotPatcher.TARGET_CLASS.replace('/', '.'))
+                        && instrumentation.isModifiableClass(loadedClass)) {
+                    try {
+                        instrumentation.retransformClasses(loadedClass);
+                        System.out.println("[Gafi Loader] Installed Mixin service resource hook on an already-loaded class.");
+                    } catch (UnmodifiableClassException exception) {
+                        throw new IOException("Could not retransform already-loaded MixinServiceKnot", exception);
+                    }
+                    break;
+                }
+            }
+        }
+
         System.out.println("[Gafi Loader] Runtime game-side compatibility agent active.");
         System.out.println("[Gafi Loader] Config: " + setup.configPath());
         System.out.println("[Gafi Loader] Game-side method alias rules: " + rules.ruleCount());
