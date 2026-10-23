@@ -119,6 +119,33 @@ class MixinSelectorRemapperTest {
     }
 
     @Test
+    void remapsIntermediaryDescriptorsInNewInjectionAnchors() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("new-selector-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("new-selector-intermediary.tiny");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "net.minecraft.Bar -> d:",
+                "net.minecraft.Baz -> e:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "c\td\tnet/minecraft/class_2",
+                "c\te\tnet/minecraft/class_3",
+                ""));
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+
+        byte[] original = mixinClassWithNewAtSelector();
+        byte[] transformed = MixinSelectorRemapper.remap(
+                original, mappings, CompatibilityScanner.AliasSet.empty());
+
+        assertNotEquals(null, transformed, "NEW descriptor class names should trigger remapping");
+        assertEquals("(Lnet/minecraft/Bar;)Lnet/minecraft/Baz;",
+                readSelectors(transformed).explicitAtTarget());
+    }
+
+    @Test
     void recognizesHyphenatedAndUnderscoredRefmapResourceNames() {
         assertTrue(MixinResourceRemapper.isMixinResource("fabric-api-refmap.json"));
         assertTrue(MixinResourceRemapper.isMixinResource("fabric_api.refmap.json"));
@@ -145,6 +172,36 @@ class MixinSelectorRemapperTest {
                 "at", "Lorg/spongepowered/asm/mixin/injection/At;");
         at.visit("value", "INVOKE");
         at.visit("target", "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;interactAt" + descriptor);
+        at.visitEnd();
+        inject.visitEnd();
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] mixinClassWithNewAtSelector() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, "example/NewExpressionMixin", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType("net/minecraft/class_1"));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "modify", "()V", null, null);
+        AnnotationVisitor inject = method.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;", true);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, "checkFallDamage");
+        methods.visitEnd();
+        AnnotationVisitor at = inject.visitAnnotation(
+                "at", "Lorg/spongepowered/asm/mixin/injection/At;");
+        at.visit("value", "NEW");
+        at.visit("target", "(Lnet/minecraft/class_2;)Lnet/minecraft/class_3;");
         at.visitEnd();
         inject.visitEnd();
         method.visitCode();
