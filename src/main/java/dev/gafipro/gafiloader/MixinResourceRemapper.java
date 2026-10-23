@@ -416,38 +416,83 @@ public final class MixinResourceRemapper {
                                     }
                                     if (incompatibility == null) {
                                         for (MixinAtTarget anchor : metadata.atTargets()) {
-                                            if (!anchor.atValue().equals("NEW")
-                                                    || !anchor.target().startsWith("(")) {
-                                                continue;
-                                            }
-                                            String targetDescriptor = aliases.mapDescriptor(
-                                                    mappings.mapDescriptor(anchor.target()));
-                                            String methodName = MixinSelectorRemapper.normalizedMethodSelector(
-                                                    anchor.methodSelector(), metadata.targets(), mappings, aliases);
-                                            for (String rawTarget : metadata.targets()) {
-                                                String normalizedTarget = rawTarget.replace('.', '/');
-                                                if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
-                                                    normalizedTarget = normalizedTarget.substring(
-                                                            1, normalizedTarget.length() - 1);
+                                            String atValue = anchor.atValue();
+                                            String mappedAnchor = remapText(anchor.target(), mappings, aliases);
+                                            if (atValue.equals("NEW") && anchor.target().startsWith("(")) {
+                                                String targetDescriptor = aliases.mapDescriptor(
+                                                        mappings.mapDescriptor(anchor.target()));
+                                                String methodName = MixinSelectorRemapper.normalizedMethodSelector(
+                                                        anchor.methodSelector(), metadata.targets(), mappings, aliases);
+                                                for (String rawTarget : metadata.targets()) {
+                                                    String normalizedTarget = rawTarget.replace('.', '/');
+                                                    if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                                                        normalizedTarget = normalizedTarget.substring(
+                                                                1, normalizedTarget.length() - 1);
+                                                    }
+                                                    String mappedTarget = aliases.mapClass(
+                                                            mappings.mapClassName(normalizedTarget));
+                                                    if (!targetApi.hasClass(mappedTarget)
+                                                            || !targetApi.hasMethodNamed(mappedTarget, methodName)) {
+                                                        continue;
+                                                    }
+                                                    if (!targetApi.hasNewExpression(
+                                                            mappedTarget, methodName, targetDescriptor)) {
+                                                        incompatibility = "@At(value=\"NEW\", target=\""
+                                                                + targetDescriptor + "\") has no matching object "
+                                                                + "allocation in Minecraft 26.2 method "
+                                                                + mappedTarget + "#" + methodName
+                                                                + "; this Mixin's behavior is not emulated";
+                                                        break;
+                                                    }
                                                 }
-                                                String mappedTarget = aliases.mapClass(
-                                                        mappings.mapClassName(normalizedTarget));
-                                                if (!targetApi.hasClass(mappedTarget)
-                                                        || !targetApi.hasMethodNamed(mappedTarget, methodName)) {
-                                                    continue;
-                                                }
-                                                if (!targetApi.hasNewExpression(
-                                                        mappedTarget, methodName, targetDescriptor)) {
-                                                    incompatibility = "@At(value=\"NEW\", target=\""
-                                                            + targetDescriptor + "\") has no matching object "
-                                                            + "allocation in Minecraft 26.2 method "
-                                                            + mappedTarget + "#" + methodName
-                                                            + "; this Mixin's behavior is not emulated";
+                                                if (incompatibility != null) {
                                                     break;
                                                 }
+                                                continue;
                                             }
-                                            if (incompatibility != null) {
-                                                break;
+
+                                            // Verify explicit invocation/field anchors against the target game.
+                                            // A stale @At target otherwise reaches Mixin and can crash the whole client.
+                                            if (!(atValue.equals("INVOKE") || atValue.equals("INVOKE_ASSIGN")
+                                                    || atValue.equals("FIELD")) || !mappedAnchor.startsWith("L")) {
+                                                continue;
+                                            }
+                                            int ownerEnd = mappedAnchor.indexOf(';');
+                                            if (ownerEnd <= 1 || ownerEnd + 1 >= mappedAnchor.length()) {
+                                                continue;
+                                            }
+                                            String anchorOwner = mappedAnchor.substring(1, ownerEnd);
+                                            if (!anchorOwner.startsWith("net/minecraft/")
+                                                    || !targetApi.hasClass(anchorOwner)) {
+                                                continue;
+                                            }
+                                            String member = mappedAnchor.substring(ownerEnd + 1);
+                                            if (atValue.equals("FIELD")) {
+                                                int separator = member.indexOf(':');
+                                                if (separator <= 0) {
+                                                    continue;
+                                                }
+                                                String fieldName = member.substring(0, separator);
+                                                String fieldDescriptor = member.substring(separator + 1);
+                                                if (targetApi.fieldAccess(anchorOwner, fieldName, fieldDescriptor) == null) {
+                                                    incompatibility = "@At(value=\"FIELD\", target=\""
+                                                            + mappedAnchor + "\") references a field absent from "
+                                                            + "Minecraft 26.2; this Mixin's behavior is not emulated";
+                                                    break;
+                                                }
+                                            } else {
+                                                int descriptorStart = member.indexOf('(');
+                                                if (descriptorStart <= 0) {
+                                                    continue;
+                                                }
+                                                String methodName = member.substring(0, descriptorStart);
+                                                String descriptor = member.substring(descriptorStart);
+                                                if (targetApi.methodAccess(anchorOwner, methodName, descriptor) == null) {
+                                                    incompatibility = "@At(value=\"" + atValue + "\", target=\""
+                                                            + mappedAnchor + "\") references a method absent from "
+                                                            + "Minecraft 26.2; this Mixin's behavior is not emulated";
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
