@@ -85,10 +85,28 @@ public final class GameSideCompatibilityAgent {
                         return hooked;
                     }
 
-                    if (intermediaryMappings == null || skipIntermediaryScan(className)) {
+                    if (intermediaryMappings == null) {
                         return transformed;
                     }
+
+                    // Mixin selectors such as @Inject(method = "method_123") are ordinary
+                    // annotation strings, not JVM member references. Normalize them during class
+                    // definition as well as at MixinServiceKnot's resource boundary: the service
+                    // hook does not see every route by which Knot defines Mixin classes.
                     byte[] mappingInput = transformed == null ? classfileBuffer : transformed;
+                    byte[] selectorRemapped = MixinSelectorRemapper.remap(
+                            mappingInput, intermediaryMappings, bytecodeAliases);
+                    if (selectorRemapped != null) {
+                        mappingInput = selectorRemapped;
+                        transformed = selectorRemapped;
+                        remappedClasses.increment();
+                        System.out.println("[Gafi Loader] Normalized legacy Mixin selectors at class definition: "
+                                + className);
+                    }
+
+                    if (skipIntermediaryScan(className)) {
+                        return transformed;
+                    }
                     byte[] remapped = IntermediaryBytecodeRemapper.remap(
                             mappingInput, intermediaryMappings, bytecodeAliases, targetApi);
                     if (remapped != null) {
