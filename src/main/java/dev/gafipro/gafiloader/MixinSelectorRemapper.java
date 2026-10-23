@@ -447,9 +447,9 @@ final class MixinSelectorRemapper {
                 }
                 continue;
             }
-            if (targetApi.methodAccess(owner, name, descriptor) == null && !optional) {
-                return "selector " + name + descriptor + " does not resolve on " + owner
-                        + " in Minecraft 26.2";
+            if (targetApi.declaredMethodAccess(owner, name, descriptor) == null && !optional) {
+                return "selector " + name + descriptor + " does not resolve to a method declared on "
+                        + owner + " in Minecraft 26.2";
             }
         }
         return null;
