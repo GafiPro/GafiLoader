@@ -286,6 +286,12 @@ final class MixinSelectorRemapper {
             return value;
         }
         String mapped = remapSelector(value, targets, mappings, aliases);
+        // NEW selectors use a constructor descriptor in the form (args)ReturnType, not the
+        // owner;member syntax handled by remapSelector. Leaving intermediary class names here
+        // makes Mixin scan zero allocations even when the target allocation exists.
+        if (atTarget && value.startsWith("(")) {
+            mapped = aliases.mapDescriptor(mappings.mapDescriptor(value));
+        }
         return atTarget ? remapKnownTargetSelector(mapped, targetApi) : mapped;
     }
 
