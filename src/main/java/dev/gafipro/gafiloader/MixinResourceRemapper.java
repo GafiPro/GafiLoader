@@ -438,8 +438,8 @@ public final class MixinResourceRemapper {
                                                 }
                                                 if (!targetApi.hasNewExpression(
                                                         mappedTarget, methodName, targetDescriptor)) {
-                                                    incompatibility = "@At(value=\\"NEW\\", target=\\""
-                                                            + targetDescriptor + "\\") has no matching object "
+                                                    incompatibility = "@At(value=\"NEW\", target=\""
+                                                            + targetDescriptor + "\") has no matching object "
                                                             + "allocation in Minecraft 26.2 method "
                                                             + mappedTarget + "#" + methodName
                                                             + "; this Mixin's behavior is not emulated";
