@@ -79,6 +79,14 @@ public final class GameSideCompatibilityAgent {
                         return hooked;
                     }
 
+                    if (intermediaryMappings != null
+                            && KnotLauncherPatcher.TARGET_CLASS.equals(className)) {
+                        byte[] hookInput = transformed == null ? classfileBuffer : transformed;
+                        byte[] hooked = KnotLauncherPatcher.transform(className, hookInput);
+                        System.out.println("[Gafi Loader] Enabled in-memory Knot launcher resource remapping.");
+                        return hooked;
+                    }
+
                     // KnotClassLoader also serves Mixin JSON/resources directly. Hooking only
                     // MixinServiceKnot misses configurations loaded through this classloader path.
                     if (intermediaryMappings != null
