@@ -771,7 +771,7 @@ public final class MixinResourceRemapper {
             // Mixin selector strings are ordinary annotation strings, so ASM's standard
             // class remapper will not normalize them. Convert the supported selector attributes
             // first, then remap the surrounding descriptors and Type values as usual.
-            byte[] selectorsRemapped = MixinSelectorRemapper.remap(original, currentMappings, aliases);
+            byte[] selectorsRemapped = MixinSelectorRemapper.remap(original, currentMappings, aliases, targetApi);
             byte[] bytecodeInput = selectorsRemapped == null ? original : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
                     bytecodeInput, currentMappings, aliases, targetApi);
