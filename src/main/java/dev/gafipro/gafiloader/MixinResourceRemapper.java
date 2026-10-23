@@ -80,12 +80,20 @@ public final class MixinResourceRemapper {
      * getResourceAsStream still receive the in-memory compatibility view.
      */
     public static URL transformUrl(String resourceName, URL original) {
-        if (original == null || mappings == null
-                || (!isMixinResource(resourceName) && !isClassResource(resourceName))) {
+        // Only wrap Mixin JSON/refmaps here. Wrapping ordinary class URLs can break
+        // Fabric's URL-to-path conversion for game and library classes.
+        if (original == null || mappings == null || !isMixinResource(resourceName)) {
             return original;
         }
         try {
             return new URL(null, original.toExternalForm(), new URLStreamHandler() {
+                @Override
+                protected void parseURL(URL url, String spec, int start, int limit) {
+                    setURL(url, original.getProtocol(), original.getHost(), original.getPort(),
+                            original.getAuthority(), original.getUserInfo(), original.getPath(),
+                            original.getQuery(), original.getRef());
+                }
+
                 @Override
                 protected URLConnection openConnection(URL url) {
                     return new URLConnection(url) {
