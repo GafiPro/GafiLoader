@@ -1227,9 +1227,10 @@ public final class MixinResourceRemapper {
             return null;
         }
         String anchorOwner = mappedAnchor.substring(1, ownerEnd);
-        if (!anchorOwner.startsWith("net/minecraft/")) {
-            return null;
-        }
+        // Injection anchors can call library methods (for example DataFixerUpper), so only
+        // validate global member existence when the owner belongs to the indexed game JAR.
+        // The instruction itself can still be checked inside a Minecraft target method.
+        boolean anchorOwnerIsGameClass = anchorOwner.startsWith("net/minecraft/");
         String member = mappedAnchor.substring(ownerEnd + 1);
         boolean field = atValue.equals("FIELD");
         String memberName;
@@ -1241,7 +1242,8 @@ public final class MixinResourceRemapper {
             }
             memberName = member.substring(0, separator);
             descriptor = member.substring(separator + 1);
-            if (targetApi.fieldAccess(anchorOwner, memberName, descriptor) == null) {
+            if (anchorOwnerIsGameClass
+                    && targetApi.fieldAccess(anchorOwner, memberName, descriptor) == null) {
                 return "@At(value=\"FIELD\", target=\"" + mappedAnchor
                         + "\") references a missing field in Minecraft 26.2";
             }
@@ -1252,7 +1254,8 @@ public final class MixinResourceRemapper {
             }
             memberName = member.substring(0, descriptorStart);
             descriptor = member.substring(descriptorStart);
-            if (targetApi.methodAccess(anchorOwner, memberName, descriptor) == null) {
+            if (anchorOwnerIsGameClass
+                    && targetApi.methodAccess(anchorOwner, memberName, descriptor) == null) {
                 return "@At(value=\"" + atValue + "\", target=\"" + mappedAnchor
                         + "\") references a missing method in Minecraft 26.2";
             }
@@ -1264,8 +1267,15 @@ public final class MixinResourceRemapper {
                 normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
             }
             String target = aliases.mapClass(mappings.mapClassName(normalizedTarget));
-            if (!targetApi.hasClass(target) || !targetApi.hasMethodNamed(target, methodName)) {
+            if (!targetApi.hasClass(target)) {
+                if (target.startsWith("net/minecraft/")) {
+                    return "Mixin target class " + target + " is absent from Minecraft 26.2";
+                }
                 continue;
+            }
+            if (!targetApi.hasMethodNamed(target, methodName)) {
+                return "target method " + target + "#" + methodName
+                        + " is absent from Minecraft 26.2";
             }
             boolean found = field
                     ? targetApi.hasFieldAccessInNamedMethod(target, methodName,
