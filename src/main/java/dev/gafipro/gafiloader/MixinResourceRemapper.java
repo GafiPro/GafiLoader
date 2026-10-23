@@ -420,6 +420,24 @@ public final class MixinResourceRemapper {
                                             continue;
                                         }
 
+                                        // Some launch paths do not pass every Mixin class through
+                                        // the class-byte hook. Preflight selectors at config-read time
+                                        // as a second safety boundary: a stale required selector must
+                                        // not crash the whole client. Skipping a Mixin is a fail-safe,
+                                        // not an emulation of the omitted behavior.
+                                        for (MixinSelector selector : metadata.selectors()) {
+                                            String selectorIssue = MixinSelectorRemapper.incompatibilityReason(
+                                                    selector.value(), metadata.targets(), mappings, aliases, targetApi);
+                                            if (selectorIssue != null) {
+                                                incompatibility = selectorIssue
+                                                        + "; Mixin skipped to prevent a fatal injection failure";
+                                                break;
+                                            }
+                                        }
+                                        if (incompatibility != null) {
+                                            break;
+                                        }
+
                                         for (ShadowMember shadow : metadata.shadowMembers()) {
                                             String memberName = shadow.name();
                                             if (!shadow.prefix().isEmpty() && memberName.startsWith(shadow.prefix())) {
