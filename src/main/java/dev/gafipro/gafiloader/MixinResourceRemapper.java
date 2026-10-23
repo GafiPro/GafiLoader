@@ -752,13 +752,27 @@ public final class MixinResourceRemapper {
         if (mixinName == null || mixinName.isBlank() || mixinName.startsWith("@")) {
             return null;
         }
-        String normalized = mixinName.replace('.', '/');
-        if (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        } else if (!normalized.contains("/") && mixinName.indexOf('.') < 0) {
-            normalized = mixinPackage.isBlank() ? normalized : mixinPackage + "/" + normalized;
-        } else if (!normalized.contains("/") && !mixinPackage.isBlank()) {
-            normalized = mixinPackage + "/" + normalized;
+
+        String packagePath = mixinPackage == null ? "" : mixinPackage.replace('.', '/');
+        String packageName = packagePath.replace('/', '.');
+        String normalized;
+        if (!packageName.isBlank() && mixinName.startsWith(packageName + ".")) {
+            // Fully-qualified dotted class name.
+            normalized = mixinName.substring(packageName.length() + 1).replace('.', '/');
+        } else if (mixinName.startsWith("/")) {
+            normalized = mixinName.substring(1).replace('.', '/');
+        } else if (mixinName.contains("/")) {
+            normalized = mixinName.replace('.', '/');
+            if (!packagePath.isBlank() && !normalized.startsWith(packagePath + "/")) {
+                // Slash-separated subpackage path relative to the config package.
+                normalized = packagePath + "/" + normalized;
+            }
+        } else {
+            // Relative names may contain dots to denote subpackages, e.g. ingredient.SomeMixin.
+            normalized = mixinName.replace('.', '/');
+            if (!packagePath.isBlank()) {
+                normalized = packagePath + "/" + normalized;
+            }
         }
         return normalized.endsWith(".class") ? normalized : normalized + ".class";
     }
