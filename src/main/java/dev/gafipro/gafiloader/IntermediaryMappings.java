@@ -39,6 +39,11 @@ final class IntermediaryMappings {
     private final Set<MemberLookupKey> ambiguousMembersByNameAndDescriptor;
     private final Map<MemberOwnerNameKey, String> memberNamesByOwnerAndName;
     private final Set<MemberOwnerNameKey> ambiguousMemberNamesByOwnerAndName;
+    // Mixin selectors can arrive with Mojang-named owners but Intermediary member names.
+    // Keep a second index keyed by the mapped owner to handle this mixed namespace safely.
+    private final Map<MemberOwnerNameKey, String> memberNamesByNamedOwnerAndName;
+    private final Set<MemberOwnerNameKey> ambiguousMemberNamesByNamedOwnerAndName;
+    private final Set<String> namedClassNames;
     private final Map<MemberNameKey, String> memberNamesByName;
     private final Set<MemberNameKey> ambiguousMemberNamesByName;
 
@@ -46,6 +51,7 @@ final class IntermediaryMappings {
                                  Map<MemberKey, MappedMember> intermediaryToNamedMembers) {
         this.intermediaryToNamedClasses = Map.copyOf(intermediaryToNamedClasses);
         this.intermediaryToNamedMembers = Map.copyOf(intermediaryToNamedMembers);
+        this.namedClassNames = Set.copyOf(intermediaryToNamedClasses.values());
 
         Map<MemberLookupKey, MappedMember> unambiguous = new HashMap<>();
         Set<MemberLookupKey> ambiguous = new HashSet<>();
@@ -72,6 +78,8 @@ final class IntermediaryMappings {
 
         Map<MemberOwnerNameKey, String> byOwnerAndName = new HashMap<>();
         Set<MemberOwnerNameKey> ambiguousByOwnerAndName = new HashSet<>();
+        Map<MemberOwnerNameKey, String> byNamedOwnerAndName = new HashMap<>();
+        Set<MemberOwnerNameKey> ambiguousByNamedOwnerAndName = new HashSet<>();
         Map<MemberNameKey, String> byName = new HashMap<>();
         Set<MemberNameKey> ambiguousByName = new HashSet<>();
         for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
@@ -87,6 +95,16 @@ final class IntermediaryMappings {
                 }
             }
 
+            MemberOwnerNameKey namedOwnerNameKey = new MemberOwnerNameKey(
+                    source.kind(), entry.getValue().owner(), source.name());
+            if (!ambiguousByNamedOwnerAndName.contains(namedOwnerNameKey)) {
+                String previous = byNamedOwnerAndName.putIfAbsent(namedOwnerNameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byNamedOwnerAndName.remove(namedOwnerNameKey);
+                    ambiguousByNamedOwnerAndName.add(namedOwnerNameKey);
+                }
+            }
+
             MemberNameKey nameKey = new MemberNameKey(source.kind(), source.name());
             if (!ambiguousByName.contains(nameKey)) {
                 String previous = byName.putIfAbsent(nameKey, mappedName);
@@ -98,6 +116,8 @@ final class IntermediaryMappings {
         }
         this.memberNamesByOwnerAndName = Map.copyOf(byOwnerAndName);
         this.ambiguousMemberNamesByOwnerAndName = Set.copyOf(ambiguousByOwnerAndName);
+        this.memberNamesByNamedOwnerAndName = Map.copyOf(byNamedOwnerAndName);
+        this.ambiguousMemberNamesByNamedOwnerAndName = Set.copyOf(ambiguousByNamedOwnerAndName);
         this.memberNamesByName = Map.copyOf(byName);
         this.ambiguousMemberNamesByName = Set.copyOf(ambiguousByName);
     }
@@ -267,6 +287,15 @@ final class IntermediaryMappings {
                     member.owner(), member.name(), member.descriptor());
         }
 
+        // Some legacy metadata is only partially remapped before Mixin reads it: its owner and
+        // descriptor types can already use Mojang names while the method/field name is Intermediary.
+        // Normalize that mixed form without guessing across ambiguous overload/name mappings.
+        if (namedClassNames.contains(reference.owner())) {
+            String mappedName = mapMemberName(reference.kind(), reference.owner(), reference.name());
+            return new CompatibilityScanner.Reference(reference.kind(), reference.owner(), mappedName,
+                    normalizeDescriptor(reference.descriptor()));
+        }
+
         // Intermediary names identify override groups, but the mapping row for an inherited
         // method is usually owned by its declaring superclass. A production mod can legally
         // reference that method through a subclass owner (for example Button.method_25355,
@@ -333,6 +362,17 @@ final class IntermediaryMappings {
             String direct = memberNamesByOwnerAndName.get(ownerKey);
             if (direct != null) {
                 return direct;
+            }
+        }
+
+        // Mixin class metadata may already have Mojang class names even when the annotation's
+        // member selector is still Intermediary. Only use a named-owner row when that exact
+        // mapped owner/name pair is unambiguous.
+        if (namedClassNames.contains(owner)
+                && !ambiguousMemberNamesByNamedOwnerAndName.contains(ownerKey)) {
+            String namedOwnerMatch = memberNamesByNamedOwnerAndName.get(ownerKey);
+            if (namedOwnerMatch != null) {
+                return namedOwnerMatch;
             }
         }
 
