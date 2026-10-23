@@ -414,6 +414,43 @@ public final class MixinResourceRemapper {
                                             }
                                         }
                                     }
+                                    if (incompatibility == null) {
+                                        for (MixinAtTarget anchor : metadata.atTargets()) {
+                                            if (!anchor.atValue().equals("NEW")
+                                                    || !anchor.target().startsWith("(")) {
+                                                continue;
+                                            }
+                                            String targetDescriptor = aliases.mapDescriptor(
+                                                    mappings.mapDescriptor(anchor.target()));
+                                            String methodName = MixinSelectorRemapper.normalizedMethodSelector(
+                                                    anchor.methodSelector(), metadata.targets(), mappings, aliases);
+                                            for (String rawTarget : metadata.targets()) {
+                                                String normalizedTarget = rawTarget.replace('.', '/');
+                                                if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                                                    normalizedTarget = normalizedTarget.substring(
+                                                            1, normalizedTarget.length() - 1);
+                                                }
+                                                String mappedTarget = aliases.mapClass(
+                                                        mappings.mapClassName(normalizedTarget));
+                                                if (!targetApi.hasClass(mappedTarget)
+                                                        || !targetApi.hasMethodNamed(mappedTarget, methodName)) {
+                                                    continue;
+                                                }
+                                                if (!targetApi.hasNewExpression(
+                                                        mappedTarget, methodName, targetDescriptor)) {
+                                                    incompatibility = "@At(value=\\"NEW\\", target=\\""
+                                                            + targetDescriptor + "\\") has no matching object "
+                                                            + "allocation in Minecraft 26.2 method "
+                                                            + mappedTarget + "#" + methodName
+                                                            + "; this Mixin's behavior is not emulated";
+                                                    break;
+                                                }
+                                            }
+                                            if (incompatibility != null) {
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } catch (IOException | RuntimeException exception) {
