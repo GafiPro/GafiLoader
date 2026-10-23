@@ -480,6 +480,27 @@ public final class MixinResourceRemapper {
                                                             + "Minecraft 26.2; this Mixin's behavior is not emulated";
                                                     break;
                                                 }
+                                                String targetMethodName = MixinSelectorRemapper.normalizedMethodSelector(
+                                                        anchor.methodSelector(), metadata.targets(), mappings, aliases);
+                                                for (String rawTarget : metadata.targets()) {
+                                                    String normalizedTarget = rawTarget.replace('.', '/');
+                                                    if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                                                        normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+                                                    }
+                                                    String mappedTarget = aliases.mapClass(mappings.mapClassName(normalizedTarget));
+                                                    if (targetApi.hasMethodNamed(mappedTarget, targetMethodName)
+                                                            && !targetApi.hasFieldAccessInNamedMethod(mappedTarget, targetMethodName,
+                                                                    anchorOwner, fieldName, fieldDescriptor)) {
+                                                        incompatibility = "@At(value=\"FIELD\", target=\""
+                                                                + mappedAnchor + "\") field access is absent from target method "
+                                                                + mappedTarget + "#" + targetMethodName
+                                                                + " in Minecraft 26.2; this Mixin's behavior is not emulated";
+                                                        break;
+                                                    }
+                                                }
+                                                if (incompatibility != null) {
+                                                    break;
+                                                }
                                             } else {
                                                 int descriptorStart = member.indexOf('(');
                                                 if (descriptorStart <= 0) {
@@ -491,6 +512,27 @@ public final class MixinResourceRemapper {
                                                     incompatibility = "@At(value=\"" + atValue + "\", target=\""
                                                             + mappedAnchor + "\") references a method absent from "
                                                             + "Minecraft 26.2; this Mixin's behavior is not emulated";
+                                                    break;
+                                                }
+                                                String targetMethodName = MixinSelectorRemapper.normalizedMethodSelector(
+                                                        anchor.methodSelector(), metadata.targets(), mappings, aliases);
+                                                for (String rawTarget : metadata.targets()) {
+                                                    String normalizedTarget = rawTarget.replace('.', '/');
+                                                    if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                                                        normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+                                                    }
+                                                    String mappedTarget = aliases.mapClass(mappings.mapClassName(normalizedTarget));
+                                                    if (targetApi.hasMethodNamed(mappedTarget, targetMethodName)
+                                                            && !targetApi.hasInvocationInNamedMethod(mappedTarget, targetMethodName,
+                                                                    anchorOwner, methodName, descriptor)) {
+                                                        incompatibility = "@At(value=\"" + atValue + "\", target=\""
+                                                                + mappedAnchor + "\") invocation is absent from target method "
+                                                                + mappedTarget + "#" + targetMethodName
+                                                                + " in Minecraft 26.2; this Mixin's behavior is not emulated";
+                                                        break;
+                                                    }
+                                                }
+                                                if (incompatibility != null) {
                                                     break;
                                                 }
                                             }
