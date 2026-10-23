@@ -5,6 +5,7 @@ import java.io.Reader;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
+import java.lang.instrument.UnmodifiableClassException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,7 +135,26 @@ public final class GameSideCompatibilityAgent {
                     throw failure;
                 }
             }
-        }, false);
+        }, instrumentation.isRetransformClassesSupported());
+
+        // Some Fabric launcher classes can be loaded before the first application class is
+        // transformed. Retransform KnotClassLoader if it is already loaded so its resource hook
+        // is still installed; otherwise the normal transformer will patch it on first load.
+        if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
+            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+                if (loadedClass.getName().equals(
+                        KnotClassLoaderPatcher.TARGET_CLASS.replace('/', '.'))
+                        && instrumentation.isModifiableClass(loadedClass)) {
+                    try {
+                        instrumentation.retransformClasses(loadedClass);
+                        System.out.println("[Gafi Loader] Installed Knot resource hook on an already-loaded class.");
+                    } catch (UnmodifiableClassException exception) {
+                        throw new IOException("Could not retransform already-loaded KnotClassLoader", exception);
+                    }
+                    break;
+                }
+            }
+        }
 
         System.out.println("[Gafi Loader] Runtime game-side compatibility agent active.");
         System.out.println("[Gafi Loader] Config: " + setup.configPath());
