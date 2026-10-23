@@ -165,6 +165,12 @@ final class TargetApiIndex {
         return target == null ? null : target.methods().get(new MemberKey(name, descriptor));
     }
 
+    boolean hasDeclaredMethodNamed(String owner, String name) {
+        TargetClass target = classes.get(owner);
+        return target != null && target.methods().keySet().stream()
+                .anyMatch(member -> member.name().equals(name));
+    }
+
     Integer methodAccess(String owner, String name, String descriptor) {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
