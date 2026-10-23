@@ -327,6 +327,12 @@ public final class MixinResourceRemapper {
                                 inspected = true;
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
                                 if (metadata != null) {
+                                    if (mixinName.endsWith("LivingEntityMixin")) {
+                                        System.out.println("[Gafi Loader] DEBUG mixin metadata " + mixinName
+                                                + " targets=" + metadata.targets()
+                                                + " selectors=" + metadata.selectors()
+                                                + " atTargets=" + metadata.atTargets());
+                                    }
                                     if (metadata.superName() != null
                                             && STRUCTURALLY_SKIPPED_MIXINS.contains(metadata.superName())) {
                                         incompatibility = "superclass Mixin " + metadata.superName()
