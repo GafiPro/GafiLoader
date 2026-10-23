@@ -14,6 +14,8 @@ import org.objectweb.asm.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -68,10 +70,89 @@ class MixinSelectorRemapperTest {
     }
 
     @Test
+    void remapsRemovedInteractAtMixinAnchorToVerifiedInteractMethod() throws Exception {
+        Path targetJar = temporaryDirectory.resolve("target-26.2.jar");
+        String descriptor = "(Lnet/minecraft/world/entity/player/Player;"
+                + "Lnet/minecraft/world/entity/Entity;"
+                + "Lnet/minecraft/world/phys/EntityHitResult;"
+                + "Lnet/minecraft/world/InteractionHand;)"
+                + "Lnet/minecraft/world/InteractionResult;";
+        byte[] targetClass = new ClassWriter(0) {{
+            visit(Opcodes.V25, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                    "net/minecraft/client/multiplayer/MultiPlayerGameMode", null,
+                    "java/lang/Object", null);
+            visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                    "interact", descriptor, null, null).visitEnd();
+            visitEnd();
+        }}.toByteArray();
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
+            jar.putNextEntry(new JarEntry(
+                    "net/minecraft/client/multiplayer/MultiPlayerGameMode.class"));
+            jar.write(targetClass);
+            jar.closeEntry();
+        }
+
+        Path mojangFile = temporaryDirectory.resolve("anchor-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("anchor-intermediary.tiny");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "net.minecraft.Bar -> d:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "c\td\tnet/minecraft/class_2",
+                ""));
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+
+        byte[] original = mixinClassWithInteractAtSelector(descriptor);
+        byte[] snapshot = original.clone();
+        byte[] transformed = MixinSelectorRemapper.remap(
+                original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        assertNotEquals(null, transformed, "The known legacy injection anchor should be adapted");
+        assertArrayEquals(snapshot, original, "The original mixin bytes must remain unchanged");
+        assertEquals("Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;interact" + descriptor,
+                readSelectors(transformed).explicitAtTarget());
+    }
+
+    @Test
     void recognizesHyphenatedAndUnderscoredRefmapResourceNames() {
         assertTrue(MixinResourceRemapper.isMixinResource("fabric-api-refmap.json"));
         assertTrue(MixinResourceRemapper.isMixinResource("fabric_api.refmap.json"));
         assertTrue(MixinResourceRemapper.isMixinResource("some.mixins.json"));
+    }
+
+    private static byte[] mixinClassWithInteractAtSelector(String descriptor) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, "example/InteractionMixin", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType("net/minecraft/client/Minecraft"));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "inject", "()V", null, null);
+        AnnotationVisitor inject = method.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;", true);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, "startUseItem");
+        methods.visitEnd();
+        AnnotationVisitor at = inject.visitAnnotation(
+                "at", "Lorg/spongepowered/asm/mixin/injection/At;");
+        at.visit("value", "INVOKE");
+        at.visit("target", "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;interactAt" + descriptor);
+        at.visitEnd();
+        inject.visitEnd();
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] mixinClassWithInjectionSelectors() {
