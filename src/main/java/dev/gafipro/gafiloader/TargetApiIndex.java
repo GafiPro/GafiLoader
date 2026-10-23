@@ -5,6 +5,7 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,6 +51,7 @@ final class TargetApiIndex {
                     ClassReader reader = new ClassReader(input);
                     Map<MemberKey, Integer> fields = new HashMap<>();
                     Map<MemberKey, Integer> methods = new HashMap<>();
+                    Map<MemberKey, Set<NewExpressionKey>> newExpressions = new HashMap<>();
                     int[] classAccess = new int[1];
                     String[] superName = new String[1];
                     String[][] interfaces = new String[1][];
@@ -72,14 +74,45 @@ final class TargetApiIndex {
                         @Override
                         public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                          String signature, String[] exceptions) {
-                            methods.put(new MemberKey(name, descriptor), access);
-                            return null;
-                        }
-                    }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                            MemberKey methodKey = new MemberKey(name, descriptor);
+                            methods.put(methodKey, access);
+                            Set<NewExpressionKey> expressions = new HashSet<>();
+                            newExpressions.put(methodKey, expressions);
+                            return new MethodVisitor(API) {
+                                private final List<String> pendingNewOwners = new java.util.ArrayList<>();
 
+                                @Override
+                                public void visitTypeInsn(int opcode, String type) {
+                                    if (opcode == Opcodes.NEW) {
+                                        pendingNewOwners.add(type);
+                                    }
+                                }
+
+                                @Override
+                                public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                            String methodDescriptor, boolean isInterface) {
+                                    if (opcode == Opcodes.INVOKESPECIAL && methodName.equals("<init>")) {
+                                        int pendingIndex = pendingNewOwners.lastIndexOf(owner);
+                                        if (pendingIndex >= 0) {
+                                            pendingNewOwners.remove(pendingIndex);
+                                            expressions.add(new NewExpressionKey(owner, methodDescriptor));
+                                        }
+                                    }
+                                }
+
+                                @Override
+                                public void visitEnd() {
+                                    newExpressions.put(methodKey, Set.copyOf(expressions));
+                                }
+                            };
+                        }
+                    }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+                    Map<MemberKey, Set<NewExpressionKey>> immutableNewExpressions = new HashMap<>();
+                    newExpressions.forEach((key, value) -> immutableNewExpressions.put(key, Set.copyOf(value)));
                     TargetClass previous = classes.putIfAbsent(reader.getClassName(),
                             new TargetClass(classAccess[0], superName[0], List.of(interfaces[0]),
-                                    Map.copyOf(fields), Map.copyOf(methods)));
+                                    Map.copyOf(fields), Map.copyOf(methods), Map.copyOf(immutableNewExpressions)));
                     if (previous != null) {
                         throw new IOException("Duplicate class entry for " + reader.getClassName()
                                 + " in target game JAR " + gameJar);
@@ -114,6 +147,34 @@ final class TargetApiIndex {
 
     Integer methodAccess(String owner, String name, String descriptor) {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
+    }
+
+    /**
+     * Checks whether a target method contains a matching object-allocation expression,
+     * used to validate Mixin @At(value="NEW", target="(args)ReturnType") anchors.
+     */
+    boolean hasNewExpression(String owner, String methodName, String atDescriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null || methodName == null || atDescriptor == null) {
+            return false;
+        }
+
+        final Type atType;
+        try {
+            atType = Type.getMethodType(atDescriptor);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        if (atType.getReturnType().getSort() != Type.OBJECT) {
+            return false;
+        }
+
+        String allocatedType = atType.getReturnType().getInternalName();
+        String constructorDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, atType.getArgumentTypes());
+        NewExpressionKey wanted = new NewExpressionKey(allocatedType, constructorDescriptor);
+        return target.newExpressions().entrySet().stream()
+                .anyMatch(entry -> entry.getKey().name().equals(methodName)
+                        && entry.getValue().contains(wanted));
     }
 
     boolean hasMethodNamed(String owner, String name) {
@@ -195,6 +256,8 @@ final class TargetApiIndex {
     }
 
     private record MemberKey(String name, String descriptor) {}
+    private record NewExpressionKey(String allocatedType, String constructorDescriptor) {}
     private record TargetClass(int access, String superName, List<String> interfaces,
-                               Map<MemberKey, Integer> fields, Map<MemberKey, Integer> methods) {}
+                               Map<MemberKey, Integer> fields, Map<MemberKey, Integer> methods,
+                               Map<MemberKey, Set<NewExpressionKey>> newExpressions) {}
 }
