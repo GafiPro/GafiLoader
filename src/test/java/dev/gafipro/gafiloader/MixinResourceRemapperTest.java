@@ -514,6 +514,10 @@ class MixinResourceRemapperTest {
         byte[] incompatible = classMixinWithInvokeAnchor(
                 "example/mixins/StaleInvokeMixin", livingEntity,
                 "checkFallDamage()V", invocationSelector);
+        byte[] prunedBytes = MixinResourceRemapper.transformClassBytes(
+                "example/mixins/StaleInvokeMixin.class", incompatible);
+        assertFalse(classHasMethod(prunedBytes, "modifyRenderShape"),
+                "A dynamically registered Mixin's stale callback must be removed before Mixin inspects it");
         byte[] unchanged = classMixinTargeting("example/mixins/UnchangedMixin", otherTarget);
 
         ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
@@ -603,6 +607,21 @@ class MixinResourceRemapperTest {
         method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static boolean classHasMethod(byte[] bytes, String methodName) {
+        boolean[] found = {false};
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (name.equals(methodName)) {
+                    found[0] = true;
+                }
+                return null;
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return found[0];
     }
 
     private static byte[] classWithMethod(String owner, String name, String descriptor) {
