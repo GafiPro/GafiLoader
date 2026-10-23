@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
@@ -1267,12 +1268,15 @@ public final class MixinResourceRemapper {
             byte[] bytecodeInput = selectorsRemapped == null ? pruned : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
                     bytecodeInput, currentMappings, aliases, targetApi);
-            if (remapped == null && selectorsRemapped == null) {
+            if (remapped == null && selectorsRemapped == null && pruned == original) {
                 return original;
             }
             System.out.println("[Gafi Loader] Normalized legacy bytecode for Mixin inspection: "
                     + requestedClassName + " (" + actualClassName + ")");
-            return remapped == null ? selectorsRemapped : remapped;
+            if (remapped != null) {
+                return remapped;
+            }
+            return selectorsRemapped == null ? pruned : selectorsRemapped;
         } catch (IOException | RuntimeException exception) {
             System.err.println("[Gafi Loader] Could not normalize class bytes for Mixin inspection: "
                     + requestedClassName + "; original bytes retained: " + exception.getMessage());
