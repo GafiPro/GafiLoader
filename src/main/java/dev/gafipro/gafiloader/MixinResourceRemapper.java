@@ -1169,8 +1169,39 @@ public final class MixinResourceRemapper {
             TargetApiIndex targetApi) {
         String methodName = MixinSelectorRemapper.normalizedMethodSelector(
                 anchor.methodSelector(), rawTargets, mappings, aliases);
+        String normalizedSelector = MixinSelectorRemapper.normalizedMethodSelectorWithDescriptor(
+                anchor.methodSelector(), rawTargets, mappings, aliases, targetApi);
         String atValue = anchor.atValue();
-        String mappedAnchor = remapText(anchor.target(), mappings, aliases);
+        String mappedAnchor = LegacyClassAliases.mapDescriptor(
+                remapText(anchor.target(), mappings, aliases), targetApi);
+
+        // Validate the injector's target method independently of its @At point. HEAD/RETURN
+        // injectors can be stale even when their injection point itself has no member selector.
+        int selectorDescriptorStart = normalizedSelector == null ? -1 : normalizedSelector.indexOf('(');
+        String selectorName = selectorDescriptorStart > 0
+                ? normalizedSelector.substring(0, selectorDescriptorStart) : normalizedSelector;
+        String selectorDescriptor = selectorDescriptorStart > 0
+                ? normalizedSelector.substring(selectorDescriptorStart) : null;
+        for (String rawTarget : rawTargets) {
+            String normalizedTarget = rawTarget.replace('.', '/');
+            if (normalizedTarget.startsWith("L") && normalizedTarget.endsWith(";")) {
+                normalizedTarget = normalizedTarget.substring(1, normalizedTarget.length() - 1);
+            }
+            String target = aliases.mapClass(mappings.mapClassName(normalizedTarget));
+            if (!targetApi.hasClass(target)) {
+                if (target.startsWith("net/minecraft/")) {
+                    return "Mixin target class " + target + " is absent from Minecraft 26.2";
+                }
+                continue;
+            }
+            boolean selectorExists = selectorDescriptor == null
+                    ? targetApi.hasMethodNamed(target, selectorName)
+                    : targetApi.methodAccess(target, selectorName, selectorDescriptor) != null;
+            if (!selectorExists) {
+                return "target selector " + normalizedSelector + " does not resolve on "
+                        + target + " in Minecraft 26.2";
+            }
+        }
 
         if (atValue.equals("NEW")) {
             String allocatedType = null;
