@@ -52,6 +52,8 @@ final class TargetApiIndex {
                     Map<MemberKey, Integer> fields = new HashMap<>();
                     Map<MemberKey, Integer> methods = new HashMap<>();
                     Map<MemberKey, Set<NewExpressionKey>> newExpressions = new HashMap<>();
+                    Map<MemberKey, Set<InvocationKey>> invocations = new HashMap<>();
+                    Map<MemberKey, Set<FieldAccessKey>> fieldAccesses = new HashMap<>();
                     int[] classAccess = new int[1];
                     String[] superName = new String[1];
                     String[][] interfaces = new String[1][];
@@ -77,7 +79,11 @@ final class TargetApiIndex {
                             MemberKey methodKey = new MemberKey(name, descriptor);
                             methods.put(methodKey, access);
                             Set<NewExpressionKey> expressions = new HashSet<>();
+                            Set<InvocationKey> methodInvocations = new HashSet<>();
+                            Set<FieldAccessKey> methodFieldAccesses = new HashSet<>();
                             newExpressions.put(methodKey, expressions);
+                            invocations.put(methodKey, methodInvocations);
+                            fieldAccesses.put(methodKey, methodFieldAccesses);
                             return new MethodVisitor(API) {
                                 private final List<String> pendingNewOwners = new java.util.ArrayList<>();
 
@@ -91,6 +97,7 @@ final class TargetApiIndex {
                                 @Override
                                 public void visitMethodInsn(int opcode, String owner, String methodName,
                                                             String methodDescriptor, boolean isInterface) {
+                                    methodInvocations.add(new InvocationKey(owner, methodName, methodDescriptor));
                                     if (opcode == Opcodes.INVOKESPECIAL && methodName.equals("<init>")) {
                                         int pendingIndex = pendingNewOwners.lastIndexOf(owner);
                                         if (pendingIndex >= 0) {
@@ -101,8 +108,16 @@ final class TargetApiIndex {
                                 }
 
                                 @Override
+                                public void visitFieldInsn(int opcode, String owner, String fieldName,
+                                                           String fieldDescriptor) {
+                                    methodFieldAccesses.add(new FieldAccessKey(owner, fieldName, fieldDescriptor));
+                                }
+
+                                @Override
                                 public void visitEnd() {
                                     newExpressions.put(methodKey, Set.copyOf(expressions));
+                                    invocations.put(methodKey, Set.copyOf(methodInvocations));
+                                    fieldAccesses.put(methodKey, Set.copyOf(methodFieldAccesses));
                                 }
                             };
                         }
@@ -110,9 +125,14 @@ final class TargetApiIndex {
 
                     Map<MemberKey, Set<NewExpressionKey>> immutableNewExpressions = new HashMap<>();
                     newExpressions.forEach((key, value) -> immutableNewExpressions.put(key, Set.copyOf(value)));
+                    Map<MemberKey, Set<InvocationKey>> immutableInvocations = new HashMap<>();
+                    invocations.forEach((key, value) -> immutableInvocations.put(key, Set.copyOf(value)));
+                    Map<MemberKey, Set<FieldAccessKey>> immutableFieldAccesses = new HashMap<>();
+                    fieldAccesses.forEach((key, value) -> immutableFieldAccesses.put(key, Set.copyOf(value)));
                     TargetClass previous = classes.putIfAbsent(reader.getClassName(),
                             new TargetClass(classAccess[0], superName[0], List.of(interfaces[0]),
-                                    Map.copyOf(fields), Map.copyOf(methods), Map.copyOf(immutableNewExpressions)));
+                                    Map.copyOf(fields), Map.copyOf(methods), Map.copyOf(immutableNewExpressions),
+                                    Map.copyOf(immutableInvocations), Map.copyOf(immutableFieldAccesses)));
                     if (previous != null) {
                         throw new IOException("Duplicate class entry for " + reader.getClassName()
                                 + " in target game JAR " + gameJar);
@@ -173,6 +193,34 @@ final class TargetApiIndex {
         String constructorDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, atType.getArgumentTypes());
         NewExpressionKey wanted = new NewExpressionKey(allocatedType, constructorDescriptor);
         return target.newExpressions().entrySet().stream()
+                .anyMatch(entry -> entry.getKey().name().equals(methodName)
+                        && entry.getValue().contains(wanted));
+    }
+
+    /** Checks whether a concrete invocation occurs inside any overload with the selected method name. */
+    boolean hasInvocationInNamedMethod(String owner, String methodName,
+                                       String invocationOwner, String invocationName,
+                                       String invocationDescriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return false;
+        }
+        InvocationKey wanted = new InvocationKey(invocationOwner, invocationName, invocationDescriptor);
+        return target.invocations().entrySet().stream()
+                .anyMatch(entry -> entry.getKey().name().equals(methodName)
+                        && entry.getValue().contains(wanted));
+    }
+
+    /** Checks whether a concrete field access occurs inside any overload with the selected method name. */
+    boolean hasFieldAccessInNamedMethod(String owner, String methodName,
+                                        String fieldOwner, String fieldName,
+                                        String fieldDescriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return false;
+        }
+        FieldAccessKey wanted = new FieldAccessKey(fieldOwner, fieldName, fieldDescriptor);
+        return target.fieldAccesses().entrySet().stream()
                 .anyMatch(entry -> entry.getKey().name().equals(methodName)
                         && entry.getValue().contains(wanted));
     }
@@ -257,7 +305,11 @@ final class TargetApiIndex {
 
     private record MemberKey(String name, String descriptor) {}
     private record NewExpressionKey(String allocatedType, String constructorDescriptor) {}
+    private record InvocationKey(String owner, String name, String descriptor) {}
+    private record FieldAccessKey(String owner, String name, String descriptor) {}
     private record TargetClass(int access, String superName, List<String> interfaces,
                                Map<MemberKey, Integer> fields, Map<MemberKey, Integer> methods,
-                               Map<MemberKey, Set<NewExpressionKey>> newExpressions) {}
+                               Map<MemberKey, Set<NewExpressionKey>> newExpressions,
+                               Map<MemberKey, Set<InvocationKey>> invocations,
+                               Map<MemberKey, Set<FieldAccessKey>> fieldAccesses) {}
 }
