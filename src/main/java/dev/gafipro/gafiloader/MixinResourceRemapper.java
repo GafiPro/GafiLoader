@@ -317,6 +317,10 @@ public final class MixinResourceRemapper {
                 if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
                     String mixinName = entry.getAsString();
                     classResource = mixinClassResource(mixinPackage, mixinName);
+                    if (mixinName.contains("LivingEntity")) {
+                        System.out.println("[Gafi Loader] DEBUG mixin entry=" + mixinName
+                                + " resource=" + classResource + " package=" + mixinPackage);
+                    }
                     if (classResource != null) {
                         boolean inspected = false;
                         try (InputStream input = openMixinClassResource(
@@ -326,6 +330,9 @@ public final class MixinResourceRemapper {
                             if (input != null) {
                                 inspected = true;
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
+                                if (metadata == null && mixinName.contains("LivingEntity")) {
+                                    System.out.println("[Gafi Loader] DEBUG no @Mixin targets found for " + classResource);
+                                }
                                 if (metadata != null) {
                                     if (mixinName.endsWith("LivingEntityMixin")) {
                                         System.out.println("[Gafi Loader] DEBUG mixin metadata " + mixinName
@@ -582,6 +589,10 @@ public final class MixinResourceRemapper {
                         } catch (IOException | RuntimeException exception) {
                             System.err.println("[Gafi Loader] Could not inspect mixin structure for "
                                     + mixinName + " in " + resourceName + ": " + exception.getMessage());
+                        }
+                        if (mixinName.contains("LivingEntity")) {
+                            System.out.println("[Gafi Loader] DEBUG mixin inspection result=" + mixinName
+                                    + " inspected=" + inspected + " incompatibility=" + incompatibility);
                         }
                         if (!inspected) {
                             uninspectableMixins.add(classResource);
