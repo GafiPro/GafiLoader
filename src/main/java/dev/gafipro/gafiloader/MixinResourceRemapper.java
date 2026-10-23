@@ -874,17 +874,47 @@ public final class MixinResourceRemapper {
 
                             @Override
                             public AnnotationVisitor visitArray(String elementName) {
-                                if (!elementName.equals("method")) {
-                                    return null;
-                                }
-                                return new AnnotationVisitor(Opcodes.ASM9) {
-                                    @Override
-                                    public void visit(String ignored, Object value) {
-                                        if (value instanceof String selector) {
-                                            methodSelectors.add(selector);
+                                if (elementName.equals("method")) {
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public void visit(String ignored, Object value) {
+                                            if (value instanceof String selector) {
+                                                methodSelectors.add(selector);
+                                            }
                                         }
-                                    }
-                                };
+                                    };
+                                }
+                                if (elementName.equals("at")) {
+                                    // MixinExtras injectors declare At[] rather than a single At.
+                                    // Their nested annotations are delivered through visitArray/visitAnnotation,
+                                    // so handle this form as well as the standard single-At form below.
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public AnnotationVisitor visitAnnotation(String ignored,
+                                                                                 String nestedDescriptor) {
+                                            if (!nestedDescriptor.equals(
+                                                    "Lorg/spongepowered/asm/mixin/injection/At;")) {
+                                                return null;
+                                            }
+                                            PendingAtTarget pending = new PendingAtTarget();
+                                            pendingTargets.add(pending);
+                                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                                @Override
+                                                public void visit(String atElement, Object value) {
+                                                    if (!(value instanceof String stringValue)) {
+                                                        return;
+                                                    }
+                                                    if (atElement.equals("value")) {
+                                                        pending.atValue = stringValue;
+                                                    } else if (atElement.equals("target")) {
+                                                        pending.target = stringValue;
+                                                    }
+                                                }
+                                            };
+                                        }
+                                    };
+                                }
+                                return null;
                             }
 
                             @Override
