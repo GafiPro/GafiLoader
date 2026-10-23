@@ -95,7 +95,7 @@ public final class GameSideCompatibilityAgent {
                     // hook does not see every route by which Knot defines Mixin classes.
                     byte[] mappingInput = transformed == null ? classfileBuffer : transformed;
                     byte[] selectorRemapped = MixinSelectorRemapper.remap(
-                            mappingInput, intermediaryMappings, bytecodeAliases);
+                            mappingInput, intermediaryMappings, bytecodeAliases, targetApi);
                     if (selectorRemapped != null) {
                         mappingInput = selectorRemapped;
                         transformed = selectorRemapped;
