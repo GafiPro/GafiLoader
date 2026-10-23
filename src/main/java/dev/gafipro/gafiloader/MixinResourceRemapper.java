@@ -384,8 +384,9 @@ public final class MixinResourceRemapper {
                                     System.out.println("[Gafi Loader] DEBUG no @Mixin targets found for " + classResource);
                                 }
                                 if (metadata != null) {
-                                    if (resourceName.contains("fabric-events-interaction-v0")) {
-                                        System.out.println("[Gafi Loader] DEBUG interaction mixin metadata "
+                                    if (resourceName.contains("fabric-events-interaction-v0")
+                                            || resourceName.contains("fabric-recipe-api-v1")) {
+                                        System.out.println("[Gafi Loader] DEBUG inspected mixin metadata "
                                                 + mixinName + " targets=" + metadata.targets()
                                                 + " selectors=" + metadata.selectors()
                                                 + " atTargets=" + metadata.atTargets());
@@ -477,6 +478,11 @@ public final class MixinResourceRemapper {
                                         for (MixinSelector selector : metadata.selectors()) {
                                             String selectorProblem = MixinSelectorRemapper.incompatibilityReason(
                                                     selector.value(), metadata.targets(), mappings, aliases, targetApi);
+                                            if (resourceName.contains("fabric-recipe-api-v1")) {
+                                                System.out.println("[Gafi Loader] DEBUG recipe selector "
+                                                        + mixinName + " " + selector.value()
+                                                        + " -> " + selectorProblem);
+                                            }
                                             if (selectorProblem != null) {
                                                 incompatibility = selectorProblem;
                                                 break;
