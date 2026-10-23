@@ -404,6 +404,125 @@ class MixinResourceRemapperTest {
     }
 
     @Test
+    void skipsMixinWhenItsNewExpressionAnchorIsAbsentFromTheActualTargetMethod() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("new-anchor-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("new-anchor-intermediary.tiny");
+        Path targetJar = temporaryDirectory.resolve("new-anchor-target.jar");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "net.minecraft.Bar -> b:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "c\tb\tnet/minecraft/class_2",
+                ""));
+        String livingEntity = "net/minecraft/world/entity/LivingEntity";
+        String particleOption = "net/minecraft/core/particles/BlockParticleOption";
+        String otherTarget = "net/minecraft/other/OtherTarget";
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
+            addClass(jar, livingEntity, classWithMethod(livingEntity, "checkFallDamage", "()V"));
+            addClass(jar, particleOption, ordinaryClass(particleOption));
+            addClass(jar, otherTarget, ordinaryClass(otherTarget));
+        }
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        String constructorSelector = "(Lnet/minecraft/core/particles/ParticleType;"
+                + "Lnet/minecraft/world/level/block/state/BlockState;)"
+                + "Lnet/minecraft/core/particles/BlockParticleOption;";
+        byte[] incompatible = classMixinWithNewExpressionAnchor(
+                "example/mixins/ParticleLivingEntityMixin", livingEntity,
+                "checkFallDamage", constructorSelector);
+        byte[] unchanged = classMixinTargeting("example/mixins/UnchangedMixin", otherTarget);
+
+        ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
+        ClassLoader resourceLoader = new ClassLoader(originalLoader) {
+            @Override
+            public InputStream getResourceAsStream(String name) {
+                if (name.equals("example/mixins/ParticleLivingEntityMixin.class")) {
+                    return new ByteArrayInputStream(incompatible);
+                }
+                if (name.equals("example/mixins/UnchangedMixin.class")) {
+                    return new ByteArrayInputStream(unchanged);
+                }
+                return super.getResourceAsStream(name);
+            }
+        };
+
+        String config = """
+                {
+                  "package": "example.mixins",
+                  "client": ["ParticleLivingEntityMixin", "UnchangedMixin"]
+                }
+                """;
+        String transformed;
+        try {
+            Thread.currentThread().setContextClassLoader(resourceLoader);
+            try (InputStream stream = MixinResourceRemapper.transform(
+                    "fabric-particles-v1.mixins.json",
+                    new ByteArrayInputStream(config.getBytes(StandardCharsets.UTF_8)))) {
+                transformed = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalLoader);
+        }
+
+        assertFalse(transformed.contains("ParticleLivingEntityMixin"), transformed);
+        assertTrue(transformed.contains("UnchangedMixin"), transformed);
+        assertTrue(config.contains("ParticleLivingEntityMixin"),
+                "The source configuration text must remain unchanged");
+    }
+
+    private static byte[] classWithMethod(String owner, String name, String descriptor) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, name, descriptor, null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinWithNewExpressionAnchor(String mixinName, String targetName,
+                                                            String targetMethod, String constructorSelector) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, mixinName, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetName));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "modifyParticle", "()V", null, null);
+        AnnotationVisitor injection = method.visitAnnotation(
+                "Lcom/llamalad7/mixinextras/injector/ModifyExpressionValue;", false);
+        AnnotationVisitor methods = injection.visitArray("method");
+        methods.visit(null, targetMethod);
+        methods.visitEnd();
+        AnnotationVisitor at = injection.visitAnnotation(
+                "at", "Lorg/spongepowered/asm/mixin/injection/At;");
+        at.visit("value", "NEW");
+        at.visit("target", constructorSelector);
+        at.visitEnd();
+        injection.visitEnd();
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addClass(JarOutputStream jar, String internalName, byte[] bytes) throws IOException {
+        jar.putNextEntry(new ZipEntry(internalName + ".class"));
+        jar.write(bytes);
+        jar.closeEntry();
+    }
+
+    @Test
     void fallsBackToAnotherClassLoaderWhenTheContextLoaderCannotResolveMixinClassResources() throws Exception {
         byte[] expected = "mixin-bytecode".getBytes(StandardCharsets.UTF_8);
         ClassLoader contextLoader = new ClassLoader(null) {
