@@ -89,7 +89,7 @@ final class MixinSelectorRemapper {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         return wrap(super.visitAnnotation(annotationDescriptor, visible), annotationDescriptor,
-                                targets, mappings, aliases, changed, descriptor);
+                                targets, mappings, aliases, changed, targetApi, descriptor);
                     }
 
                     @Override
