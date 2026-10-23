@@ -48,6 +48,9 @@ public final class GameSideCompatibilityAgent {
                 if (className == null) {
                     return null;
                 }
+                if (KnotClassLoaderPatcher.TARGET_CLASS.equals(className)) {
+                    System.out.println("[Gafi Loader] DEBUG transformer received KnotClassLoader bytes.");
+                }
 
                 try {
                     // Game classes are already in 26.2's runtime namespace. They may still receive
@@ -140,6 +143,21 @@ public final class GameSideCompatibilityAgent {
         // Some Fabric launcher classes can be loaded before the first application class is
         // transformed. Retransform KnotClassLoader if it is already loaded so its resource hook
         // is still installed; otherwise the normal transformer will patch it on first load.
+        if (intermediaryMappings != null) {
+            System.out.println("[Gafi Loader] DEBUG retransformation supported="
+                    + instrumentation.isRetransformClassesSupported());
+            boolean knotAlreadyLoaded = false;
+            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+                if (loadedClass.getName().equals(KnotClassLoaderPatcher.TARGET_CLASS.replace('/', '.'))) {
+                    knotAlreadyLoaded = true;
+                    System.out.println("[Gafi Loader] DEBUG KnotClassLoader already loaded; modifiable="
+                            + instrumentation.isModifiableClass(loadedClass));
+                }
+            }
+            if (!knotAlreadyLoaded) {
+                System.out.println("[Gafi Loader] DEBUG KnotClassLoader not loaded when transformer was installed.");
+            }
+        }
         if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
             for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
                 if (loadedClass.getName().equals(
