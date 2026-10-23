@@ -400,10 +400,12 @@ final class MixinSelectorRemapper {
             if (!targetApi.hasClass(owner)) {
                 return optional ? null : "selector owner class " + owner + " is absent from Minecraft 26.2";
             }
+            // Mixin injectors are applied to methods declared by the target class itself;
+            // a same-signature method inherited from a superclass is not an injection target.
             boolean exists = parsed.method()
                     ? (parsed.descriptor() == null
-                        ? targetApi.hasMethodNamed(owner, parsed.name())
-                        : targetApi.methodAccess(owner, parsed.name(), parsed.descriptor()) != null)
+                        ? targetApi.hasDeclaredMethodNamed(owner, parsed.name())
+                        : targetApi.declaredMethodAccess(owner, parsed.name(), parsed.descriptor()) != null)
                     : targetApi.fieldAccess(owner, parsed.name(), parsed.descriptor()) != null;
             if (!exists && !optional) {
                 return "selector " + mapped + " does not exist in Minecraft 26.2";
