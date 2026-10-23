@@ -57,3 +57,8 @@ Not yet implemented or verified:
 - End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod. Remaining game-wide API differences include the `TimerQueue` serialization redesign and removed loot score-provider APIs; they need targeted compatibility work and are not claimed to be adapted.
 
 Therefore this is an early runtime-bridge prototype, not a claim that arbitrary legacy mods already load.
+
+
+### Injection-point validation
+
+The runtime compatibility scanner validates not only whether an `@At` invocation or field exists somewhere in Minecraft 26.2, but whether that exact instruction occurs inside the selected target method. It also validates both supported `NEW` selector forms: constructor descriptors and explicit `<init>` selectors. When an injection anchor is stale, Gafi Loader removes only the incompatible Mixin entry from the in-memory configuration and reports that the skipped behavior is not emulated; it never changes the original mod JAR.
