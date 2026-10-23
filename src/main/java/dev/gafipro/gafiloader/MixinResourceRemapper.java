@@ -522,6 +522,7 @@ public final class MixinResourceRemapper {
         List<ShadowMember> shadowMembers = new ArrayList<>();
         List<AccessorTarget> accessorTargets = new ArrayList<>();
         List<MixinSelector> selectors = new ArrayList<>();
+        List<MixinAtTarget> atTargets = readMixinAtTargets(bytes);
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public void visit(int version, int classAccess, String name, String signature,
@@ -623,7 +624,7 @@ public final class MixinResourceRemapper {
         }
         return new MixinClassMetadata((access[0] & Opcodes.ACC_INTERFACE) != 0,
                 List.copyOf(targets), List.copyOf(shadowMembers), List.copyOf(selectors),
-                List.copyOf(accessorTargets), superNameHolder[0]);
+                List.copyOf(accessorTargets), superNameHolder[0], atTargets);
     }
 
     private static AnnotationVisitor accessorMetadataVisitor(List<AccessorTarget> members,
@@ -683,6 +684,104 @@ public final class MixinResourceRemapper {
         return methodName;
     }
 
+    /**
+     * Collects method selectors together with their nested @At anchors. Mixin's generic annotation
+     * visitor callbacks otherwise flatten these into unrelated strings, which is insufficient for
+     * proving whether a NEW-expression anchor still exists in the target method.
+     */
+    private static List<MixinAtTarget> readMixinAtTargets(byte[] bytes) {
+        List<MixinAtTarget> result = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        boolean injection = annotationDescriptor.startsWith(
+                                "Lorg/spongepowered/asm/mixin/injection/")
+                                || annotationDescriptor.startsWith("Lcom/llamalad7/mixinextras/injector/");
+                        if (!injection) {
+                            return null;
+                        }
+
+                        List<String> methodSelectors = new ArrayList<>();
+                        List<PendingAtTarget> pendingTargets = new ArrayList<>();
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String elementName, Object value) {
+                                if (elementName.equals("method") && value instanceof String selector) {
+                                    methodSelectors.add(selector);
+                                }
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitArray(String elementName) {
+                                if (!elementName.equals("method")) {
+                                    return null;
+                                }
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        if (value instanceof String selector) {
+                                            methodSelectors.add(selector);
+                                        }
+                                    }
+                                };
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String elementName,
+                                                                      String nestedDescriptor) {
+                                if (!elementName.equals("at")
+                                        || !nestedDescriptor.equals("Lorg/spongepowered/asm/mixin/injection/At;")) {
+                                    return null;
+                                }
+                                PendingAtTarget pending = new PendingAtTarget();
+                                pendingTargets.add(pending);
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String atElement, Object value) {
+                                        if (!(value instanceof String stringValue)) {
+                                            return;
+                                        }
+                                        if (atElement.equals("value")) {
+                                            pending.atValue = stringValue;
+                                        } else if (atElement.equals("target")) {
+                                            pending.target = stringValue;
+                                        }
+                                    }
+                                };
+                            }
+
+                            @Override
+                            public void visitEnd() {
+                                if (methodSelectors.isEmpty()) {
+                                    return;
+                                }
+                                for (PendingAtTarget pending : pendingTargets) {
+                                    if (pending.target == null || pending.atValue == null) {
+                                        continue;
+                                    }
+                                    for (String methodSelector : methodSelectors) {
+                                        result.add(new MixinAtTarget(
+                                                methodSelector, pending.atValue, pending.target));
+                                    }
+                                }
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return List.copyOf(result);
+    }
+
+    private static final class PendingAtTarget {
+        private String atValue;
+        private String target;
+    }
+
     private static AnnotationVisitor selectorMetadataVisitor(List<MixinSelector> selectors,
                                                               String annotationDescriptor) {
         boolean atAnnotation = annotationDescriptor.equals("Lorg/spongepowered/asm/mixin/injection/At;");
@@ -727,9 +826,11 @@ public final class MixinResourceRemapper {
     private record ShadowMember(boolean method, String name, String descriptor, String prefix) {}
     private record AccessorTarget(boolean method, String name, String descriptor) {}
     private record MixinSelector(String value) {}
+    private record MixinAtTarget(String methodSelector, String atValue, String target) {}
     private record MixinClassMetadata(boolean isInterface, List<String> targets,
                                       List<ShadowMember> shadowMembers, List<MixinSelector> selectors,
-                                      List<AccessorTarget> accessorTargets, String superName) {}
+                                      List<AccessorTarget> accessorTargets, String superName,
+                                      List<MixinAtTarget> atTargets) {}
 
     static boolean isMixinResource(String resourceName) {
         if (resourceName == null) {
