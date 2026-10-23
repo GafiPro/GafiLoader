@@ -171,6 +171,25 @@ final class TargetApiIndex {
                 .anyMatch(member -> member.name().equals(name));
     }
 
+    /**
+     * Returns a replacement method name only when the exact descriptor identifies one
+     * unambiguous declared method on the target class. This safely handles simple renames
+     * in Mixin selectors without guessing among overloads.
+     */
+    String uniqueDeclaredMethodName(String owner, String descriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return null;
+        }
+        Set<String> candidates = new HashSet<>();
+        for (MemberKey member : target.methods().keySet()) {
+            if (member.descriptor().equals(descriptor)) {
+                candidates.add(member.name());
+            }
+        }
+        return candidates.size() == 1 ? candidates.iterator().next() : null;
+    }
+
     Integer methodAccess(String owner, String name, String descriptor) {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
