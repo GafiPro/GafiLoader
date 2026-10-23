@@ -275,6 +275,9 @@ public final class MixinResourceRemapper {
                 || (!isMixinResource(resourceName) && !classResource)) {
             return original;
         }
+        if (resourceName != null && resourceName.contains("fabric-events-interaction-v0")) {
+            System.out.println("[Gafi Loader] DEBUG intercepted interaction Mixin resource: " + resourceName);
+        }
 
         final byte[] source;
         try {
@@ -381,6 +384,12 @@ public final class MixinResourceRemapper {
                                     System.out.println("[Gafi Loader] DEBUG no @Mixin targets found for " + classResource);
                                 }
                                 if (metadata != null) {
+                                    if (resourceName.contains("fabric-events-interaction-v0")) {
+                                        System.out.println("[Gafi Loader] DEBUG interaction mixin metadata "
+                                                + mixinName + " targets=" + metadata.targets()
+                                                + " selectors=" + metadata.selectors()
+                                                + " atTargets=" + metadata.atTargets());
+                                    }
                                     if (mixinName.endsWith("LivingEntityMixin")) {
                                         System.out.println("[Gafi Loader] DEBUG mixin metadata " + mixinName
                                                 + " targets=" + metadata.targets()
