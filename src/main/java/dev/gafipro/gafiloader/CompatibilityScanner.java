@@ -753,6 +753,27 @@ public final class CompatibilityScanner {
             return new AliasSet(Map.of(), Map.of());
         }
 
+        /**
+         * Applies narrowly reviewed class moves that are known to exist in the pinned target
+         * game. These are runtime namespace aliases, not mod-JAR rewrites.
+         */
+        AliasSet withBuiltInCompatibilityAliases() {
+            Map<String, String> merged = new HashMap<>(classes);
+            putBuiltInClassAlias(merged,
+                    "net/minecraft/world/level/BlockAndTintGetter",
+                    "net/minecraft/client/renderer/block/BlockAndTintGetter");
+            return new AliasSet(merged, members);
+        }
+
+        private static void putBuiltInClassAlias(Map<String, String> aliases,
+                                                  String legacyName, String targetName) {
+            String previous = aliases.putIfAbsent(legacyName, targetName);
+            if (previous != null && !previous.equals(targetName)) {
+                throw new IllegalArgumentException("Conflicting built-in class alias for "
+                        + legacyName + ": " + previous + " vs " + targetName);
+            }
+        }
+
         static AliasSet load(Path file) throws IOException {
             if (!Files.isRegularFile(file)) {
                 throw new IllegalArgumentException("Alias file does not exist: " + file);
