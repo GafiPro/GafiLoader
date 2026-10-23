@@ -174,11 +174,9 @@ final class TargetApiIndex {
      * used to validate Mixin @At(value="NEW", target="(args)ReturnType") anchors.
      */
     boolean hasNewExpression(String owner, String methodName, String atDescriptor) {
-        TargetClass target = classes.get(owner);
-        if (target == null || methodName == null || atDescriptor == null) {
+        if (atDescriptor == null) {
             return false;
         }
-
         final Type atType;
         try {
             atType = Type.getMethodType(atDescriptor);
@@ -188,13 +186,35 @@ final class TargetApiIndex {
         if (atType.getReturnType().getSort() != Type.OBJECT) {
             return false;
         }
-
         String allocatedType = atType.getReturnType().getInternalName();
         String constructorDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, atType.getArgumentTypes());
+        return hasNewExpression(owner, methodName, allocatedType, constructorDescriptor);
+    }
+
+    /** Checks a constructor-specific NEW anchor against instructions in the selected target method. */
+    boolean hasNewExpression(String owner, String methodName, String allocatedType,
+                             String constructorDescriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null || methodName == null || allocatedType == null
+                || constructorDescriptor == null) {
+            return false;
+        }
         NewExpressionKey wanted = new NewExpressionKey(allocatedType, constructorDescriptor);
         return target.newExpressions().entrySet().stream()
                 .anyMatch(entry -> entry.getKey().name().equals(methodName)
                         && entry.getValue().contains(wanted));
+    }
+
+    /** Checks whether the selected method allocates an object of the requested type. */
+    boolean hasNewExpressionOfType(String owner, String methodName, String allocatedType) {
+        TargetClass target = classes.get(owner);
+        if (target == null || methodName == null || allocatedType == null) {
+            return false;
+        }
+        return target.newExpressions().entrySet().stream()
+                .anyMatch(entry -> entry.getKey().name().equals(methodName)
+                        && entry.getValue().stream().anyMatch(expression ->
+                                expression.allocatedType().equals(allocatedType)));
     }
 
     /** Checks whether a concrete invocation occurs inside any overload with the selected method name. */
