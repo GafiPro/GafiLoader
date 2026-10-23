@@ -476,6 +476,17 @@ public final class MixinResourceRemapper {
                                     }
                                     if (incompatibility == null) {
                                         for (MixinAtTarget anchor : metadata.atTargets()) {
+                                            // Check the exact bytecode location, not merely whether
+                                            // the named method exists. Redirects and other injector
+                                            // callbacks can otherwise fail Mixin's required injection
+                                            // count and crash the entire client during startup.
+                                            String staleAnchor = injectionAnchorIncompatibility(
+                                                    anchor, metadata.targets(), mappings, aliases, targetApi);
+                                            if (staleAnchor != null) {
+                                                incompatibility = staleAnchor
+                                                        + "; this Mixin's behavior is not emulated";
+                                                break;
+                                            }
                                             String atValue = anchor.atValue();
                                             String mappedAnchor = remapText(anchor.target(), mappings, aliases);
                                             if (atValue.equals("NEW")) {
