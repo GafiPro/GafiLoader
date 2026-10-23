@@ -1,5 +1,9 @@
 package dev.gafipro.gafiloader;
 
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * Reviewed class-name bridges for known moved Minecraft API types.
  *
@@ -8,32 +12,59 @@ package dev.gafipro.gafiloader;
  * or rewrite files in the original game/mod archives.</p>
  */
 final class LegacyClassAliases {
-    private static final String LEGACY_BLOCK_AND_TINT_GETTER =
-            "net/minecraft/world/level/BlockAndTintGetter";
-    private static final String RENDER_BLOCK_AND_TINT_GETTER =
-            "net/minecraft/client/renderer/block/BlockAndTintGetter";
+    private static final List<ClassMove> MOVES = List.of(
+            new ClassMove("net/minecraft/world/level/BlockAndTintGetter",
+                    "net/minecraft/client/renderer/block/BlockAndTintGetter"),
+            new ClassMove("net/minecraft/client/renderer/block/model/BlockStateModel",
+                    "net/minecraft/client/renderer/block/dispatch/BlockStateModel"),
+            new ClassMove("net/minecraft/client/renderer/block/model/BlockModelPart",
+                    "net/minecraft/client/renderer/block/dispatch/BlockStateModelPart"),
+            new ClassMove("net/minecraft/client/renderer/block/model/BlockModelDefinition",
+                    "net/minecraft/client/renderer/block/dispatch/BlockStateModelDispatcher")
+    );
+    private static final Pattern OBJECT_TYPE = Pattern.compile("L([^;]+);");
 
     private LegacyClassAliases() {}
 
     static String mapClass(String internalName, TargetApiIndex targetApi) {
-        if (internalName == null || targetApi == null) {
+        if (internalName == null || targetApi == null || targetApi.hasClass(internalName)) {
             return internalName;
         }
-        if (internalName.equals(LEGACY_BLOCK_AND_TINT_GETTER)
-                && !targetApi.hasClass(LEGACY_BLOCK_AND_TINT_GETTER)
-                && targetApi.hasClass(RENDER_BLOCK_AND_TINT_GETTER)) {
-            return RENDER_BLOCK_AND_TINT_GETTER;
+        for (ClassMove move : MOVES) {
+            if (!internalName.equals(move.legacyName())
+                    && !internalName.startsWith(move.legacyName() + "$")) {
+                continue;
+            }
+            if (targetApi.hasClass(move.legacyName())) {
+                continue;
+            }
+            String candidate = move.targetName()
+                    + internalName.substring(move.legacyName().length());
+            if (targetApi.hasClass(candidate)) {
+                return candidate;
+            }
         }
         return internalName;
     }
 
     static String mapDescriptor(String descriptor, TargetApiIndex targetApi) {
-        if (descriptor == null || targetApi == null
-                || targetApi.hasClass(LEGACY_BLOCK_AND_TINT_GETTER)
-                || !targetApi.hasClass(RENDER_BLOCK_AND_TINT_GETTER)) {
+        if (descriptor == null || targetApi == null) {
             return descriptor;
         }
-        return descriptor.replace("L" + LEGACY_BLOCK_AND_TINT_GETTER + ";",
-                "L" + RENDER_BLOCK_AND_TINT_GETTER + ";");
+        Matcher matcher = OBJECT_TYPE.matcher(descriptor);
+        StringBuffer result = new StringBuffer();
+        boolean changed = false;
+        while (matcher.find()) {
+            String originalName = matcher.group(1);
+            String mappedName = mapClass(originalName, targetApi);
+            if (!mappedName.equals(originalName)) {
+                changed = true;
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement("L" + mappedName + ";"));
+        }
+        matcher.appendTail(result);
+        return changed ? result.toString() : descriptor;
     }
+
+    private record ClassMove(String legacyName, String targetName) {}
 }
