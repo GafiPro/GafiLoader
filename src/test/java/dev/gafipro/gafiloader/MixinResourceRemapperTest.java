@@ -478,6 +478,131 @@ class MixinResourceRemapperTest {
                 "The source configuration text must remain unchanged");
     }
 
+    @Test
+    void skipsMixinWhenInvokeAnchorExistsElsewhereButNotInsideItsTargetMethod() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("invoke-anchor-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("invoke-anchor-intermediary.tiny");
+        Path targetJar = temporaryDirectory.resolve("invoke-anchor-target.jar");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "net.minecraft.Bar -> b:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "c\tb\tnet/minecraft/class_2",
+                ""));
+        String livingEntity = "net/minecraft/world/entity/LivingEntity";
+        String blockState = "net/minecraft/world/level/block/state/BlockState";
+        String renderShape = "net/minecraft/world/level/block/state/RenderShape";
+        String otherTarget = "net/minecraft/other/OtherTarget";
+        String renderDescriptor = "()L" + renderShape + ";";
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
+            addClass(jar, livingEntity, classWithTargetMethodAndUnrelatedInvocation(
+                    livingEntity, "checkFallDamage", blockState, "getRenderShape", renderDescriptor));
+            addClass(jar, blockState, classWithMethod(blockState, "getRenderShape", renderDescriptor));
+            addClass(jar, renderShape, ordinaryClass(renderShape));
+            addClass(jar, otherTarget, ordinaryClass(otherTarget));
+        }
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+        MixinResourceRemapper.configure(mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        String invocationSelector = "L" + blockState + ";getRenderShape" + renderDescriptor;
+        byte[] incompatible = classMixinWithInvokeAnchor(
+                "example/mixins/StaleInvokeMixin", livingEntity,
+                "checkFallDamage()V", invocationSelector);
+        byte[] unchanged = classMixinTargeting("example/mixins/UnchangedMixin", otherTarget);
+
+        ClassLoader originalLoader = Thread.currentThread().getContextClassLoader();
+        ClassLoader resourceLoader = new ClassLoader(originalLoader) {
+            @Override
+            public InputStream getResourceAsStream(String name) {
+                if (name.equals("example/mixins/StaleInvokeMixin.class")) {
+                    return new ByteArrayInputStream(incompatible);
+                }
+                if (name.equals("example/mixins/UnchangedMixin.class")) {
+                    return new ByteArrayInputStream(unchanged);
+                }
+                return super.getResourceAsStream(name);
+            }
+        };
+
+        String config = """
+                {
+                  "package": "example.mixins",
+                  "client": ["StaleInvokeMixin", "UnchangedMixin"]
+                }
+                """;
+        String transformed;
+        try {
+            Thread.currentThread().setContextClassLoader(resourceLoader);
+            try (InputStream stream = MixinResourceRemapper.transform(
+                    "fabric-particles-v1.mixins.json",
+                    new ByteArrayInputStream(config.getBytes(StandardCharsets.UTF_8)))) {
+                transformed = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalLoader);
+        }
+
+        assertFalse(transformed.contains("StaleInvokeMixin"), transformed);
+        assertTrue(transformed.contains("UnchangedMixin"), transformed);
+        assertTrue(config.contains("StaleInvokeMixin"),
+                "The source configuration text must remain unchanged");
+    }
+
+    private static byte[] classWithTargetMethodAndUnrelatedInvocation(
+            String owner, String targetMethod, String invokedOwner, String invokedName,
+            String invokedDescriptor) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
+        MethodVisitor target = writer.visitMethod(Opcodes.ACC_PUBLIC, targetMethod, "()V", null, null);
+        target.visitCode();
+        target.visitInsn(Opcodes.RETURN);
+        target.visitMaxs(0, 0);
+        target.visitEnd();
+        MethodVisitor unrelated = writer.visitMethod(Opcodes.ACC_PUBLIC, "unrelatedMethod", "()V", null, null);
+        unrelated.visitCode();
+        unrelated.visitVarInsn(Opcodes.ALOAD, 0);
+        unrelated.visitMethodInsn(Opcodes.INVOKEVIRTUAL, invokedOwner, invokedName, invokedDescriptor, false);
+        unrelated.visitInsn(Opcodes.POP);
+        unrelated.visitInsn(Opcodes.RETURN);
+        unrelated.visitMaxs(0, 0);
+        unrelated.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classMixinWithInvokeAnchor(String mixinName, String targetName,
+                                                      String targetMethod, String invocationSelector) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, mixinName, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetName));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "modifyRenderShape", "()V", null, null);
+        AnnotationVisitor injection = method.visitAnnotation(
+                "Lcom/llamalad7/mixinextras/injector/ModifyExpressionValue;", false);
+        AnnotationVisitor methods = injection.visitArray("method");
+        methods.visit(null, targetMethod);
+        methods.visitEnd();
+        AnnotationVisitor at = injection.visitAnnotation(
+                "at", "Lorg/spongepowered/asm/mixin/injection/At;");
+        at.visit("value", "INVOKE");
+        at.visit("target", invocationSelector);
+        at.visitEnd();
+        injection.visitEnd();
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] classWithMethod(String owner, String name, String descriptor) {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
