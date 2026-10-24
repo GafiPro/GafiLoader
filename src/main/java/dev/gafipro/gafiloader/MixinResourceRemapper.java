@@ -76,14 +76,15 @@ public final class MixinResourceRemapper {
     }
 
     /**
-     * Wraps Mixin JSON/refmap/class resource URLs so callers that use URL.openStream rather than
-     * getResourceAsStream still receive the in-memory compatibility view.
+     * Wrap only Mixin configuration/refmap URLs. Class-byte remapping has dedicated hooks in
+     * MixinServiceKnot and Mixin's bytecode inspection path; wrapping arbitrary URLs for classes
+     * whose names merely contain "Mixin" can break Fabric's code-source discovery for plugin
+     * classes such as IndigoMixinConfigPlugin. In particular, Fabric union URLs must retain their
+     * original URL handler and protocol.
      */
     public static URL transformUrl(String resourceName, URL original) {
-        // Wrap Mixin JSON/refmaps and only those Mixin class URLs that already expose a path.
-        // Fabric's union URLs with no path must remain untouched because Loader converts them to paths.
         if (original == null || mappings == null || original.getPath() == null
-                || (!isMixinResource(resourceName) && !isMixinClassResource(resourceName))) {
+                || !isMixinResource(resourceName)) {
             // Fabric union URLs may have no concrete path. Leave them intact so Fabric Loader
             // can convert them to its own resource path and the stream hooks can normalize bytes.
             return original;
