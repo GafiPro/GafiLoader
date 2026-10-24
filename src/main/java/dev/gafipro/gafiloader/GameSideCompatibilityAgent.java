@@ -166,6 +166,25 @@ public final class GameSideCompatibilityAgent {
             }
         }, instrumentation.isRetransformClassesSupported());
 
+        // Mixin can be loaded before premain by launcher/bootstrap setup. The transformer
+        // above cannot alter classes already defined unless they are explicitly retransformed.
+        // Reapply the @Shadow validation patch to an already-loaded preprocessor as well.
+        if (instrumentation.isRetransformClassesSupported()) {
+            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+                if (loadedClass.getName().equals(
+                        MixinShadowValidationPatcher.TARGET_CLASS.replace('/', '.'))
+                        && instrumentation.isModifiableClass(loadedClass)) {
+                    try {
+                        instrumentation.retransformClasses(loadedClass);
+                        System.out.println("[Gafi Loader] Installed legacy @Shadow validation hook on an already-loaded Mixin preprocessor.");
+                    } catch (UnmodifiableClassException exception) {
+                        throw new IOException("Could not retransform MixinPreProcessorStandard", exception);
+                    }
+                    break;
+                }
+            }
+        }
+
         // Some Fabric launcher classes can be loaded before the first application class is
         // transformed. Retransform KnotClassLoader if it is already loaded so its resource hook
         // is still installed; otherwise the normal transformer will patch it on first load.
