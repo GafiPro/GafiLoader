@@ -41,7 +41,10 @@ final class LegacyClassAliases {
             new ClassMove("net/minecraft/client/renderer/block/model/multipart/MultiPartModel",
                     "net/minecraft/client/renderer/block/dispatch/multipart/MultiPartModel"),
             new ClassMove("net/minecraft/client/renderer/block/model/multipart/Selector",
-                    "net/minecraft/client/renderer/block/dispatch/multipart/Selector")
+                    "net/minecraft/client/renderer/block/dispatch/multipart/Selector"),
+            // 26.2 renamed the GUI drawing facade during the render-state extraction.
+            new ClassMove("net/minecraft/client/gui/GuiGraphics",
+                    "net/minecraft/client/gui/GuiGraphicsExtractor")
     );
     private static final Pattern OBJECT_TYPE = Pattern.compile("L([^;]+);");
 
