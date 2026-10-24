@@ -239,6 +239,33 @@ final class TargetApiIndex {
         return candidates.size() == 1 ? candidates.iterator().next() : null;
     }
 
+    /**
+     * Finds the unique matching method declared directly by the target class.
+     * Mixin injectors scan methods present in that class's bytecode, not methods
+     * that are merely inherited from a superclass or interface.
+     */
+    String uniqueDeclaredVoidMethodSelectorByFirstArgument(String owner, String argumentDescriptor) {
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return null;
+        }
+        Set<String> candidates = new HashSet<>();
+        for (MemberKey method : target.methods().keySet()) {
+            try {
+                Type type = Type.getMethodType(method.descriptor());
+                Type[] arguments = type.getArgumentTypes();
+                if (type.getReturnType().getSort() == Type.VOID && arguments.length > 0
+                        && arguments[0].getDescriptor().equals(argumentDescriptor)
+                        && !method.name().startsWith("<")) {
+                    candidates.add(method.name() + method.descriptor());
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed descriptors from a broken fixture.
+            }
+        }
+        return candidates.size() == 1 ? candidates.iterator().next() : null;
+    }
+
     private void collectVoidMethodSelectorsByFirstArgument(String owner, String argumentDescriptor,
             Set<String> visited, Set<String> candidates) {
         if (owner == null || !visited.add(owner)) {
