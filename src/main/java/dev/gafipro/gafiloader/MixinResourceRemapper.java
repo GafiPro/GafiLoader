@@ -1597,6 +1597,7 @@ public final class MixinResourceRemapper {
         }
 
         Map<String, String> methodRenames = new java.util.HashMap<>();
+        Map<String, String> methodDescriptors = new java.util.HashMap<>();
         Map<String, String> fieldRenames = new java.util.HashMap<>();
         for (ShadowMember shadow : metadata.shadowMembers()) {
             String originalName = shadow.name();
@@ -1619,6 +1620,14 @@ public final class MixinResourceRemapper {
                 boolean exists = shadow.method()
                         ? targetApi.methodAccess(mappedOwner, mapped.name(), mappedDescriptor) != null
                         : targetApi.fieldAccess(mappedOwner, mapped.name(), mappedDescriptor) != null;
+                String resolvedDescriptor = mappedDescriptor;
+                if (!exists && shadow.method()) {
+                    String uniqueDescriptor = targetApi.uniqueDeclaredMethodDescriptor(mappedOwner, mapped.name());
+                    if (uniqueDescriptor != null) {
+                        resolvedDescriptor = uniqueDescriptor;
+                        exists = true;
+                    }
+                }
                 if (!exists) {
                     ambiguous = true;
                     break;
@@ -1628,6 +1637,14 @@ public final class MixinResourceRemapper {
                     break;
                 }
                 resolvedName = mapped.name();
+                if (shadow.method()) {
+                    String priorDescriptor = methodDescriptors.putIfAbsent(
+                            shadow.name() + shadow.descriptor(), resolvedDescriptor);
+                    if (priorDescriptor != null && !priorDescriptor.equals(resolvedDescriptor)) {
+                        ambiguous = true;
+                        break;
+                    }
+                }
             }
             if (ambiguous || resolvedName == null || resolvedName.equals(lookupName)) {
                 continue;
@@ -1657,8 +1674,10 @@ public final class MixinResourceRemapper {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
-                String mappedName = methodRenames.getOrDefault(name + descriptor, name);
-                return super.visitMethod(access, mappedName, descriptor, signature, exceptions);
+                String key = name + descriptor;
+                String mappedName = methodRenames.getOrDefault(key, name);
+                String mappedDescriptor = methodDescriptors.getOrDefault(key, descriptor);
+                return super.visitMethod(access, mappedName, mappedDescriptor, signature, exceptions);
             }
         }, 0);
         System.out.println("[Gafi Loader] Remapped " + (methodRenames.size() + fieldRenames.size())
