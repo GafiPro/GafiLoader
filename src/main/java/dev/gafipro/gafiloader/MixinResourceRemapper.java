@@ -272,7 +272,8 @@ public final class MixinResourceRemapper {
         IntermediaryMappings currentMappings = mappings;
         boolean classResource = isClassResource(resourceName);
         if (original == null || currentMappings == null
-                || (!isMixinResource(resourceName) && !classResource)) {
+                || (!isMixinResource(resourceName) && !classResource
+                    && !isPotentialClassResourceName(resourceName))) {
             return original;
         }
         if (resourceName != null && resourceName.contains("fabric-events-interaction-v0")) {
@@ -1166,6 +1167,23 @@ public final class MixinResourceRemapper {
         }
         String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
         return normalized.toLowerCase(java.util.Locale.ROOT).endsWith(".class");
+    }
+
+    private static boolean isPotentialClassResourceName(String resourceName) {
+        if (resourceName == null || resourceName.isBlank()) {
+            return false;
+        }
+        String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
+        if (normalized.endsWith(".class") || normalized.endsWith(".json")
+                || normalized.endsWith(".png") || normalized.endsWith(".ogg")
+                || normalized.endsWith(".properties") || normalized.endsWith(".txt")) {
+            return false;
+        }
+        int separator = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('.'));
+        if (separator < 0 || separator + 1 >= normalized.length()) {
+            return false;
+        }
+        return Character.isUpperCase(normalized.charAt(separator + 1));
     }
 
     /**
