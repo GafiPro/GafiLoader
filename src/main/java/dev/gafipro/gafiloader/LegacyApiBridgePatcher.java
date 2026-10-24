@@ -80,7 +80,9 @@ final class LegacyApiBridgePatcher {
         if (ABSTRACT_PACK_RESOURCES.equals(className)
                 && targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
                 && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
-                        "getMetadataFromStream", METADATA_FROM_STREAM) == null) {
+                        "getMetadataFromStream", METADATA_FROM_STREAM) == null
+                && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
+                        "loadMetadata", LOAD_METADATA) != null) {
             return addBridgeMethod(original, "getMetadataFromStream", METADATA_FROM_STREAM,
                     LegacyApiBridgePatcher::writeMetadataFromStreamBridge);
         }
@@ -225,12 +227,12 @@ final class LegacyApiBridgePatcher {
     }
 
     private static void writeMetadataFromStreamBridge(MethodVisitor method, String owner) {
+        // 26.2 replaced getMetadataFromStream(type, stream, location) with
+        // loadMetadata(type, stream). Call the game-owned implementation directly so
+        // the transformed class has no dependency on GafiLoader's isolated classloader.
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitVarInsn(Opcodes.ALOAD, 1);
-        method.visitVarInsn(Opcodes.ALOAD, 2);
-        method.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/gafipro/gafiloader/LegacyApiBridgeRuntime",
-                "getMetadataFromStream",
-                "(Ljava/lang/Object;Ljava/io/InputStream;Ljava/lang/Object;)Ljava/lang/Object;", false);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "loadMetadata", LOAD_METADATA, false);
         method.visitInsn(Opcodes.ARETURN);
     }
 
