@@ -64,7 +64,7 @@ final class MixinShadowValidationPatcher {
             code.add(new VarInsnNode(Opcodes.ALOAD, 2));
             code.add(new LdcInsnNode(Type.getObjectType("org/spongepowered/asm/mixin/Shadow")));
             code.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL,
-                    "org/spongepowered/asm/mixin/transformer/MixinMethodNode",
+                    "org/spongepowered/asm/mixin/transformer/MixinInfo$MixinMethodNode",
                     "getVisibleAnnotation",
                     "(Ljava/lang/Class;)Lorg/objectweb/asm/tree/AnnotationNode;", false));
             code.add(new JumpInsnNode(Opcodes.IFNULL, notShadow));
