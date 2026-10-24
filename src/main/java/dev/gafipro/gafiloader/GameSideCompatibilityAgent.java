@@ -48,6 +48,11 @@ public final class GameSideCompatibilityAgent {
                 if (className == null) {
                     return null;
                 }
+                if (className.contains("MixinPreProcessorStandard")) {
+                    System.out.println("[Gafi Loader] DEBUG Mixin preprocessor definition seen: "
+                            + className + " loader=" + loader + " retransform="
+                            + (classBeingRedefined != null));
+                }
                 // Patch Mixin itself before its preprocessor validates legacy @Shadow methods.
                 // This is a runtime-only change; source mods and game files are not rewritten.
                 if (MixinShadowValidationPatcher.TARGET_CLASS.equals(className)) {
