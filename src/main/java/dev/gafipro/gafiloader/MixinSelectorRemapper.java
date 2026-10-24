@@ -466,10 +466,11 @@ final class MixinSelectorRemapper {
         if (!targetsListener || !targetApi.hasClass(owner)) {
             return selector;
         }
-        String targetDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, arguments[0]);
-        // The target may expose the packet handler through an interface or under a renamed
-        // method. Resolve by the exact packet descriptor across the target hierarchy.
-        String targetMethodName = targetApi.uniqueMethodName(owner, targetDescriptor);
+        // The target handler may have acquired additional arguments in 26.2. The legacy
+        // callback only consumes the packet argument, which Mixin permits; match the unique
+        // void handler by its first argument instead of requiring an obsolete exact descriptor.
+        String packetDescriptor = arguments[0].getDescriptor();
+        String targetMethodName = targetApi.uniqueVoidMethodNameByFirstArgument(owner, packetDescriptor);
         if (targetMethodName == null) {
             return selector;
         }
@@ -478,14 +479,10 @@ final class MixinSelectorRemapper {
         if (value.startsWith("L")) {
             int ownerEnd = value.indexOf(';');
             if (ownerEnd > 1) {
-                return optional + value.substring(0, ownerEnd + 1)
-                        + targetMethodName + targetDescriptor;
+                return optional + value.substring(0, ownerEnd + 1) + targetMethodName;
             }
         }
-        // Pin the selector to the verified packet descriptor even when the legacy selector
-        // used only a name. This avoids Mixin selecting an unrelated overload after the target
-        // API has been renamed or reorganized.
-        return optional + targetMethodName + targetDescriptor;
+        return optional + targetMethodName;
     }
 
     /**
