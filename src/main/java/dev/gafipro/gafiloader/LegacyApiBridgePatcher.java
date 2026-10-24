@@ -30,6 +30,11 @@ final class LegacyApiBridgePatcher {
     private static final String MUTABLE_COMPONENT = "net/minecraft/network/chat/MutableComponent";
     private static final String COMMON_COMPONENTS = "net/minecraft/network/chat/CommonComponents";
     private static final String COMPONENT = "net/minecraft/network/chat/Component";
+    private static final String ABSTRACT_PACK_RESOURCES =
+            "net/minecraft/server/packs/AbstractPackResources";
+    private static final String METADATA_FROM_STREAM =
+            "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
+                    + "Ljava/io/InputStream;Lnet/minecraft/server/packs/PackLocationInfo;)Ljava/lang/Object;";
     private static final String SAFE_FORMAT_VALUE =
             "(Lnet/minecraft/world/scores/ReadOnlyScoreInfo;"
                     + "Lnet/minecraft/network/chat/numbers/NumberFormat;)"
@@ -69,6 +74,14 @@ final class LegacyApiBridgePatcher {
                     LegacyApiBridgePatcher::writeSafeFormatValueBridge);
         }
 
+        if (ABSTRACT_PACK_RESOURCES.equals(className)
+                && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
+                        "getMetadataFromStream", METADATA_FROM_STREAM) == null
+                && supportsMetadataFromStreamBridge(targetApi)) {
+            return addBridgeMethod(original, "getMetadataFromStream", METADATA_FROM_STREAM,
+                    LegacyApiBridgePatcher::writeMetadataFromStreamBridge);
+        }
+
         return null;
     }
 
@@ -91,6 +104,14 @@ final class LegacyApiBridgePatcher {
             }
         }
         return true;
+    }
+
+    private static boolean supportsMetadataFromStreamBridge(TargetApiIndex targetApi) {
+        Integer replacementAccess = targetApi.declaredMethodAccess(
+                ABSTRACT_PACK_RESOURCES, "loadMetadata", METADATA_FROM_STREAM);
+        return targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
+                && replacementAccess != null
+                && (replacementAccess & Opcodes.ACC_STATIC) != 0;
     }
 
     private static boolean supportsSafeFormatValueBridge(TargetApiIndex targetApi) {
@@ -205,6 +226,15 @@ final class LegacyApiBridgePatcher {
         method.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Enum", "valueOf",
                 "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;", false);
         method.visitTypeInsn(Opcodes.CHECKCAST, owner);
+        method.visitInsn(Opcodes.ARETURN);
+    }
+
+    private static void writeMetadataFromStreamBridge(MethodVisitor method, String owner) {
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitVarInsn(Opcodes.ALOAD, 1);
+        method.visitVarInsn(Opcodes.ALOAD, 2);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "loadMetadata",
+                METADATA_FROM_STREAM, false);
         method.visitInsn(Opcodes.ARETURN);
     }
 
