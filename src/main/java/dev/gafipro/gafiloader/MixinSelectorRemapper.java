@@ -286,6 +286,9 @@ final class MixinSelectorRemapper {
             return value;
         }
         String mapped = remapSelector(value, targets, mappings, aliases);
+        if (targetApi != null) {
+            mapped = remapSelectorClassAliases(mapped, targetApi);
+        }
         if (methodSelector && targetApi != null) {
             mapped = remapUniqueDescriptorMatch(mapped, targets, mappings, aliases,
                     enclosingMethodDescriptor, targetApi);
@@ -298,6 +301,49 @@ final class MixinSelectorRemapper {
                     aliases.mapDescriptor(mappings.mapDescriptor(value)), targetApi);
         }
         return atTarget ? remapKnownTargetSelector(mapped, targetApi) : mapped;
+    }
+
+    /**
+     * Applies verified game-side class moves inside selector owners and descriptors. These
+     * names are not part of Intermediary's namespace map, so normal member remapping alone
+     * cannot update selectors that mention moved model classes.
+     */
+    private static String remapSelectorClassAliases(String selector, TargetApiIndex targetApi) {
+        if (selector == null || selector.isBlank() || targetApi == null) {
+            return selector;
+        }
+        String optional = selector.startsWith("?") ? "?" : "";
+        String value = optional.isEmpty() ? selector : selector.substring(1);
+        if (value.startsWith("(")) {
+            return optional + LegacyClassAliases.mapDescriptor(value, targetApi);
+        }
+        if (value.startsWith("L")) {
+            int ownerEnd = value.indexOf(';');
+            if (ownerEnd <= 1 || ownerEnd + 1 >= value.length()) {
+                return selector;
+            }
+            String owner = value.substring(1, ownerEnd);
+            String member = value.substring(ownerEnd + 1);
+            String mappedOwner = LegacyClassAliases.mapClass(owner, targetApi);
+            int methodStart = member.indexOf('(');
+            if (methodStart >= 0) {
+                member = member.substring(0, methodStart)
+                        + LegacyClassAliases.mapDescriptor(member.substring(methodStart), targetApi);
+            } else {
+                int fieldSeparator = member.indexOf(':');
+                if (fieldSeparator >= 0) {
+                    member = member.substring(0, fieldSeparator + 1)
+                            + LegacyClassAliases.mapDescriptor(member.substring(fieldSeparator + 1), targetApi);
+                }
+            }
+            return optional + "L" + mappedOwner + ";" + member;
+        }
+        int descriptorStart = value.indexOf('(');
+        if (descriptorStart > 0) {
+            return optional + value.substring(0, descriptorStart)
+                    + LegacyClassAliases.mapDescriptor(value.substring(descriptorStart), targetApi);
+        }
+        return selector;
     }
 
     /**
