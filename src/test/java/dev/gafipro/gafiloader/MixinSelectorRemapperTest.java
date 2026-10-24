@@ -119,6 +119,44 @@ class MixinSelectorRemapperTest {
     }
 
     @Test
+    void pinsRespawnInjectionToTheVerifiedTargetDescriptor() throws Exception {
+        Path targetJar = temporaryDirectory.resolve("respawn-target.jar");
+        String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
+        String packet = "net/minecraft/network/protocol/game/ClientboundRespawnPacket";
+        String descriptor = "(L" + packet + ";)V";
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
+            jar.putNextEntry(new JarEntry(owner + ".class"));
+            jar.write(targetClassWithRespawnMethod(owner, packet));
+            jar.closeEntry();
+            jar.putNextEntry(new JarEntry(packet + ".class"));
+            jar.write(emptyClass(packet));
+            jar.closeEntry();
+        }
+
+        Path mojangFile = temporaryDirectory.resolve("respawn-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("respawn-intermediary.tiny");
+        Files.writeString(mojangFile, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "net.minecraft.Bar -> d:",
+                ""));
+        Files.writeString(intermediaryFile, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "c\td\tnet/minecraft/class_2",
+                ""));
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediaryFile, MojangMappings.load(mojangFile));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+
+        byte[] original = mixinClassWithRespawnSelector(owner, packet);
+        byte[] transformed = MixinSelectorRemapper.remap(
+                original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        assertNotEquals(null, transformed, "Respawn selectors should be pinned to the verified descriptor");
+        assertEquals("handleRespawn" + descriptor, readSelectors(transformed).implicitMethod());
+    }
+
+    @Test
     void remapsIntermediaryDescriptorsInNewInjectionAnchors() throws Exception {
         Path mojangFile = temporaryDirectory.resolve("new-selector-client.txt");
         Path intermediaryFile = temporaryDirectory.resolve("new-selector-intermediary.tiny");
@@ -150,6 +188,53 @@ class MixinSelectorRemapperTest {
         assertTrue(MixinResourceRemapper.isMixinResource("fabric-api-refmap.json"));
         assertTrue(MixinResourceRemapper.isMixinResource("fabric_api.refmap.json"));
         assertTrue(MixinResourceRemapper.isMixinResource("some.mixins.json"));
+    }
+
+    private static byte[] mixinClassWithRespawnSelector(String owner, String packet) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, "example/ClientPacketListenerMixin", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(owner));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, "onPlayerRespawn",
+                "(L" + packet + ";Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V",
+                null, null);
+        AnnotationVisitor inject = method.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;", true);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, "handleRespawn");
+        methods.visitEnd();
+        inject.visitEnd();
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetClassWithRespawnMethod(String owner, String packet) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "handleRespawn",
+                "(L" + packet + ";)V", null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] emptyClass(String name) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, name, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] mixinClassWithInteractAtSelector(String descriptor) {
