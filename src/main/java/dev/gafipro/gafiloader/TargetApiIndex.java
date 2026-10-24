@@ -227,6 +227,46 @@ final class TargetApiIndex {
         return candidates.size() == 1 ? candidates.iterator().next() : null;
     }
 
+    /**
+     * Returns a full selector (name plus descriptor) for the unique void packet handler
+     * whose first argument is the supplied packet type. The target descriptor may have
+     * gained trailing arguments since the legacy callback was compiled.
+     */
+    String uniqueVoidMethodSelectorByFirstArgument(String owner, String argumentDescriptor) {
+        Set<String> candidates = new HashSet<>();
+        collectVoidMethodSelectorsByFirstArgument(owner, argumentDescriptor,
+                new HashSet<>(), candidates);
+        return candidates.size() == 1 ? candidates.iterator().next() : null;
+    }
+
+    private void collectVoidMethodSelectorsByFirstArgument(String owner, String argumentDescriptor,
+            Set<String> visited, Set<String> candidates) {
+        if (owner == null || !visited.add(owner)) {
+            return;
+        }
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return;
+        }
+        for (MemberKey method : target.methods().keySet()) {
+            try {
+                Type type = Type.getMethodType(method.descriptor());
+                Type[] arguments = type.getArgumentTypes();
+                if (type.getReturnType().getSort() == Type.VOID && arguments.length > 0
+                        && arguments[0].getDescriptor().equals(argumentDescriptor)
+                        && !method.name().startsWith("<")) {
+                    candidates.add(method.name() + method.descriptor());
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed descriptors from a broken fixture.
+            }
+        }
+        for (String interfaceName : target.interfaces()) {
+            collectVoidMethodSelectorsByFirstArgument(interfaceName, argumentDescriptor, visited, candidates);
+        }
+        collectVoidMethodSelectorsByFirstArgument(target.superName(), argumentDescriptor, visited, candidates);
+    }
+
     private void collectVoidMethodNamesByFirstArgument(String owner, String argumentDescriptor,
             Set<String> visited, Set<String> candidates) {
         if (owner == null || !visited.add(owner)) {
