@@ -296,6 +296,14 @@ public final class MixinResourceRemapper {
                     + resourceName + ": " + exception.getMessage());
         }
 
+        // Some Knot/Mixin paths request a class by binary name without the ".class" suffix.
+        // Identify bytecode by its CAFEBABE header rather than treating it as opaque resource data.
+        if (!classResource && source.length >= 4
+                && source[0] == (byte) 0xCA && source[1] == (byte) 0xFE
+                && source[2] == (byte) 0xBA && source[3] == (byte) 0xBE) {
+            classResource = true;
+        }
+
         if (classResource) {
             return new ByteArrayInputStream(transformClassBytes(resourceName, source));
         }
@@ -1478,14 +1486,6 @@ public final class MixinResourceRemapper {
                     bytecodeInput, currentMappings, aliases, targetApi);
             byte[] result = remapped != null ? remapped
                     : selectorsRemapped == null ? pruned : selectorsRemapped;
-            if (requestedClassName != null && requestedClassName.contains("ClientPacketListenerMixin")) {
-                MixinClassMetadata before = readMixinMetadata(original);
-                MixinClassMetadata after = readMixinMetadata(result);
-                System.out.println("[Gafi Loader] DEBUG respawn mixin before="
-                        + (before == null ? "null" : before.targets() + " " + before.selectors())
-                        + " after=" + (after == null ? "null" : after.targets() + " " + after.selectors())
-                        + " selectorsChanged=" + (selectorsRemapped != null));
-            }
             byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
             if (overwriteAdjusted != original || remapped != null
                     || selectorsRemapped != null || pruned != original) {
