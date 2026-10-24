@@ -20,12 +20,14 @@ class MixinServiceKnotPatcherTest {
                 MixinServiceKnotPatcher.TARGET_CLASS, original);
         AtomicBoolean foundAdapter = new AtomicBoolean();
         AtomicBoolean foundClassAdapter = new AtomicBoolean();
+        AtomicBoolean foundClassNodeAdapter = new AtomicBoolean();
 
         new ClassReader(transformed).accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
                 boolean classBytesMethod = name.equals("getClassBytes");
+                boolean classNodeMethod = name.equals("getClassNode");
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public void visitMethodInsn(int opcode, String owner, String methodName,
@@ -43,6 +45,12 @@ class MixinServiceKnotPatcherTest {
                                 && methodDescriptor.equals("(Ljava/lang/String;[B)[B")) {
                             foundClassAdapter.set(true);
                         }
+                        if (classNodeMethod && opcode == Opcodes.INVOKESTATIC
+                                && owner.equals("dev/gafipro/gafiloader/MixinResourceRemapper")
+                                && methodName.equals("transformClassNode")
+                                && methodDescriptor.equals("(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;")) {
+                            foundClassNodeAdapter.set(true);
+                        }
                     }
                 };
             }
@@ -50,6 +58,7 @@ class MixinServiceKnotPatcherTest {
 
         assertTrue(foundAdapter.get(), "Expected the in-memory resource transformer call");
         assertTrue(foundClassAdapter.get(), "Expected the pre-Mixin class-byte transformer call");
+        assertTrue(foundClassNodeAdapter.get(), "Expected the pre-Mixin ClassNode transformer call");
     }
 
     @Test
@@ -94,6 +103,14 @@ class MixinServiceKnotPatcherTest {
         classBytesFlag.visitInsn(Opcodes.ARETURN);
         classBytesFlag.visitMaxs(0, 0);
         classBytesFlag.visitEnd();
+
+        MethodVisitor classNode = writer.visitMethod(Opcodes.ACC_PUBLIC, "getClassNode",
+                "(Ljava/lang/String;ZI)Lorg/objectweb/asm/tree/ClassNode;", null, null);
+        classNode.visitCode();
+        classNode.visitInsn(Opcodes.ACONST_NULL);
+        classNode.visitInsn(Opcodes.ARETURN);
+        classNode.visitMaxs(0, 0);
+        classNode.visitEnd();
 
         writer.visitEnd();
         return writer.toByteArray();
