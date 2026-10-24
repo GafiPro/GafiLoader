@@ -2,12 +2,6 @@ package dev.gafipro.gafiloader;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URISyntaxException;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.jar.JarOutputStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
@@ -34,32 +28,6 @@ public final class GameSideCompatibilityAgent {
         if (agentArguments == null || agentArguments.isBlank()) {
             throw new IllegalArgumentException(
                     "Gafi Loader requires an agent properties file or a legacy rules TSV.");
-        }
-
-        // Minecraft's Knot/game class loader deliberately isolates agent classes. Expose only
-        // the dependency-free runtime bridge to the bootstrap loader so transformed game classes
-        // can resolve it even when Fabric's classPathGroups excludes the agent JAR.
-        try {
-            // Do not append the whole agent JAR: doing so can split the agent's own package
-            // across the application and bootstrap loaders. Build a tiny bridge-only JAR.
-            Path bridgeJar = Files.createTempFile("gafiloader-runtime-bridge-", ".jar");
-            String bridgeClass = "dev/gafipro/gafiloader/LegacyApiBridgeRuntime.class";
-            try (InputStream input = GameSideCompatibilityAgent.class.getClassLoader()
-                    .getResourceAsStream(bridgeClass)) {
-                if (input == null) {
-                    throw new IOException("Runtime bridge class is missing from the agent JAR.");
-                }
-                try (OutputStream output = Files.newOutputStream(bridgeJar);
-                     JarOutputStream jar = new JarOutputStream(output)) {
-                    jar.putNextEntry(new JarEntry(bridgeClass));
-                    input.transferTo(jar);
-                    jar.closeEntry();
-                }
-            }
-            instrumentation.appendToBootstrapClassLoaderSearch(new JarFile(bridgeJar.toFile()));
-            System.out.println("[Gafi Loader] Exposed isolated runtime compatibility bridge to bootstrap loader.");
-        } catch (IOException exception) {
-            throw new IOException("Could not expose Gafi Loader runtime bridge to Minecraft.", exception);
         }
 
         Path argumentPath = Path.of(agentArguments).toAbsolutePath().normalize();
