@@ -153,7 +153,7 @@ class MixinSelectorRemapperTest {
                 original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
 
         assertNotEquals(null, transformed, "Respawn selectors should be pinned to the verified descriptor");
-        assertEquals("handleRespawn", readSelectors(transformed).implicitMethod());
+        assertEquals("processRespawnPacket", readSelectors(transformed).implicitMethod());
     }
 
     @Test
@@ -220,7 +220,7 @@ class MixinSelectorRemapperTest {
     private static byte[] targetClassWithRespawnMethod(String owner, String packet) {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
-        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "handleRespawn",
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "processRespawnPacket",
                 "(L" + packet + ";I)V", null, null);
         method.visitCode();
         method.visitInsn(Opcodes.RETURN);
