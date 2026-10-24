@@ -1495,18 +1495,20 @@ public final class MixinResourceRemapper {
             // hook. Remove only callback methods with proven-stale injection anchors before Mixin
             // inspects the class metadata.
             byte[] pruned = pruneIncompatibleInjectionMethods(original, currentMappings, aliases, targetApi);
+            byte[] shadowRemapped = remapMixinShadowMembers(pruned, currentMappings, aliases, targetApi);
             // Mixin selector strings are ordinary annotation strings, so ASM's standard
             // class remapper will not normalize them. Convert the supported selector attributes
             // first, then remap the surrounding descriptors and Type values as usual.
-            byte[] selectorsRemapped = MixinSelectorRemapper.remap(pruned, currentMappings, aliases, targetApi);
-            byte[] bytecodeInput = selectorsRemapped == null ? pruned : selectorsRemapped;
+            byte[] selectorsRemapped = MixinSelectorRemapper.remap(
+                    shadowRemapped, currentMappings, aliases, targetApi);
+            byte[] bytecodeInput = selectorsRemapped == null ? shadowRemapped : selectorsRemapped;
             byte[] remapped = IntermediaryBytecodeRemapper.remap(
                     bytecodeInput, currentMappings, aliases, targetApi);
             byte[] result = remapped != null ? remapped
-                    : selectorsRemapped == null ? pruned : selectorsRemapped;
+                    : selectorsRemapped == null ? shadowRemapped : selectorsRemapped;
             byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
             if (overwriteAdjusted != original || remapped != null
-                    || selectorsRemapped != null || pruned != original) {
+                    || selectorsRemapped != null || shadowRemapped != pruned || pruned != original) {
                 System.out.println("[Gafi Loader] Normalized legacy bytecode for Mixin inspection: "
                         + requestedClassName + " (" + actualClassName + ")");
             }
@@ -1549,6 +1551,93 @@ public final class MixinResourceRemapper {
                     + "; original node retained: " + exception.getMessage());
             return originalNode;
         }
+    }
+
+    /**
+     * Remaps @Shadow member declarations against their @Mixin targets. Normal bytecode remapping
+     * sees the mixin class as the owner, but a shadow name belongs to the target game class.
+     * Without this pass intermediary shadow names such as method_123 remain unchanged even when
+     * the target's official method is known.
+     */
+    private static byte[] remapMixinShadowMembers(byte[] original,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        if (original == null || mappings == null || targetApi == null) {
+            return original;
+        }
+        MixinClassMetadata metadata = readMixinMetadata(original);
+        if (metadata == null || metadata.shadowMembers().isEmpty() || metadata.targets().isEmpty()) {
+            return original;
+        }
+
+        Map<String, String> methodRenames = new java.util.HashMap<>();
+        Map<String, String> fieldRenames = new java.util.HashMap<>();
+        for (ShadowMember shadow : metadata.shadowMembers()) {
+            String originalName = shadow.name();
+            boolean hadPrefix = !shadow.prefix().isEmpty() && originalName.startsWith(shadow.prefix());
+            String lookupName = hadPrefix ? originalName.substring(shadow.prefix().length()) : originalName;
+            String resolvedName = null;
+            boolean ambiguous = false;
+            CompatibilityScanner.SymbolKind kind = shadow.method()
+                    ? CompatibilityScanner.SymbolKind.METHOD : CompatibilityScanner.SymbolKind.FIELD;
+            for (String rawTarget : metadata.targets()) {
+                String owner = rawTarget.replace('.', '/');
+                if (owner.startsWith("L") && owner.endsWith(";")) {
+                    owner = owner.substring(1, owner.length() - 1);
+                }
+                CompatibilityScanner.Reference normalized = mappings.normalize(
+                        new CompatibilityScanner.Reference(kind, owner, lookupName, shadow.descriptor()));
+                CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
+                String mappedOwner = LegacyClassAliases.mapClass(mapped.owner(), targetApi);
+                String mappedDescriptor = LegacyClassAliases.mapDescriptor(mapped.descriptor(), targetApi);
+                boolean exists = shadow.method()
+                        ? targetApi.methodAccess(mappedOwner, mapped.name(), mappedDescriptor) != null
+                        : targetApi.fieldAccess(mappedOwner, mapped.name(), mappedDescriptor) != null;
+                if (!exists) {
+                    ambiguous = true;
+                    break;
+                }
+                if (resolvedName != null && !resolvedName.equals(mapped.name())) {
+                    ambiguous = true;
+                    break;
+                }
+                resolvedName = mapped.name();
+            }
+            if (ambiguous || resolvedName == null || resolvedName.equals(lookupName)) {
+                continue;
+            }
+            String replacementName = hadPrefix ? shadow.prefix() + resolvedName : resolvedName;
+            String key = originalName + shadow.descriptor();
+            if (shadow.method()) {
+                methodRenames.put(key, replacementName);
+            } else {
+                fieldRenames.put(key, replacementName);
+            }
+        }
+        if (methodRenames.isEmpty() && fieldRenames.isEmpty()) {
+            return original;
+        }
+
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public org.objectweb.asm.FieldVisitor visitField(int access, String name, String descriptor,
+                                                              String signature, Object value) {
+                String mappedName = fieldRenames.getOrDefault(name + descriptor, name);
+                return super.visitField(access, mappedName, descriptor, signature, value);
+            }
+
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                String mappedName = methodRenames.getOrDefault(name + descriptor, name);
+                return super.visitMethod(access, mappedName, descriptor, signature, exceptions);
+            }
+        }, 0);
+        System.out.println("[Gafi Loader] Remapped " + (methodRenames.size() + fieldRenames.size())
+                + " @Shadow member declaration(s) for " + metadata.targets());
+        return writer.toByteArray();
     }
 
     /**
