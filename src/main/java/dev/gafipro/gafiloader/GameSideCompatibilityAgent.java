@@ -119,6 +119,12 @@ public final class GameSideCompatibilityAgent {
                     // definition as well as at MixinServiceKnot's resource boundary: the service
                     // hook does not see every route by which Knot defines Mixin classes.
                     byte[] mappingInput = transformed == null ? classfileBuffer : transformed;
+                    byte[] shadowRemapped = MixinResourceRemapper.remapMixinShadowMembers(
+                            mappingInput, intermediaryMappings, bytecodeAliases, targetApi);
+                    if (shadowRemapped != mappingInput) {
+                        mappingInput = shadowRemapped;
+                        transformed = shadowRemapped;
+                    }
                     byte[] selectorRemapped = MixinSelectorRemapper.remap(
                             mappingInput, intermediaryMappings, bytecodeAliases, targetApi);
                     if (selectorRemapped != null) {
