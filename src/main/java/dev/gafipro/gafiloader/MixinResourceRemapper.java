@@ -1529,6 +1529,9 @@ public final class MixinResourceRemapper {
         if (requestedClassName == null || originalNode == null || mappings == null) {
             return originalNode;
         }
+        if (requestedClassName.contains("MinecraftServerMixin")) {
+            System.out.println("[Gafi Loader] DEBUG ClassNode hook reached: " + requestedClassName);
+        }
         try {
             ClassLoader loader = originalNode.getClass().getClassLoader();
             Class<?> visitorClass = Class.forName("org.objectweb.asm.ClassVisitor", false, loader);
@@ -1537,6 +1540,10 @@ public final class MixinResourceRemapper {
             originalNode.getClass().getMethod("accept", visitorClass).invoke(originalNode, writer);
             byte[] originalBytes = (byte[]) writerClass.getMethod("toByteArray").invoke(writer);
             byte[] transformedBytes = transformClassBytes(requestedClassName, originalBytes);
+            if (requestedClassName.contains("MinecraftServerMixin")) {
+                System.out.println("[Gafi Loader] DEBUG ClassNode bytes changed="
+                        + (transformedBytes != originalBytes) + " length=" + originalBytes.length);
+            }
             if (transformedBytes == originalBytes) {
                 return originalNode;
             }
@@ -1568,6 +1575,10 @@ public final class MixinResourceRemapper {
         MixinClassMetadata metadata = readMixinMetadata(original);
         if (metadata == null || metadata.shadowMembers().isEmpty() || metadata.targets().isEmpty()) {
             return original;
+        }
+        if (new ClassReader(original).getClassName().contains("MinecraftServerMixin")) {
+            System.out.println("[Gafi Loader] DEBUG shadow metadata targets=" + metadata.targets()
+                    + " members=" + metadata.shadowMembers());
         }
 
         Map<String, String> methodRenames = new java.util.HashMap<>();
