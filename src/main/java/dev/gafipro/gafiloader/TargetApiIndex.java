@@ -190,6 +190,20 @@ final class TargetApiIndex {
         return candidates.size() == 1 ? candidates.iterator().next() : null;
     }
 
+    String uniqueDeclaredMethodDescriptor(String owner, String name) {
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return null;
+        }
+        Set<String> candidates = new HashSet<>();
+        for (MemberKey member : target.methods().keySet()) {
+            if (member.name().equals(name)) {
+                candidates.add(member.descriptor());
+            }
+        }
+        return candidates.size() == 1 ? candidates.iterator().next() : null;
+    }
+
     Integer methodAccess(String owner, String name, String descriptor) {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
