@@ -287,7 +287,8 @@ final class MixinSelectorRemapper {
         }
         String mapped = remapSelector(value, targets, mappings, aliases);
         if (methodSelector && targetApi != null) {
-            mapped = remapUniqueDescriptorMatch(mapped, targets, mappings, aliases, targetApi);
+            mapped = remapUniqueDescriptorMatch(mapped, targets, mappings, aliases,
+                    enclosingMethodDescriptor, targetApi);
         }
         // NEW selectors use a constructor descriptor in the form (args)ReturnType, not the
         // owner;member syntax handled by remapSelector. Leaving intermediary class names here
@@ -306,7 +307,7 @@ final class MixinSelectorRemapper {
      */
     private static String remapUniqueDescriptorMatch(String selector, List<String> targets,
             IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
-            TargetApiIndex targetApi) {
+            String callbackDescriptor, TargetApiIndex targetApi) {
         if (selector == null || selector.isBlank() || targetApi == null) {
             return selector;
         }
@@ -323,11 +324,16 @@ final class MixinSelectorRemapper {
             member = value.substring(ownerEnd + 1);
         }
         int descriptorStart = member.indexOf('(');
-        if (descriptorStart <= 0) {
+        if (descriptorStart == 0) {
             return selector;
         }
-        String name = member.substring(0, descriptorStart);
-        String descriptor = member.substring(descriptorStart);
+        String name = descriptorStart < 0 ? member : member.substring(0, descriptorStart);
+        String descriptor = descriptorStart < 0
+                ? inferTargetDescriptor(callbackDescriptor, mappings, aliases, targetApi)
+                : member.substring(descriptorStart);
+        if (descriptor == null) {
+            return selector;
+        }
         if (name.contains("*") || name.contains("/") || name.contains(";")
                 || targetApi.declaredMethodAccess(owner == null ? "" : owner, name, descriptor) != null) {
             return selector;
@@ -358,9 +364,50 @@ final class MixinSelectorRemapper {
         if (replacement == null || replacement.equals(name)) {
             return selector;
         }
+        if (descriptorStart < 0) {
+            return optionalPrefix + (owner == null ? replacement : "L" + owner + ";" + replacement);
+        }
         String mapped = owner == null ? replacement + descriptor
                 : "L" + owner + ";" + replacement + descriptor;
         return optionalPrefix + mapped;
+    }
+
+    /**
+     * Infers an @Inject target descriptor from its callback when the legacy selector contains
+     * only a method name. This is safe only for ordinary void @Inject callbacks whose final
+     * parameter is Mixin's CallbackInfo; ambiguous target signatures remain unchanged.
+     */
+    private static String inferTargetDescriptor(String callbackDescriptor,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            TargetApiIndex targetApi) {
+        if (callbackDescriptor == null || targetApi == null) {
+            return null;
+        }
+        String mapped = LegacyClassAliases.mapDescriptor(
+                aliases.mapDescriptor(mappings.mapDescriptor(callbackDescriptor)), targetApi);
+        Type callbackType;
+        try {
+            callbackType = Type.getMethodType(mapped);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+        if (callbackType.getReturnType().getSort() != Type.VOID) {
+            return null;
+        }
+        Type[] arguments = callbackType.getArgumentTypes();
+        if (arguments.length == 0) {
+            return null;
+        }
+        Type last = arguments[arguments.length - 1];
+        if (last.getSort() != Type.OBJECT
+                || !(last.getInternalName().equals(
+                        "org/spongepowered/asm/mixin/injection/callback/CallbackInfo")
+                    || last.getInternalName().equals(
+                        "org/spongepowered/asm/mixin/injection/callback/CallbackInfoReturnable"))) {
+            return null;
+        }
+        Type[] targetArguments = java.util.Arrays.copyOf(arguments, arguments.length - 1);
+        return Type.getMethodDescriptor(Type.VOID_TYPE, targetArguments);
     }
 
     /**
