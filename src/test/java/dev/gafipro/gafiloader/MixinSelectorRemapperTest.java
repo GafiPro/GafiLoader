@@ -153,7 +153,7 @@ class MixinSelectorRemapperTest {
                 original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
 
         assertNotEquals(null, transformed, "Respawn selectors should be pinned to the verified descriptor");
-        assertEquals("processRespawnPacket", readSelectors(transformed).implicitMethodWithoutDescriptor());
+        assertEquals("processRespawnPacket" + descriptor, readSelectors(transformed).implicitMethod());
     }
 
     @Test
