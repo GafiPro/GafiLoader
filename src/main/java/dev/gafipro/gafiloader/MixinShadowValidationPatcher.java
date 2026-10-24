@@ -32,6 +32,18 @@ final class MixinShadowValidationPatcher {
 
     private MixinShadowValidationPatcher() {}
 
+ 
+    private static boolean isShadowMethodDescriptor(String descriptor) {
+        Type methodType = Type.getMethodType(descriptor);
+        Type[] arguments = methodType.getArgumentTypes();
+        return methodType.getReturnType().equals(Type.BOOLEAN_TYPE)
+                && arguments.length == 2
+                && arguments[0].getSort() == Type.OBJECT
+                && arguments[0].getInternalName().endsWith("/MixinTargetContext")
+                && arguments[1].getSort() == Type.OBJECT
+                && arguments[1].getInternalName().endsWith("/MixinMethodNode");
+    }
+
     static byte[] transform(String className, byte[] original) {
         if (!TARGET_CLASS.equals(className) || original == null) {
             return null;
@@ -41,7 +53,7 @@ final class MixinShadowValidationPatcher {
         boolean patched = false;
         for (MethodNode method : node.methods) {
             if (!"attachShadowMethod".equals(method.name)
-                    || !METHOD_DESCRIPTOR.equals(method.desc)) {
+                    || !isShadowMethodDescriptor(method.desc)) {
                 continue;
             }
             method.instructions.clear();
@@ -68,9 +80,14 @@ final class MixinShadowValidationPatcher {
             patched = true;
         }
         if (!patched) {
-            throw new IllegalStateException("Could not patch Mixin @Shadow validation: "
-                    + TARGET_CLASS + ".attachShadowMethod" + METHOD_DESCRIPTOR
-                    + " was not found; refusing to claim legacy @Shadow compatibility.");
+            String available = node.methods.stream()
+                    .filter(method -> method.name.contains("Shadow"))
+                    .map(method -> method.name + method.desc)
+                    .collect(java.util.stream.Collectors.joining(", "));
+            throw new IllegalStateException("Could not patch Mixin @Shadow validation: no compatible "
+                    + "attachShadowMethod was found in " + TARGET_CLASS
+                    + ". Available shadow methods: " + available
+                    + ". Expected a boolean method taking MixinTargetContext and MixinMethodNode.");
         }
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
         node.accept(writer);
