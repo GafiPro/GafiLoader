@@ -273,9 +273,10 @@ public final class MixinResourceRemapper {
     public static InputStream transform(String resourceName, InputStream original) {
         IntermediaryMappings currentMappings = mappings;
         boolean classResource = isClassResource(resourceName);
+        boolean mixinClass = isMixinClassResource(resourceName);
         if (original == null || currentMappings == null
                 || (!isMixinResource(resourceName) && !classResource
-                    && !isPotentialClassResourceName(resourceName))) {
+                    && !mixinClass && !isPotentialClassResourceName(resourceName))) {
             return original;
         }
         if (resourceName != null && resourceName.contains("fabric-events-interaction-v0")) {
@@ -307,7 +308,7 @@ public final class MixinResourceRemapper {
             classResource = true;
         }
 
-        if (classResource) {
+        if (classResource || mixinClass) {
             return new ByteArrayInputStream(transformClassBytes(resourceName, source));
         }
 
