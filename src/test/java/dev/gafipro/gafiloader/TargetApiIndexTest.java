@@ -47,6 +47,25 @@ class TargetApiIndexTest {
     }
 
     @Test
+    void resolvesUniqueMethodNamesThroughInheritedInterfaces() throws Exception {
+        Path targetJar = temporaryDirectory.resolve("inherited-handler.jar");
+        String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
+        String parent = "net/minecraft/network/ClientGamePacketListener";
+        String packet = "net/minecraft/network/protocol/game/ClientboundRespawnPacket";
+        String descriptor = "(L" + packet + ";)V";
+        writeJar(targetJar,
+                owner, classWithInterface(owner, parent),
+                parent, interfaceWithInstanceMethod(parent, "renamedRespawnHandler", descriptor),
+                packet, emptyClass(packet));
+
+        TargetApiIndex api = TargetApiIndex.load(targetJar);
+        assertNull(api.declaredMethodAccess(owner, "renamedRespawnHandler", descriptor));
+        assertNotNull(api.methodAccess(owner, "renamedRespawnHandler", descriptor));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "renamedRespawnHandler", api.uniqueMethodName(owner, descriptor));
+    }
+
+    @Test
     void detectsConstructorAllocationAnchorsInsideTheSelectedTargetMethod() throws Exception {
         Path targetJar = temporaryDirectory.resolve("new-expression-index.jar");
         String owner = "net/minecraft/world/entity/LivingEntity";
@@ -102,6 +121,25 @@ class TargetApiIndexTest {
                 () -> CompatibilityScanner.AliasSet.load(missingMethod).validateAgainstTarget(targetJar));
         assertThrows(IOException.class,
                 () -> CompatibilityScanner.AliasSet.load(missingClass).validateAgainstTarget(targetJar));
+    }
+
+    private static byte[] classWithInterface(String name, String implementedInterface) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null,
+                "java/lang/Object", new String[]{implementedInterface});
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] interfaceWithInstanceMethod(String owner, String name, String descriptor) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                owner, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                name, descriptor, null, null);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] interfaceWithParent(String name, String parent) {
