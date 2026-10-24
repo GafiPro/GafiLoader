@@ -241,9 +241,9 @@ final class LegacyApiBridgePatcher {
         method.visitVarInsn(Opcodes.ASTORE, 3);
 
         method.visitVarInsn(Opcodes.ALOAD, 0);
-        method.visitMethodInsn(Opcodes.INVOKEINTERFACE,
+        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
                 "net/minecraft/server/packs/metadata/MetadataSectionType", "codec",
-                "()Lcom/mojang/serialization/Codec;", true);
+                "()Lcom/mojang/serialization/Codec;", false);
         method.visitFieldInsn(Opcodes.GETSTATIC, "com/mojang/serialization/JsonOps", "INSTANCE",
                 "Lcom/mojang/serialization/JsonOps;");
         method.visitVarInsn(Opcodes.ALOAD, 3);
