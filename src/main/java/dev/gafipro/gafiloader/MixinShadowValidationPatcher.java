@@ -140,28 +140,42 @@ public final class MixinShadowValidationPatcher {
                             + exception.getMessage());
                 }
             }
+            String targetClassName = targetClassNode == null ? ""
+                    : String.valueOf(readField(targetClassNode, "name"));
+            boolean packetListenerTarget = targetClassName.equals(
+                    "net/minecraft/client/multiplayer/ClientPacketListener")
+                    || targetClassName.equals("net/minecraft/class_634");
             for (Object method : methods) {
                 String name = String.valueOf(readField(method, "name"));
                 String descriptor = String.valueOf(readField(method, "desc"));
+                if (!packetListenerTarget) {
+                    // Keep the narrow fallback if Mixin does not expose its target node.
+                    if (!(name.equals("onPlayerRespawn") || name.endsWith("$onPlayerRespawn")
+                            || name.contains("$onPlayerRespawn$"))
+                            || !descriptor.contains("ClientboundRespawnPacket")) {
+                        continue;
+                    }
+                } else {
+                    String packetArgument = firstObjectArgument(descriptor);
+                    if (!descriptor.contains("org/spongepowered/asm/mixin/injection/callback/CallbackInfo")
+                            || packetArgument == null
+                            || !(packetArgument.contains("Packet")
+                                || packetArgument.matches("Lnet/minecraft/class_\\d+;"))) {
+                        continue;
+                    }
+                }
                 if (name.toLowerCase(java.util.Locale.ROOT).contains("respawn")
                         || descriptor.contains("ClientboundRespawnPacket")
+                        || descriptor.contains("ClientboundLoginPacket")
                         || descriptor.contains("class_2724")) {
-                    System.out.println("[Gafi Loader] DEBUG live mixin relevant method="
-                            + name + descriptor);
-                }
-                // Mixin renames injector methods to handler$...$<originalName> before this hook.
-                // Match the preserved source-name suffix, not only the original method name.
-                if (!(name.equals("onPlayerRespawn") || name.endsWith("$onPlayerRespawn")
-                        || name.contains("$onPlayerRespawn$"))
-                        || !(descriptor.contains("ClientboundRespawnPacket")
-                        || descriptor.contains("class_2724"))) {
-                    continue;
+                    System.out.println("[Gafi Loader] DEBUG live packet mixin method="
+                            + name + descriptor + " target=" + targetClassName);
                 }
                 String targetSelector = resolveTargetSelectorFromContext(targetClassNode, descriptor);
-                if (targetSelector == null) {
+                if (targetSelector == null && name.toLowerCase(java.util.Locale.ROOT).contains("respawn")) {
                     targetSelector = MixinResourceRemapper.resolveRespawnTargetSelector();
                 }
-                System.out.println("[Gafi Loader] DEBUG live respawn target selector=" + targetSelector
+                System.out.println("[Gafi Loader] DEBUG live packet target selector=" + targetSelector
                         + " fromTargetNode=" + (targetClassNode != null));
                 java.util.List<Object> annotations = new java.util.ArrayList<>();
                 Object visibleValue = readField(method, "visibleAnnotations");
@@ -183,7 +197,7 @@ public final class MixinShadowValidationPatcher {
                             Object original = values.get(i + 1);
                             if (original instanceof List<?> selectors) {
                                 values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
-                                System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                System.out.println("[Gafi Loader] Normalized live packet selector on "
                                         + name + descriptor + ": " + selectors + " -> " + targetSelector);
                             } else if (original instanceof String selector) {
                                 values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
@@ -202,7 +216,7 @@ public final class MixinShadowValidationPatcher {
                         values.add("require");
                         values.add(0);
                     }
-                    System.out.println("[Gafi Loader] Set respawn injection require=0 for compatibility.");
+                    System.out.println("[Gafi Loader] Set optional packet injection require=0 for compatibility.");
                 }
             }
         } catch (ReflectiveOperationException | RuntimeException exception) {
