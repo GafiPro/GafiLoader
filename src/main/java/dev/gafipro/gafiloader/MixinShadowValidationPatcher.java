@@ -1,14 +1,21 @@
 package dev.gafipro.gafiloader;
 
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
 
 /**
  * Relaxes Mixin's hard failure for legacy @Shadow methods that disappeared or changed
@@ -29,44 +36,44 @@ final class MixinShadowValidationPatcher {
         if (!TARGET_CLASS.equals(className) || original == null) {
             return null;
         }
-        AtomicBoolean patched = new AtomicBoolean();
-        ClassReader reader = new ClassReader(original);
-        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
-        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
-            @Override
-            public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                             String signature, String[] exceptions) {
-                if (!"attachShadowMethod".equals(name) || !METHOD_DESCRIPTOR.equals(descriptor)) {
-                    return super.visitMethod(access, name, descriptor, signature, exceptions);
-                }
-                patched.set(true);
-                MethodVisitor method = super.visitMethod(access, name, descriptor, signature, exceptions);
-                method.visitCode();
-                Label notShadow = new Label();
-                method.visitVarInsn(Opcodes.ALOAD, 2);
-                method.visitLdcInsn(Type.getObjectType("org/spongepowered/asm/mixin/Shadow"));
-                method.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
-                        "org/spongepowered/asm/mixin/transformer/MixinMethodNode",
-                        "getVisibleAnnotation",
-                        "(Ljava/lang/Class;)Lorg/objectweb/asm/tree/AnnotationNode;", false);
-                method.visitJumpInsn(Opcodes.IFNULL, notShadow);
-                // Treat any @Shadow method as a shadow member without requiring the old
-                // name/descriptor to exist on the newer game target.
-                method.visitInsn(Opcodes.ICONST_1);
-                method.visitInsn(Opcodes.IRETURN);
-                method.visitLabel(notShadow);
-                method.visitInsn(Opcodes.ICONST_0);
-                method.visitInsn(Opcodes.IRETURN);
-                method.visitMaxs(2, 3);
-                method.visitEnd();
-                return null;
+        ClassNode node = new ClassNode(Opcodes.ASM9);
+        new ClassReader(original).accept(node, 0);
+        boolean patched = false;
+        for (MethodNode method : node.methods) {
+            if (!"attachShadowMethod".equals(method.name)
+                    || !METHOD_DESCRIPTOR.equals(method.desc)) {
+                continue;
             }
-        }, ClassReader.EXPAND_FRAMES);
-        if (!patched.get()) {
+            method.instructions.clear();
+            if (method.tryCatchBlocks != null) method.tryCatchBlocks.clear();
+            if (method.localVariables != null) method.localVariables.clear();
+            InsnList code = method.instructions;
+            LabelNode notShadow = new LabelNode();
+            code.add(new VarInsnNode(Opcodes.ALOAD, 2));
+            code.add(new LdcInsnNode(Type.getObjectType("org/spongepowered/asm/mixin/Shadow")));
+            code.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL,
+                    "org/spongepowered/asm/mixin/transformer/MixinMethodNode",
+                    "getVisibleAnnotation",
+                    "(Ljava/lang/Class;)Lorg/objectweb/asm/tree/AnnotationNode;", false));
+            code.add(new JumpInsnNode(Opcodes.IFNULL, notShadow));
+            // Treat any @Shadow method as a shadow member without requiring the old
+            // name/descriptor to exist on the newer game target.
+            code.add(new InsnNode(Opcodes.ICONST_1));
+            code.add(new InsnNode(Opcodes.IRETURN));
+            code.add(notShadow);
+            code.add(new InsnNode(Opcodes.ICONST_0));
+            code.add(new InsnNode(Opcodes.IRETURN));
+            method.maxStack = 2;
+            method.maxLocals = 3;
+            patched = true;
+        }
+        if (!patched) {
             throw new IllegalStateException("Could not patch Mixin @Shadow validation: "
                     + TARGET_CLASS + ".attachShadowMethod" + METHOD_DESCRIPTOR
                     + " was not found; refusing to claim legacy @Shadow compatibility.");
         }
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
+        node.accept(writer);
         System.out.println("[Gafi Loader] Enabled legacy @Shadow validation compatibility.");
         return writer.toByteArray();
     }
