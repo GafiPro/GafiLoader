@@ -467,7 +467,10 @@ final class MixinSelectorRemapper {
             return selector;
         }
         String targetDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, arguments[0]);
-        if (targetApi.methodAccess(owner, "handleRespawn", targetDescriptor) == null) {
+        // The target may expose the packet handler through an interface or under a renamed
+        // method. Resolve by the exact packet descriptor across the target hierarchy.
+        String targetMethodName = targetApi.uniqueMethodName(owner, targetDescriptor);
+        if (targetMethodName == null) {
             return selector;
         }
         String optional = selector.startsWith("?") ? "?" : "";
@@ -476,11 +479,11 @@ final class MixinSelectorRemapper {
             int ownerEnd = value.indexOf(';');
             if (ownerEnd > 1) {
                 return optional + value.substring(0, ownerEnd + 1)
-                        + "handleRespawn" + targetDescriptor;
+                        + targetMethodName + targetDescriptor;
             }
         }
         int descriptorStart = value.indexOf('(');
-        return optional + "handleRespawn"
+        return optional + targetMethodName
                 + (descriptorStart >= 0 ? targetDescriptor : "");
     }
 
