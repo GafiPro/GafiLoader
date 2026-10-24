@@ -38,6 +38,26 @@ class MixinResourceRemapperTest {
     }
 
     @Test
+    void preservesClassResourceUrlsForFabricMixinPluginCodeSourceLookup() throws Exception {
+        Path mojangFile = temporaryDirectory.resolve("url-client.txt");
+        Path intermediaryFile = temporaryDirectory.resolve("url-intermediary.tiny");
+        Files.writeString(mojangFile, "net.minecraft.Foo -> a:\\n");
+        Files.writeString(intermediaryFile, "tiny\\t2\\t0\\tofficial\\tintermediary\\n"
+                + "c\\ta\\tnet/minecraft/class_1\\n");
+        MixinResourceRemapper.configure(
+                IntermediaryMappings.load(intermediaryFile, MojangMappings.load(mojangFile)),
+                CompatibilityScanner.AliasSet.empty());
+
+        java.net.URL pluginClassUrl = new java.net.URL(
+                "file:/tmp/net/fabricmc/fabric/impl/client/indigo/IndigoMixinConfigPlugin.class");
+
+        assertSame(pluginClassUrl, MixinResourceRemapper.transformUrl(
+                "net/fabricmc/fabric/impl/client/indigo/IndigoMixinConfigPlugin.class",
+                pluginClassUrl),
+                "Fabric must receive the original class URL so code-source conversion remains valid");
+    }
+
+    @Test
     void remapsMixinTargetsAndRefmapSelectorsInMemory() throws Exception {
         Path mojangFile = temporaryDirectory.resolve("client.txt");
         Path intermediaryFile = temporaryDirectory.resolve("intermediary.tiny");
