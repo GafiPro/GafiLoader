@@ -22,7 +22,7 @@ import java.util.List;
  * still need to be resolved by the in-memory mapping and game-side bridge passes.
  * The source mod JAR is never modified.
  */
-final class MixinShadowValidationPatcher {
+public final class MixinShadowValidationPatcher {
     static final String TARGET_CLASS =
             "org/spongepowered/asm/mixin/transformer/MixinPreProcessorStandard";
     private static final String CONTEXT =
