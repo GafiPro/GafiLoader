@@ -195,13 +195,13 @@ public final class MixinShadowValidationPatcher {
                     for (int i = 0; i + 1 < values.size(); i += 2) {
                         if ("method".equals(values.get(i))) {
                             Object original = values.get(i + 1);
-                            if (original instanceof List<?> selectors) {
+                            if (targetSelector != null && original instanceof List<?> selectors) {
                                 values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
                                 System.out.println("[Gafi Loader] Normalized live packet selector on "
                                         + name + descriptor + ": " + selectors + " -> " + targetSelector);
-                            } else if (original instanceof String selector) {
+                            } else if (targetSelector != null && original instanceof String selector) {
                                 values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
-                                System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                System.out.println("[Gafi Loader] Normalized live packet selector on "
                                         + name + descriptor + ": " + selector + " -> " + targetSelector);
                             }
                         } else if ("require".equals(values.get(i))) {
