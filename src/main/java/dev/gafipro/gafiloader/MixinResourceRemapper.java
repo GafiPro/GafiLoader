@@ -1490,6 +1490,53 @@ public final class MixinResourceRemapper {
     }
 
     /**
+     * Diagnostic callback invoked by MixinTransformer immediately before it applies mixins to
+     * a target class. This observes the live bytecode namespace, rather than the static target JAR.
+     */
+    public static void debugRuntimeTargetClassBytes(String name, String transformedName, byte[] original) {
+        if (original == null) {
+            return;
+        }
+        try {
+            ClassReader reader = new ClassReader(original);
+            String actualName = reader.getClassName();
+            String names = String.valueOf(name) + " " + String.valueOf(transformedName) + " " + actualName;
+            if (!names.contains("ClientPacketListener") && !names.contains("class_634")) {
+                return;
+            }
+            java.util.List<String> signatures = new java.util.ArrayList<>();
+            java.util.List<String> relevant = new java.util.ArrayList<>();
+            reader.accept(new ClassVisitor(Opcodes.ASM9) {
+                @Override
+                public void visit(int version, int access, String internalName, String signature,
+                                  String superName, String[] interfaces) {
+                    System.out.println("[Gafi Loader] DEBUG MixinTransformer target bytes: requested="
+                            + name + ", transformed=" + transformedName + ", actual=" + internalName
+                            + ", super=" + superName);
+                }
+
+                @Override
+                public org.objectweb.asm.MethodVisitor visitMethod(int access, String methodName,
+                        String descriptor, String signature, String[] exceptions) {
+                    String member = methodName + descriptor;
+                    signatures.add(member);
+                    if (methodName.toLowerCase(java.util.Locale.ROOT).contains("respawn")
+                            || descriptor.contains("RespawnPacket")
+                            || descriptor.contains("class_2724")) {
+                        relevant.add(member);
+                    }
+                    return null;
+                }
+            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            System.out.println("[Gafi Loader] DEBUG live listener methods: "
+                    + (relevant.isEmpty() ? signatures.stream().limit(35).toList() : relevant));
+        } catch (RuntimeException exception) {
+            System.out.println("[Gafi Loader] DEBUG could not inspect live listener bytes: "
+                    + exception.getMessage());
+        }
+    }
+
+    /**
      * Normalize legacy bytecode when Mixin asks Fabric for class metadata. This is separate from
      * Instrumentation: Mixin can inspect a class before the JVM invokes the Java-agent transformer.
      * Returning the input on failure is intentional; the regular definition-time transformer will
