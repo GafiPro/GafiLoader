@@ -64,6 +64,76 @@ public final class MixinShadowValidationPatcher {
     }
 
 
+    /**
+     * Mixin may parse the mixin class through a different bytecode path than its metadata
+     * inspection hooks. Normalize the known respawn selector on the live MixinClassNode just
+     * before Mixin prepares and attaches the methods.
+     */
+    public static void normalizeRespawnSelector(Object mixinClassNode) {
+        if (mixinClassNode == null) return;
+        try {
+            Object methodsValue;
+            try {
+                methodsValue = readField(mixinClassNode, "mixinMethods");
+            } catch (NoSuchFieldException ignored) {
+                methodsValue = readField(mixinClassNode, "methods");
+            }
+            if (!(methodsValue instanceof List<?> methods)) return;
+            String targetSelector = MixinResourceRemapper.resolveRespawnTargetSelector();
+            for (Object method : methods) {
+                String name = String.valueOf(readField(method, "name"));
+                String descriptor = String.valueOf(readField(method, "desc"));
+                if (!"onPlayerRespawn".equals(name)
+                        || !(descriptor.contains("ClientboundRespawnPacket")
+                        || descriptor.contains("class_2724"))) {
+                    continue;
+                }
+                Object annotationsValue = readField(method, "visibleAnnotations");
+                if (!(annotationsValue instanceof List<?> annotations)) continue;
+                for (Object annotation : annotations) {
+                    if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(
+                            String.valueOf(readField(annotation, "desc")))) {
+                        continue;
+                    }
+                    Object valuesValue = readField(annotation, "values");
+                    if (!(valuesValue instanceof List<?> rawValues)) continue;
+                    @SuppressWarnings("unchecked")
+                    List<Object> values = (List<Object>) rawValues;
+                    for (int i = 0; i + 1 < values.size(); i += 2) {
+                        if (!"method".equals(values.get(i))) continue;
+                        Object original = values.get(i + 1);
+                        if (original instanceof List<?> selectors) {
+                            values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
+                            System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                    + name + descriptor + ": " + selectors + " -> " + targetSelector);
+                        } else if (original instanceof String selector) {
+                            values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
+                            System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                    + name + descriptor + ": " + selector + " -> " + targetSelector);
+                        }
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            System.err.println("[Gafi Loader] Could not normalize live respawn selector: "
+                    + exception.getMessage());
+        }
+    }
+
+    private static Object readField(Object target, String name) throws ReflectiveOperationException {
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
+    }
+
     /** Read @Shadow metadata reflectively to avoid linking against Mixin's shaded ASM return type. */
     public static boolean isShadowMethod(Object mixinMethod) {
         if (mixinMethod == null) return false;
@@ -89,8 +159,24 @@ public final class MixinShadowValidationPatcher {
         new ClassReader(original).accept(node, 0);
         int patchedMethods = 0;
         int patchedFields = 0;
+        int patchedAttach = 0;
 
         for (MethodNode method : node.methods) {
+            boolean attach = "attach".equals(method.name)
+                    && method.desc.contains("MixinTargetContext;")
+                    && method.desc.endsWith("MixinPreProcessorStandard;");
+            if (attach) {
+                InsnList entry = new InsnList();
+                entry.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                entry.add(new org.objectweb.asm.tree.FieldInsnNode(Opcodes.GETFIELD,
+                        TARGET_CLASS, "classNode",
+                        "Lorg/spongepowered/asm/mixin/transformer/MixinClassNode;"));
+                entry.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                        "dev/gafipro/gafiloader/MixinShadowValidationPatcher",
+                        "normalizeRespawnSelector", "(Ljava/lang/Object;)V", false));
+                method.instructions.insert(entry);
+                patchedAttach++;
+            }
             boolean shadowMethod = "attachShadowMethod".equals(method.name)
                     && hasExpectedArguments(method.desc, "MixinMethodNode");
             boolean shadowField = "attachShadowField".equals(method.name)
@@ -122,7 +208,7 @@ public final class MixinShadowValidationPatcher {
             method.maxLocals = 3;
         }
 
-        if (patchedMethods == 0 && patchedFields == 0) {
+        if (patchedMethods == 0 && patchedFields == 0 && patchedAttach == 0) {
             String available = node.methods.stream()
                     .filter(method -> method.name.toLowerCase(java.util.Locale.ROOT).contains("shadow"))
                     .map(method -> method.name + method.desc)
@@ -134,7 +220,7 @@ public final class MixinShadowValidationPatcher {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
         node.accept(writer);
         System.out.println("[Gafi Loader] Enabled legacy @Shadow validation compatibility (methods="
-                + patchedMethods + ", fields=" + patchedFields + ").");
+                + patchedMethods + ", fields=" + patchedFields + ", attach=" + patchedAttach + ").");
         return writer.toByteArray();
     }
 }
