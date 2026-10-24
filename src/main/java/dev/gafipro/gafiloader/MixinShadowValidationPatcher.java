@@ -64,6 +64,42 @@ public final class MixinShadowValidationPatcher {
     }
 
 
+    /** Locate the live mixin node reflectively; Mixin versions differ in field descriptors. */
+    public static void normalizeRespawnSelectorFromPreprocessor(Object preprocessor) {
+        if (preprocessor == null) return;
+        try {
+            try {
+                normalizeRespawnSelector(readField(preprocessor, "classNode"));
+                return;
+            } catch (NoSuchFieldException ignored) {
+                // Continue with type-based discovery below.
+            }
+            Class<?> type = preprocessor.getClass();
+            while (type != null) {
+                for (Field field : type.getDeclaredFields()) {
+                    String fieldType = field.getType().getName();
+                    if (!fieldType.endsWith("MixinClassNode") && !fieldType.endsWith("ClassNode")) {
+                        continue;
+                    }
+                    field.setAccessible(true);
+                    Object candidate = field.get(preprocessor);
+                    if (candidate != null) {
+                        normalizeRespawnSelector(candidate);
+                        return;
+                    }
+                }
+                type = type.getSuperclass();
+            }
+            System.err.println("[Gafi Loader] Could not find live MixinClassNode field on "
+                    + preprocessor.getClass().getName() + "; fields="
+                    + java.util.Arrays.stream(preprocessor.getClass().getDeclaredFields())
+                    .map(field -> field.getName() + ":" + field.getType().getName()).toList());
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            System.err.println("[Gafi Loader] Could not locate live MixinClassNode: "
+                    + exception.getMessage());
+        }
+    }
+
     /**
      * Mixin may parse the mixin class through a different bytecode path than its metadata
      * inspection hooks. Normalize the known respawn selector on the live MixinClassNode just
@@ -168,12 +204,9 @@ public final class MixinShadowValidationPatcher {
             if (attach) {
                 InsnList entry = new InsnList();
                 entry.add(new VarInsnNode(Opcodes.ALOAD, 0));
-                entry.add(new org.objectweb.asm.tree.FieldInsnNode(Opcodes.GETFIELD,
-                        TARGET_CLASS, "classNode",
-                        "Lorg/spongepowered/asm/mixin/transformer/MixinClassNode;"));
                 entry.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
                         "dev/gafipro/gafiloader/MixinShadowValidationPatcher",
-                        "normalizeRespawnSelector", "(Ljava/lang/Object;)V", false));
+                        "normalizeRespawnSelectorFromPreprocessor", "(Ljava/lang/Object;)V", false));
                 method.instructions.insert(entry);
                 patchedAttach++;
             }
