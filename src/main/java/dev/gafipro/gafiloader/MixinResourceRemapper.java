@@ -1170,9 +1170,10 @@ public final class MixinResourceRemapper {
         }
         String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
         String lower = normalized.toLowerCase(java.util.Locale.ROOT);
-        return lower.endsWith(".class")
-                && (lower.contains("/mixin/") || lower.endsWith("mixin.class")
-                    || lower.contains("mixin$"));
+        // Fabric API Mixin classes are not always stored below a package literally named
+        // "mixin" (for example impl/biome/MinecraftServerMixin.class). Match the class name
+        // itself as well, otherwise legacy @Shadow declarations bypass this transformation.
+        return lower.endsWith(".class") && lower.contains("mixin");
     }
 
     static boolean isClassResource(String resourceName) {
