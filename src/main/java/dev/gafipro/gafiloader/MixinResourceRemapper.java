@@ -1478,6 +1478,14 @@ public final class MixinResourceRemapper {
                     bytecodeInput, currentMappings, aliases, targetApi);
             byte[] result = remapped != null ? remapped
                     : selectorsRemapped == null ? pruned : selectorsRemapped;
+            if (requestedClassName != null && requestedClassName.contains("ClientPacketListenerMixin")) {
+                MixinClassMetadata before = readMixinMetadata(original);
+                MixinClassMetadata after = readMixinMetadata(result);
+                System.out.println("[Gafi Loader] DEBUG respawn mixin before="
+                        + (before == null ? "null" : before.targets() + " " + before.selectors())
+                        + " after=" + (after == null ? "null" : after.targets() + " " + after.selectors())
+                        + " selectorsChanged=" + (selectorsRemapped != null));
+            }
             byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
             if (overwriteAdjusted != original || remapped != null
                     || selectorsRemapped != null || pruned != original) {
