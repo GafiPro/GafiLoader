@@ -282,9 +282,11 @@ public final class MixinShadowValidationPatcher {
             if (attach) {
                 InsnList entry = new InsnList();
                 entry.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                entry.add(new VarInsnNode(Opcodes.ALOAD, 1));
                 entry.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
                         "dev/gafipro/gafiloader/MixinShadowValidationPatcher",
-                        "normalizeRespawnSelectorFromPreprocessor", "(Ljava/lang/Object;)V", false));
+                        "normalizeRespawnSelectorFromPreprocessor",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)V", false));
                 method.instructions.insert(entry);
                 patchedAttach++;
             }
