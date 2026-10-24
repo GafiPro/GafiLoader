@@ -82,9 +82,10 @@ public final class MixinResourceRemapper {
     public static URL transformUrl(String resourceName, URL original) {
         // Wrap Mixin JSON/refmaps and only those Mixin class URLs that already expose a path.
         // Fabric's union URLs with no path must remain untouched because Loader converts them to paths.
-        if (original == null || mappings == null
-                || (!isMixinResource(resourceName)
-                    && (!isMixinClassResource(resourceName) || original.getPath() == null))) {
+        if (original == null || mappings == null || original.getPath() == null
+                || (!isMixinResource(resourceName) && !isMixinClassResource(resourceName))) {
+            // Fabric union URLs may have no concrete path. Leave them intact so Fabric Loader
+            // can convert them to its own resource path and the stream hooks can normalize bytes.
             return original;
         }
         try {
