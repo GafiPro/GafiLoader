@@ -62,6 +62,15 @@ class MixinServiceKnotPatcherTest {
     }
 
     @Test
+    void keepsEssentialClassByteHookWhenOptionalMethodsAreAbsent() {
+        byte[] original = classWithClassBytesOnly();
+        byte[] transformed = MixinServiceKnotPatcher.transform(
+                MixinServiceKnotPatcher.TARGET_CLASS, original);
+        assertTrue(transformed.length > original.length,
+                "Expected the class-byte compatibility hook even without optional resource/ClassNode methods");
+    }
+
+    @Test
     void rejectsUnexpectedFabricMixinServiceSignature() {
         byte[] noExpectedMethod = classWithWrongMethod();
         assertThrows(IllegalStateException.class, () -> MixinServiceKnotPatcher.transform(
@@ -112,6 +121,29 @@ class MixinServiceKnotPatcherTest {
         classNode.visitMaxs(0, 0);
         classNode.visitEnd();
 
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] classWithClassBytesOnly() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, MixinServiceKnotPatcher.TARGET_CLASS,
+                null, "java/lang/Object", null);
+        MethodVisitor constructor = writer.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+        constructor.visitCode();
+        constructor.visitVarInsn(Opcodes.ALOAD, 0);
+        constructor.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
+        constructor.visitInsn(Opcodes.RETURN);
+        constructor.visitMaxs(0, 0);
+        constructor.visitEnd();
+
+        MethodVisitor classBytes = writer.visitMethod(Opcodes.ACC_PUBLIC, "getClassBytes",
+                "(Ljava/lang/String;Z)[B", null, null);
+        classBytes.visitCode();
+        classBytes.visitInsn(Opcodes.ACONST_NULL);
+        classBytes.visitInsn(Opcodes.ARETURN);
+        classBytes.visitMaxs(0, 0);
+        classBytes.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
