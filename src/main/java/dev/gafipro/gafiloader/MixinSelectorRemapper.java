@@ -292,6 +292,8 @@ final class MixinSelectorRemapper {
         if (methodSelector && targetApi != null) {
             mapped = remapUniqueDescriptorMatch(mapped, targets, mappings, aliases,
                     enclosingMethodDescriptor, targetApi);
+            mapped = remapKnownRespawnSelector(mapped, targets, mappings, aliases,
+                    enclosingMethodDescriptor, targetApi);
         }
         // NEW selectors use a constructor descriptor in the form (args)ReturnType, not the
         // owner;member syntax handled by remapSelector. Leaving intermediary class names here
@@ -416,6 +418,70 @@ final class MixinSelectorRemapper {
         String mapped = owner == null ? replacement + descriptor
                 : "L" + owner + ";" + replacement + descriptor;
         return optionalPrefix + mapped;
+    }
+
+    /**
+     * Fabric API 1.21.11 names this callback's target through a selector that does not always
+     * map through the implementation owner (the mapping is declared on the listener interface).
+     * Preserve the behavior by using the verified 26.2 handler with the same packet signature.
+     */
+    private static String remapKnownRespawnSelector(String selector, List<String> targets,
+            IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
+            String callbackDescriptor, TargetApiIndex targetApi) {
+        if (selector == null || callbackDescriptor == null || targetApi == null) {
+            return selector;
+        }
+        String mappedCallback = LegacyClassAliases.mapDescriptor(
+                aliases.mapDescriptor(mappings.mapDescriptor(callbackDescriptor)), targetApi);
+        Type callbackType;
+        try {
+            callbackType = Type.getMethodType(mappedCallback);
+        } catch (IllegalArgumentException exception) {
+            return selector;
+        }
+        Type[] arguments = callbackType.getArgumentTypes();
+        if (callbackType.getReturnType().getSort() != Type.VOID || arguments.length != 2
+                || arguments[0].getSort() != Type.OBJECT
+                || !arguments[0].getInternalName().equals(
+                        "net/minecraft/network/protocol/game/ClientboundRespawnPacket")
+                || arguments[1].getSort() != Type.OBJECT
+                || !arguments[1].getInternalName().equals(
+                        "org/spongepowered/asm/mixin/injection/callback/CallbackInfo")) {
+            return selector;
+        }
+        String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
+        boolean targetsListener = false;
+        for (String rawTarget : targets) {
+            String normalized = rawTarget.replace('.', '/');
+            if (normalized.startsWith("L") && normalized.endsWith(";")) {
+                normalized = normalized.substring(1, normalized.length() - 1);
+            }
+            String mappedOwner = LegacyClassAliases.mapClass(
+                    aliases.mapClass(mappings.mapClassName(normalized)), targetApi);
+            if (owner.equals(mappedOwner)) {
+                targetsListener = true;
+                break;
+            }
+        }
+        if (!targetsListener || !targetApi.hasClass(owner)) {
+            return selector;
+        }
+        String targetDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, arguments[0]);
+        if (targetApi.declaredMethodAccess(owner, "handleRespawn", targetDescriptor) == null) {
+            return selector;
+        }
+        String optional = selector.startsWith("?") ? "?" : "";
+        String value = optional.isEmpty() ? selector : selector.substring(1);
+        if (value.startsWith("L")) {
+            int ownerEnd = value.indexOf(';');
+            if (ownerEnd > 1) {
+                return optional + value.substring(0, ownerEnd + 1)
+                        + "handleRespawn" + targetDescriptor;
+            }
+        }
+        int descriptorStart = value.indexOf('(');
+        return optional + "handleRespawn"
+                + (descriptorStart >= 0 ? targetDescriptor : "");
     }
 
     /**
