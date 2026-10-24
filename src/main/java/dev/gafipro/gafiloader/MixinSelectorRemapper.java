@@ -535,9 +535,11 @@ final class MixinSelectorRemapper {
         }
         boolean optional = selector.startsWith("?");
         String unwrapped = optional ? selector.substring(1) : selector;
+        String normalizedSelector = remapSelectorClassAliases(
+                remapSelector(unwrapped, targets, mappings, aliases), targetApi);
         String mapped = remapKnownTargetSelector(
-                remapUniqueDescriptorMatch(remapSelector(unwrapped, targets, mappings, aliases),
-                        targets, mappings, aliases, targetApi), targetApi);
+                remapUniqueDescriptorMatch(normalizedSelector, targets, mappings, aliases,
+                        null, targetApi), targetApi);
         if (mapped == null || mapped.equals(unwrapped)) {
             // A selector that only needs descriptor normalization may still change even if the
             // member name stays the same; remapSelector handles that. If no full signature exists,
