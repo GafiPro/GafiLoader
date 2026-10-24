@@ -78,9 +78,9 @@ final class LegacyApiBridgePatcher {
         }
 
         if (ABSTRACT_PACK_RESOURCES.equals(className)
+                && targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
                 && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
-                        "getMetadataFromStream", METADATA_FROM_STREAM) == null
-                && supportsMetadataFromStreamBridge(targetApi)) {
+                        "getMetadataFromStream", METADATA_FROM_STREAM) == null) {
             return addBridgeMethod(original, "getMetadataFromStream", METADATA_FROM_STREAM,
                     LegacyApiBridgePatcher::writeMetadataFromStreamBridge);
         }
@@ -107,14 +107,6 @@ final class LegacyApiBridgePatcher {
             }
         }
         return true;
-    }
-
-    private static boolean supportsMetadataFromStreamBridge(TargetApiIndex targetApi) {
-        Integer replacementAccess = targetApi.declaredMethodAccess(
-                ABSTRACT_PACK_RESOURCES, "loadMetadata", LOAD_METADATA);
-        return targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
-                && replacementAccess != null
-                && (replacementAccess & Opcodes.ACC_STATIC) != 0;
     }
 
     private static boolean supportsSafeFormatValueBridge(TargetApiIndex targetApi) {
@@ -233,12 +225,12 @@ final class LegacyApiBridgePatcher {
     }
 
     private static void writeMetadataFromStreamBridge(MethodVisitor method, String owner) {
-        // 26.2's loadMetadata helper no longer takes PackLocationInfo; its parsing behavior
-        // replaces the old three-argument getMetadataFromStream helper.
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitVarInsn(Opcodes.ALOAD, 1);
-        method.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "loadMetadata",
-                LOAD_METADATA, false);
+        method.visitVarInsn(Opcodes.ALOAD, 2);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/gafipro/gafiloader/LegacyApiBridgeRuntime",
+                "getMetadataFromStream",
+                "(Ljava/lang/Object;Ljava/io/InputStream;Ljava/lang/Object;)Ljava/lang/Object;", false);
         method.visitInsn(Opcodes.ARETURN);
     }
 
