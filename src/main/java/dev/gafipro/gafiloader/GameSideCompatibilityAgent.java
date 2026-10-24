@@ -104,6 +104,8 @@ public final class GameSideCompatibilityAgent {
                                 + targetApi.declaredMethodAccess("net/minecraft/server/packs/AbstractPackResources",
                                         "getMetadataFromStream", "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
                                         + "Ljava/io/InputStream;Lnet/minecraft/server/packs/PackLocationInfo;)Ljava/lang/Object;")
+                                + " methods=" + targetApi.describeClassMethods(
+                                        "net/minecraft/server/packs/AbstractPackResources")
                                 + " patched=" + (bridged != null));
                     }
                     if (bridged != null) {
