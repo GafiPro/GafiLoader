@@ -80,10 +80,9 @@ public final class MixinResourceRemapper {
      * getResourceAsStream still receive the in-memory compatibility view.
      */
     public static URL transformUrl(String resourceName, URL original) {
-        // Wrap Mixin JSON/refmaps and Mixin class resources. Leave ordinary game/library class
-        // URLs alone because Fabric may convert those URLs to filesystem paths.
-        if (original == null || mappings == null
-                || (!isMixinResource(resourceName) && !isMixinClassResource(resourceName))) {
+        // Only wrap Mixin JSON/refmaps here. ClassNode loading is patched separately so we do
+        // not replace URLs that Fabric needs to convert back to paths.
+        if (original == null || mappings == null || !isMixinResource(resourceName)) {
             return original;
         }
         try {
@@ -272,10 +271,6 @@ public final class MixinResourceRemapper {
     public static InputStream transform(String resourceName, InputStream original) {
         IntermediaryMappings currentMappings = mappings;
         boolean classResource = isClassResource(resourceName);
-        if (resourceName != null && resourceName.contains("ClientPacketListenerMixin")) {
-            System.out.println("[Gafi Loader] DEBUG resource stream requested for " + resourceName
-                    + " classResource=" + classResource);
-        }
         if (original == null || currentMappings == null
                 || (!isMixinResource(resourceName) && !classResource
                     && !isPotentialClassResourceName(resourceName))) {
@@ -1166,17 +1161,6 @@ public final class MixinResourceRemapper {
                 && (lower.contains("mixin") || lower.contains("refmap"));
     }
 
-    private static boolean isMixinClassResource(String resourceName) {
-        if (resourceName == null) {
-            return false;
-        }
-        String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
-        String lower = normalized.toLowerCase(java.util.Locale.ROOT);
-        return lower.endsWith(".class")
-                && (lower.contains("/mixin/") || lower.endsWith("mixin.class")
-                    || lower.contains("mixin$"));
-    }
-
     static boolean isClassResource(String resourceName) {
         if (resourceName == null) {
             return false;
@@ -1520,14 +1504,6 @@ public final class MixinResourceRemapper {
                     bytecodeInput, currentMappings, aliases, targetApi);
             byte[] result = remapped != null ? remapped
                     : selectorsRemapped == null ? pruned : selectorsRemapped;
-            if (requestedClassName != null && requestedClassName.contains("ClientPacketListenerMixin")) {
-                MixinClassMetadata before = readMixinMetadata(original);
-                MixinClassMetadata after = readMixinMetadata(result);
-                System.out.println("[Gafi Loader] DEBUG respawn mixin before="
-                        + (before == null ? "null" : before.targets() + " " + before.selectors())
-                        + " after=" + (after == null ? "null" : after.targets() + " " + after.selectors())
-                        + " selectorsChanged=" + (selectorsRemapped != null));
-            }
             byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
             if (overwriteAdjusted != original || remapped != null
                     || selectorsRemapped != null || pruned != original) {
@@ -1539,6 +1515,39 @@ public final class MixinResourceRemapper {
             System.err.println("[Gafi Loader] Could not normalize class bytes for Mixin inspection: "
                     + requestedClassName + "; original bytes retained: " + exception.getMessage());
             return original;
+        }
+    }
+
+    /**
+     * Mixin's class-node provider is the path used by some loader versions to read Mixin
+     * bytecode without calling the resource-stream hook. Serialize and normalize through the
+     * target loader's own ASM classes so the returned ClassNode remains type-compatible.
+     */
+    public static Object transformClassNode(String requestedClassName, Object originalNode) {
+        if (requestedClassName == null || originalNode == null || mappings == null) {
+            return originalNode;
+        }
+        try {
+            ClassLoader loader = originalNode.getClass().getClassLoader();
+            Class<?> visitorClass = Class.forName("org.objectweb.asm.ClassVisitor", false, loader);
+            Class<?> writerClass = Class.forName("org.objectweb.asm.ClassWriter", false, loader);
+            Object writer = writerClass.getConstructor(int.class).newInstance(0);
+            originalNode.getClass().getMethod("accept", visitorClass).invoke(originalNode, writer);
+            byte[] originalBytes = (byte[]) writerClass.getMethod("toByteArray").invoke(writer);
+            byte[] transformedBytes = transformClassBytes(requestedClassName, originalBytes);
+            if (transformedBytes == originalBytes) {
+                return originalNode;
+            }
+
+            Class<?> readerClass = Class.forName("org.objectweb.asm.ClassReader", false, loader);
+            Object reader = readerClass.getConstructor(byte[].class).newInstance((Object) transformedBytes);
+            Object transformedNode = originalNode.getClass().getConstructor().newInstance();
+            readerClass.getMethod("accept", visitorClass, int.class).invoke(reader, transformedNode, 0);
+            return transformedNode;
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException exception) {
+            System.err.println("[Gafi Loader] Could not normalize Mixin ClassNode " + requestedClassName
+                    + "; original node retained: " + exception.getMessage());
+            return originalNode;
         }
     }
 
