@@ -137,8 +137,11 @@ public final class MixinShadowValidationPatcher {
                         || descriptor.contains("class_2724"))) {
                     continue;
                 }
-                Object annotationsValue = readField(method, "visibleAnnotations");
-                if (!(annotationsValue instanceof List<?> annotations)) continue;
+                java.util.List<Object> annotations = new java.util.ArrayList<>();
+                Object visibleValue = readField(method, "visibleAnnotations");
+                if (visibleValue instanceof List<?> visible) annotations.addAll(visible);
+                Object invisibleValue = readField(method, "invisibleAnnotations");
+                if (invisibleValue instanceof List<?> invisible) annotations.addAll(invisible);
                 for (Object annotation : annotations) {
                     if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(
                             String.valueOf(readField(annotation, "desc")))) {
