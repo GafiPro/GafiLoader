@@ -1579,7 +1579,7 @@ public final class MixinResourceRemapper {
      * Without this pass intermediary shadow names such as method_123 remain unchanged even when
      * the target's official method is known.
      */
-    private static byte[] remapMixinShadowMembers(byte[] original,
+    static byte[] remapMixinShadowMembers(byte[] original,
             IntermediaryMappings mappings, CompatibilityScanner.AliasSet aliases,
             TargetApiIndex targetApi) {
         if (original == null || mappings == null || targetApi == null) {
