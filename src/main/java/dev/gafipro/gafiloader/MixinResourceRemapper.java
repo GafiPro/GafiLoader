@@ -1244,15 +1244,22 @@ public final class MixinResourceRemapper {
         // selector/anchor validation cannot prove the WrapOperation handler compatible.
         // Remove only this known stale callback; all other handlers continue through normal
         // anchor validation below.
-        if (new ClassReader(original).getClassName().endsWith("/RenderPipelineBuilderMixin")) {
+        String mixinClassName = new ClassReader(original).getClassName();
+        if (mixinClassName.endsWith("/RenderPipelineBuilderMixin")
+                || mixinClassName.endsWith("/ItemStackRenderStateMixin")) {
             new ClassReader(original).accept(new ClassVisitor(Opcodes.ASM9) {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
-                    if ("copyUsePipelineDrawModeForGuiToSnippet".equals(name)) {
+                    if (mixinClassName.endsWith("/RenderPipelineBuilderMixin")
+                            && "copyUsePipelineDrawModeForGuiToSnippet".equals(name)) {
                         methodsToRemove.add(name);
                         reasons.putIfAbsent(name, "WrapOperation handler arguments no longer match "
                                 + "the Minecraft 26.2 RenderPipeline.Builder operation signature");
+                    } else if (mixinClassName.endsWith("/ItemStackRenderStateMixin")
+                            && "afterInitVecLoad".equals(name)) {
+                        methodsToRemove.add(name);
+                        reasons.putIfAbsent(name, "captured local-variable layout changed in Minecraft 26.2");
                     }
                     return null;
                 }
