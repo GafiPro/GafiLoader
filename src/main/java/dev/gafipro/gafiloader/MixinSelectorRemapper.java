@@ -482,9 +482,10 @@ final class MixinSelectorRemapper {
                         + targetMethodName + targetDescriptor;
             }
         }
-        int descriptorStart = value.indexOf('(');
-        return optional + targetMethodName
-                + (descriptorStart >= 0 ? targetDescriptor : "");
+        // Pin the selector to the verified packet descriptor even when the legacy selector
+        // used only a name. This avoids Mixin selecting an unrelated overload after the target
+        // API has been renamed or reorganized.
+        return optional + targetMethodName + targetDescriptor;
     }
 
     /**
