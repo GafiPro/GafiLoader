@@ -208,6 +208,29 @@ final class TargetApiIndex {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
 
+    /** Returns the unique method name for an exact descriptor in the class hierarchy. */
+    String uniqueMethodName(String owner, String descriptor) {
+        Set<String> candidates = new HashSet<>();
+        collectMethodNamesByDescriptor(owner, descriptor, new HashSet<>(), candidates);
+        return candidates.size() == 1 ? candidates.iterator().next() : null;
+    }
+
+    private void collectMethodNamesByDescriptor(String owner, String descriptor,
+            Set<String> visited, Set<String> candidates) {
+        if (owner == null || !visited.add(owner)) return;
+        TargetClass target = classes.get(owner);
+        if (target == null) return;
+        for (MemberKey member : target.methods().keySet()) {
+            if (member.descriptor().equals(descriptor) && !member.name().startsWith("<")) {
+                candidates.add(member.name());
+            }
+        }
+        for (String interfaceName : target.interfaces()) {
+            collectMethodNamesByDescriptor(interfaceName, descriptor, visited, candidates);
+        }
+        collectMethodNamesByDescriptor(target.superName(), descriptor, visited, candidates);
+    }
+
     /**
      * Checks whether a target method contains a matching object-allocation expression,
      * used to validate Mixin @At(value="NEW", target="(args)ReturnType") anchors.
