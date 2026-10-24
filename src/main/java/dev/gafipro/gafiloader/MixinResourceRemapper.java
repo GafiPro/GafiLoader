@@ -1589,17 +1589,20 @@ public final class MixinResourceRemapper {
             return original;
         }
         MixinClassMetadata metadata = readMixinMetadata(original);
+        String debugClassName = new ClassReader(original).getClassName();
+        if (debugClassName.contains("MinecraftServerMixin")) {
+            System.out.println("[Gafi Loader] DEBUG shadow metadata class=" + debugClassName
+                    + " targets=" + (metadata == null ? "<none>" : metadata.targets())
+                    + " members=" + (metadata == null ? "<none>" : metadata.shadowMembers()));
+        }
         if (metadata == null || metadata.shadowMembers().isEmpty() || metadata.targets().isEmpty()) {
             return original;
-        }
-        if (new ClassReader(original).getClassName().contains("MinecraftServerMixin")) {
-            System.out.println("[Gafi Loader] DEBUG shadow metadata targets=" + metadata.targets()
-                    + " members=" + metadata.shadowMembers());
         }
 
         Map<String, String> methodRenames = new java.util.HashMap<>();
         Map<String, String> methodDescriptors = new java.util.HashMap<>();
         Map<String, String> fieldRenames = new java.util.HashMap<>();
+        Map<String, String> fieldDescriptors = new java.util.HashMap<>();
         for (ShadowMember shadow : metadata.shadowMembers()) {
             String originalName = shadow.name();
             boolean hadPrefix = !shadow.prefix().isEmpty() && originalName.startsWith(shadow.prefix());
@@ -1622,22 +1625,36 @@ public final class MixinResourceRemapper {
                         ? targetApi.methodAccess(mappedOwner, mapped.name(), mappedDescriptor) != null
                         : targetApi.fieldAccess(mappedOwner, mapped.name(), mappedDescriptor) != null;
                 String resolvedDescriptor = mappedDescriptor;
+                String resolvedMemberName = mapped.name();
                 if (!exists && shadow.method()) {
                     String uniqueDescriptor = targetApi.uniqueDeclaredMethodDescriptor(mappedOwner, mapped.name());
                     if (uniqueDescriptor != null) {
                         resolvedDescriptor = uniqueDescriptor;
                         exists = true;
                     }
+                } else if (!exists) {
+                    String uniqueFieldName = targetApi.uniqueFieldName(mappedOwner, mappedDescriptor);
+                    if (uniqueFieldName != null) {
+                        resolvedMemberName = uniqueFieldName;
+                        exists = true;
+                    }
+                }
+                if (debugClassName.contains("MinecraftServerMixin")) {
+                    System.out.println("[Gafi Loader] DEBUG shadow resolve target=" + mappedOwner
+                            + " original=" + lookupName + shadow.descriptor()
+                            + " mapped=" + mapped.name() + mappedDescriptor
+                            + " resolved=" + resolvedMemberName + resolvedDescriptor
+                            + " exists=" + exists + " kind=" + kind);
                 }
                 if (!exists) {
                     ambiguous = true;
                     break;
                 }
-                if (resolvedName != null && !resolvedName.equals(mapped.name())) {
+                if (resolvedName != null && !resolvedName.equals(resolvedMemberName)) {
                     ambiguous = true;
                     break;
                 }
-                resolvedName = mapped.name();
+                resolvedName = resolvedMemberName;
                 if (shadow.method()) {
                     String priorDescriptor = methodDescriptors.putIfAbsent(
                             shadow.name() + shadow.descriptor(), resolvedDescriptor);
@@ -1656,6 +1673,7 @@ public final class MixinResourceRemapper {
                 methodRenames.put(key, replacementName);
             } else {
                 fieldRenames.put(key, replacementName);
+                fieldDescriptors.put(key, methodDescriptors.getOrDefault(key, shadow.descriptor()));
             }
         }
         if (methodRenames.isEmpty() && fieldRenames.isEmpty()) {
@@ -1668,8 +1686,10 @@ public final class MixinResourceRemapper {
             @Override
             public org.objectweb.asm.FieldVisitor visitField(int access, String name, String descriptor,
                                                               String signature, Object value) {
-                String mappedName = fieldRenames.getOrDefault(name + descriptor, name);
-                return super.visitField(access, mappedName, descriptor, signature, value);
+                String key = name + descriptor;
+                String mappedName = fieldRenames.getOrDefault(key, name);
+                String mappedDescriptor = fieldDescriptors.getOrDefault(key, descriptor);
+                return super.visitField(access, mappedName, mappedDescriptor, signature, value);
             }
 
             @Override
