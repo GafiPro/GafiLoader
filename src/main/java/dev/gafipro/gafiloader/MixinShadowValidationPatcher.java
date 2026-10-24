@@ -63,6 +63,25 @@ public final class MixinShadowValidationPatcher {
         return false;
     }
 
+
+    /** Read @Shadow metadata reflectively to avoid linking against Mixin's shaded ASM return type. */
+    public static boolean isShadowMethod(Object mixinMethod) {
+        if (mixinMethod == null) return false;
+        try {
+            Field annotationsField = mixinMethod.getClass().getField("visibleAnnotations");
+            Object annotations = annotationsField.get(mixinMethod);
+            if (!(annotations instanceof List<?> list)) return false;
+            for (Object annotation : list) {
+                if (annotation == null) continue;
+                Field descriptorField = annotation.getClass().getField("desc");
+                if (SHADOW_ANNOTATION.equals(descriptorField.get(annotation))) return true;
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // Fail closed: never classify an unverified method as a shadow.
+        }
+        return false;
+    }
+
     static byte[] transform(String className, byte[] original) {
         if (!TARGET_CLASS.equals(className) || original == null) return null;
 
@@ -83,21 +102,12 @@ public final class MixinShadowValidationPatcher {
             if (method.localVariables != null) method.localVariables.clear();
             InsnList code = method.instructions;
             if (shadowMethod) {
-                // MixinMethodNode provides getVisibleAnnotation(Class).
+                // Reflect over visibleAnnotations so the method does not link to either
+                // Fabric's ASM classes or the agent's relocated/shaded ASM classes.
                 code.add(new VarInsnNode(Opcodes.ALOAD, 2));
-                code.add(new org.objectweb.asm.tree.LdcInsnNode(
-                        Type.getObjectType("org/spongepowered/asm/mixin/Shadow")));
-                code.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL,
-                        "org/spongepowered/asm/mixin/transformer/MixinInfo$MixinMethodNode",
-                        "getVisibleAnnotation",
-                        "(Ljava/lang/Class;)Lorg/objectweb/asm/tree/AnnotationNode;", false));
-                org.objectweb.asm.tree.LabelNode notShadow =
-                        new org.objectweb.asm.tree.LabelNode();
-                code.add(new org.objectweb.asm.tree.JumpInsnNode(Opcodes.IFNULL, notShadow));
-                code.add(new InsnNode(Opcodes.ICONST_1));
-                code.add(new InsnNode(Opcodes.IRETURN));
-                code.add(notShadow);
-                code.add(new InsnNode(Opcodes.ICONST_0));
+                code.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                        "dev/gafipro/gafiloader/MixinShadowValidationPatcher",
+                        "isShadowMethod", "(Ljava/lang/Object;)Z", false));
                 code.add(new InsnNode(Opcodes.IRETURN));
                 patchedMethods++;
             } else {
