@@ -123,7 +123,7 @@ class MixinSelectorRemapperTest {
         Path targetJar = temporaryDirectory.resolve("respawn-target.jar");
         String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
         String packet = "net/minecraft/network/protocol/game/ClientboundRespawnPacket";
-        String descriptor = "(L" + packet + ";)V";
+        String descriptor = "(L" + packet + ";I)V";
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(targetJar))) {
             jar.putNextEntry(new JarEntry(owner + ".class"));
             jar.write(targetClassWithRespawnMethod(owner, packet));
@@ -153,7 +153,7 @@ class MixinSelectorRemapperTest {
                 original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
 
         assertNotEquals(null, transformed, "Respawn selectors should be pinned to the verified descriptor");
-        assertEquals("handleRespawn" + descriptor, readSelectors(transformed).implicitMethod());
+        assertEquals("handleRespawn", readSelectors(transformed).implicitMethod());
     }
 
     @Test
@@ -221,7 +221,7 @@ class MixinSelectorRemapperTest {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V25, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "handleRespawn",
-                "(L" + packet + ";)V", null, null);
+                "(L" + packet + ";I)V", null, null);
         method.visitCode();
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(0, 0);
