@@ -1239,6 +1239,25 @@ public final class MixinResourceRemapper {
 
         Set<String> methodsToRemove = new java.util.HashSet<>();
         Map<String, String> reasons = new java.util.LinkedHashMap<>();
+        // Fabric API 0.141.5's GUI pipeline wrapper binds to the pre-26.2 builder
+        // signature. The target still exists, but its argument layout changed, so ordinary
+        // selector/anchor validation cannot prove the WrapOperation handler compatible.
+        // Remove only this known stale callback; all other handlers continue through normal
+        // anchor validation below.
+        if (new ClassReader(original).getClassName().endsWith("/RenderPipelineBuilderMixin")) {
+            new ClassReader(original).accept(new ClassVisitor(Opcodes.ASM9) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                 String signature, String[] exceptions) {
+                    if ("copyUsePipelineDrawModeForGuiToSnippet".equals(name)) {
+                        methodsToRemove.add(name);
+                        reasons.putIfAbsent(name, "WrapOperation handler arguments no longer match "
+                                + "the Minecraft 26.2 RenderPipeline.Builder operation signature");
+                    }
+                    return null;
+                }
+            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        }
         for (MixinAtTarget anchor : metadata.atTargets()) {
             String reason = injectionAnchorIncompatibility(
                     anchor, metadata.targets(), mappings, aliases, targetApi);
