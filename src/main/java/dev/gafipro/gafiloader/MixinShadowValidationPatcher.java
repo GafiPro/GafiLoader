@@ -66,10 +66,14 @@ public final class MixinShadowValidationPatcher {
 
     /** Locate the live mixin node reflectively; Mixin versions differ in field descriptors. */
     public static void normalizeRespawnSelectorFromPreprocessor(Object preprocessor) {
+        normalizeRespawnSelectorFromPreprocessor(preprocessor, null);
+    }
+
+    public static void normalizeRespawnSelectorFromPreprocessor(Object preprocessor, Object targetContext) {
         if (preprocessor == null) return;
         try {
             try {
-                normalizeRespawnSelector(readField(preprocessor, "classNode"));
+                normalizeRespawnSelector(readField(preprocessor, "classNode"), targetContext);
                 return;
             } catch (NoSuchFieldException ignored) {
                 // Continue with type-based discovery below.
@@ -84,7 +88,7 @@ public final class MixinShadowValidationPatcher {
                     field.setAccessible(true);
                     Object candidate = field.get(preprocessor);
                     if (candidate != null) {
-                        normalizeRespawnSelector(candidate);
+                        normalizeRespawnSelector(candidate, targetContext);
                         return;
                     }
                 }
@@ -106,6 +110,10 @@ public final class MixinShadowValidationPatcher {
      * before Mixin prepares and attaches the methods.
      */
     public static void normalizeRespawnSelector(Object mixinClassNode) {
+        normalizeRespawnSelector(mixinClassNode, null);
+    }
+
+    public static void normalizeRespawnSelector(Object mixinClassNode, Object targetContext) {
         if (mixinClassNode == null) return;
         System.out.println("[Gafi Loader] DEBUG live mixin node received: "
                 + mixinClassNode.getClass().getName());
@@ -122,7 +130,16 @@ public final class MixinShadowValidationPatcher {
                 return;
             }
             System.out.println("[Gafi Loader] DEBUG live mixin method count=" + methods.size());
-            String targetSelector = MixinResourceRemapper.resolveRespawnTargetSelector();
+            Object targetClassNode = null;
+            if (targetContext != null) {
+                try {
+                    targetClassNode = targetContext.getClass().getMethod("getTargetClassNode")
+                            .invoke(targetContext);
+                } catch (ReflectiveOperationException | RuntimeException exception) {
+                    System.out.println("[Gafi Loader] Could not inspect live Mixin target class: "
+                            + exception.getMessage());
+                }
+            }
             for (Object method : methods) {
                 String name = String.valueOf(readField(method, "name"));
                 String descriptor = String.valueOf(readField(method, "desc"));
@@ -140,6 +157,12 @@ public final class MixinShadowValidationPatcher {
                         || descriptor.contains("class_2724"))) {
                     continue;
                 }
+                String targetSelector = resolveTargetSelectorFromContext(targetClassNode, descriptor);
+                if (targetSelector == null) {
+                    targetSelector = MixinResourceRemapper.resolveRespawnTargetSelector();
+                }
+                System.out.println("[Gafi Loader] DEBUG live respawn target selector=" + targetSelector
+                        + " fromTargetNode=" + (targetClassNode != null));
                 java.util.List<Object> annotations = new java.util.ArrayList<>();
                 Object visibleValue = readField(method, "visibleAnnotations");
                 if (visibleValue instanceof List<?> visible) annotations.addAll(visible);
@@ -173,6 +196,42 @@ public final class MixinShadowValidationPatcher {
             System.err.println("[Gafi Loader] Could not normalize live respawn selector: "
                     + exception.getMessage());
         }
+    }
+
+    private static String resolveTargetSelectorFromContext(Object targetClassNode,
+            String callbackDescriptor) {
+        if (targetClassNode == null || callbackDescriptor == null) return null;
+        try {
+            String callbackPacket = firstObjectArgument(callbackDescriptor);
+            if (callbackPacket == null) return null;
+            Object methodsValue = readField(targetClassNode, "methods");
+            if (!(methodsValue instanceof List<?> methods)) return null;
+            java.util.Set<String> candidates = new java.util.TreeSet<>();
+            for (Object method : methods) {
+                String descriptor = String.valueOf(readField(method, "desc"));
+                if (!descriptor.endsWith(")V")) continue;
+                String firstArgument = firstObjectArgument(descriptor);
+                if (callbackPacket.equals(firstArgument)) {
+                    candidates.add(String.valueOf(readField(method, "name")) + descriptor);
+                }
+            }
+            if (candidates.size() == 1) return candidates.iterator().next();
+            if (!candidates.isEmpty()) {
+                System.out.println("[Gafi Loader] Ambiguous live respawn target candidates: " + candidates);
+            }
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            System.out.println("[Gafi Loader] Could not resolve respawn target from live target node: "
+                    + exception.getMessage());
+        }
+        return null;
+    }
+
+    private static String firstObjectArgument(String descriptor) {
+        if (descriptor == null || !descriptor.startsWith("(")) return null;
+        int start = 1;
+        if (descriptor.length() <= start || descriptor.charAt(start) != 'L') return null;
+        int end = descriptor.indexOf(';', start);
+        return end < 0 ? null : descriptor.substring(start, end + 1);
     }
 
     private static Object readField(Object target, String name) throws ReflectiveOperationException {
