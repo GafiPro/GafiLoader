@@ -80,9 +80,11 @@ public final class MixinResourceRemapper {
      * getResourceAsStream still receive the in-memory compatibility view.
      */
     public static URL transformUrl(String resourceName, URL original) {
-        // Only wrap Mixin JSON/refmaps here. ClassNode loading is patched separately so we do
-        // not replace URLs that Fabric needs to convert back to paths.
-        if (original == null || mappings == null || !isMixinResource(resourceName)) {
+        // Wrap Mixin JSON/refmaps and only those Mixin class URLs that already expose a path.
+        // Fabric's union URLs with no path must remain untouched because Loader converts them to paths.
+        if (original == null || mappings == null
+                || (!isMixinResource(resourceName)
+                    && (!isMixinClassResource(resourceName) || original.getPath() == null))) {
             return original;
         }
         try {
@@ -1159,6 +1161,17 @@ public final class MixinResourceRemapper {
         String lower = normalized.toLowerCase(java.util.Locale.ROOT);
         return lower.endsWith(".json")
                 && (lower.contains("mixin") || lower.contains("refmap"));
+    }
+
+    private static boolean isMixinClassResource(String resourceName) {
+        if (resourceName == null) {
+            return false;
+        }
+        String normalized = resourceName.startsWith("/") ? resourceName.substring(1) : resourceName;
+        String lower = normalized.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".class")
+                && (lower.contains("/mixin/") || lower.endsWith("mixin.class")
+                    || lower.contains("mixin$"));
     }
 
     static boolean isClassResource(String resourceName) {
