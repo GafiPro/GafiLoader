@@ -107,6 +107,8 @@ public final class MixinShadowValidationPatcher {
      */
     public static void normalizeRespawnSelector(Object mixinClassNode) {
         if (mixinClassNode == null) return;
+        System.out.println("[Gafi Loader] DEBUG live mixin node received: "
+                + mixinClassNode.getClass().getName());
         try {
             Object methodsValue;
             try {
@@ -114,11 +116,22 @@ public final class MixinShadowValidationPatcher {
             } catch (NoSuchFieldException ignored) {
                 methodsValue = readField(mixinClassNode, "methods");
             }
-            if (!(methodsValue instanceof List<?> methods)) return;
+            if (!(methodsValue instanceof List<?> methods)) {
+                System.out.println("[Gafi Loader] DEBUG live mixin methods field is not a list: "
+                        + (methodsValue == null ? "null" : methodsValue.getClass().getName()));
+                return;
+            }
+            System.out.println("[Gafi Loader] DEBUG live mixin method count=" + methods.size());
             String targetSelector = MixinResourceRemapper.resolveRespawnTargetSelector();
             for (Object method : methods) {
                 String name = String.valueOf(readField(method, "name"));
                 String descriptor = String.valueOf(readField(method, "desc"));
+                if (name.toLowerCase(java.util.Locale.ROOT).contains("respawn")
+                        || descriptor.contains("ClientboundRespawnPacket")
+                        || descriptor.contains("class_2724")) {
+                    System.out.println("[Gafi Loader] DEBUG live mixin relevant method="
+                            + name + descriptor);
+                }
                 if (!"onPlayerRespawn".equals(name)
                         || !(descriptor.contains("ClientboundRespawnPacket")
                         || descriptor.contains("class_2724"))) {
