@@ -174,20 +174,34 @@ public final class GameSideCompatibilityAgent {
         // Mixin can be loaded before premain by launcher/bootstrap setup. The transformer
         // above cannot alter classes already defined unless they are explicitly retransformed.
         // Reapply the @Shadow validation patch to an already-loaded preprocessor as well.
-        if (instrumentation.isRetransformClassesSupported()) {
-            for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
-                if (loadedClass.getName().equals(
-                        MixinShadowValidationPatcher.TARGET_CLASS.replace('/', '.'))
-                        && instrumentation.isModifiableClass(loadedClass)) {
-                    try {
-                        instrumentation.retransformClasses(loadedClass);
-                        System.out.println("[Gafi Loader] Installed legacy @Shadow validation hook on an already-loaded Mixin preprocessor.");
-                    } catch (UnmodifiableClassException exception) {
-                        throw new IOException("Could not retransform MixinPreProcessorStandard", exception);
-                    }
-                    break;
-                }
+        boolean shadowPreprocessorFound = false;
+        for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
+            if (!loadedClass.getName().equals(
+                    MixinShadowValidationPatcher.TARGET_CLASS.replace('/', '.'))) {
+                continue;
             }
+            shadowPreprocessorFound = true;
+            boolean modifiable = instrumentation.isModifiableClass(loadedClass);
+            System.out.println("[Gafi Loader] Mixin preprocessor already loaded: loader="
+                    + loadedClass.getClassLoader() + ", modifiable=" + modifiable
+                    + ", retransformationSupported=" + instrumentation.isRetransformClassesSupported());
+            if (!instrumentation.isRetransformClassesSupported() || !modifiable) {
+                throw new IOException("Cannot install legacy @Shadow compatibility: MixinPreProcessorStandard "
+                        + "was loaded before the agent and cannot be retransformed (modifiable="
+                        + modifiable + ", retransformationSupported="
+                        + instrumentation.isRetransformClassesSupported() + ").");
+            }
+            try {
+                instrumentation.retransformClasses(loadedClass);
+                System.out.println("[Gafi Loader] Installed legacy @Shadow validation hook on an already-loaded Mixin preprocessor.");
+            } catch (UnmodifiableClassException exception) {
+                throw new IOException("Could not retransform MixinPreProcessorStandard", exception);
+            }
+            break;
+        }
+        if (!shadowPreprocessorFound) {
+            System.out.println("[Gafi Loader] MixinPreProcessorStandard not loaded at premain; "
+                    + "waiting for the class-definition transformer.");
         }
 
         // Some Fabric launcher classes can be loaded before the first application class is
