@@ -75,6 +75,21 @@ public final class MixinResourceRemapper {
         STRUCTURALLY_SKIPPED_MIXINS.clear();
     }
 
+    static String resolveRespawnTargetSelector() {
+        String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
+        String packetDescriptor = "Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;";
+        String selector = TargetApiIndex.uniqueRuntimeVoidMethodSelectorByFirstArgument(
+                owner, packetDescriptor);
+        TargetApiIndex current = targetApi;
+        if (selector == null && current != null) {
+            selector = current.uniqueDeclaredVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
+        }
+        if (selector == null && current != null) {
+            selector = current.uniqueVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
+        }
+        return selector == null ? "handleRespawn(" + packetDescriptor + ")V" : selector;
+    }
+
     /**
      * Wrap only Mixin configuration/refmap URLs. Class-byte remapping has dedicated hooks in
      * MixinServiceKnot and Mixin's bytecode inspection path; wrapping arbitrary URLs for classes
