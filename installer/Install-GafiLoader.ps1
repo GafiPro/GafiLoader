@@ -49,7 +49,8 @@ try {
     $versionMeta = Get-Json $versionEntry.url
     if (-not (Test-Path $baseJsonPath)) {
         New-Item -ItemType Directory -Force -Path $baseVersionDir | Out-Null
-        $versionMeta | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 $baseJsonPath
+        $json = $versionMeta | ConvertTo-Json -Depth 100
+        [IO.File]::WriteAllText($baseJsonPath, $json, [Text.UTF8Encoding]::new($false))
     }
     Download-File $versionMeta.downloads.client.url $baseJarPath
 
@@ -100,7 +101,8 @@ try {
     $profileDir = Join-Path $versionsDir $ProfileId
     New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
     $profilePath = Join-Path $profileDir "$ProfileId.json"
-    $profile | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 $profilePath
+    $profileJson = $profile | ConvertTo-Json -Depth 100
+    [IO.File]::WriteAllText($profilePath, $profileJson, [Text.UTF8Encoding]::new($false))
 
     Write-Step "Installed"
     Write-Host "Minecraft version: $MinecraftVersion"
