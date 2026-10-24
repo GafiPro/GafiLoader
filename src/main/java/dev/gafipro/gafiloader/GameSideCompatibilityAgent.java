@@ -48,6 +48,10 @@ public final class GameSideCompatibilityAgent {
                 if (className == null) {
                     return null;
                 }
+                if (className.contains("MinecraftServerMixin")) {
+                    System.out.println("[Gafi Loader] DEBUG class-definition transformer received "
+                            + className + " bytes=" + classfileBuffer.length);
+                }
                 if (KnotClassLoaderPatcher.TARGET_CLASS.equals(className)
                         || KnotLauncherPatcher.TARGET_CLASS.equals(className)
                         || MixinServiceKnotPatcher.TARGET_CLASS.equals(className)) {
