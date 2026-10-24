@@ -41,7 +41,7 @@ final class MixinShadowValidationPatcher {
                 && arguments[0].getSort() == Type.OBJECT
                 && arguments[0].getInternalName().endsWith("/MixinTargetContext")
                 && arguments[1].getSort() == Type.OBJECT
-                && arguments[1].getInternalName().endsWith("/MixinMethodNode");
+                && arguments[1].getInternalName().endsWith("MixinMethodNode");
     }
 
     static byte[] transform(String className, byte[] original) {
