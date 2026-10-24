@@ -2,12 +2,18 @@ name: Build and test
 
 on:
   push:
-    branches: [main]
+    branches: [main, game-side-compatibility]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Keep only the newest verification run for this branch/PR. Repeated compatibility
+# adapter commits should not leave stale queued runs behind the current result.
+concurrency:
+  group: gafi-loader-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -20,5 +26,58 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Validate Python integration scripts
+        run: python3 -m py_compile scripts/fetch_real_integration_fixtures.py scripts/run_fabric_client_smoke.py
+      - name: Download released Fabric Loader binary for Mixin hook validation
+        run: curl --fail --location --retry 3 --silent --show-error https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar --output "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+      - name: Download official Minecraft and real legacy mod fixtures
+        run: python3 scripts/fetch_real_integration_fixtures.py "$RUNNER_TEMP/gafi-real-fixture"
       - name: Build and test with the pinned Gradle wrapper
-        run: ./gradlew --no-daemon clean test build
+        run: ./gradlew --no-daemon clean test build -PgafiFabricLoaderJar="$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+      - name: Run compatibility scan on real Minecraft and mod artifacts
+        run: |
+          mkdir -p build/real-artifact-test
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
+          test -n "$agent_jar"
+          java -jar "$agent_jar" \
+            --game "$GAFI_REAL_TARGET_GAME" \
+            --mods "$GAFI_REAL_LEGACY_MOD" \
+            --intermediary-mappings "$GAFI_REAL_INTERMEDIARY_MAPPINGS" \
+            --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
+            --report build/real-artifact-test/compatibility-report.json
+          java -jar "$agent_jar" \
+            --game "$GAFI_REAL_TARGET_GAME" \
+            --legacy-game "$GAFI_REAL_LEGACY_GAME" \
+            --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
+            --api-report build/real-artifact-test/api-diff.json \
+            --alias-candidates build/real-artifact-test/method-alias-candidates.tsv \
+            > build/real-artifact-test/api-comparison.log
+          tail -n 20 build/real-artifact-test/api-comparison.log
+          cp "$GAFI_REAL_FIXTURE_METADATA" build/real-artifact-test/fixture-metadata.json
+      - name: Install virtual display and software OpenGL for client smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb libgl1-mesa-dri libglx-mesa0
+      - name: Launch actual Fabric client with the legacy mod and Gafi Loader
+        run: |
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
+          test -n "$agent_jar"
+          python3 scripts/run_fabric_client_smoke.py \
+            "$RUNNER_TEMP/gafi-real-fixture" \
+            "$GITHUB_WORKSPACE/$agent_jar" \
+            "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+      - name: Upload integration diagnostics and self-contained agent JAR
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gafi-loader-integration-${{ github.sha }}
+          path: |
+            build/libs/gafi-loader-*.jar
+            build/real-artifact-test/compatibility-report.json
+            build/real-artifact-test/api-diff.json
+            build/real-artifact-test/method-alias-candidates.tsv
+            build/real-artifact-test/fixture-metadata.json
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/client-console.log
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/game/logs/latest.log
+          if-no-files-found: warn
+          retention-days: 7

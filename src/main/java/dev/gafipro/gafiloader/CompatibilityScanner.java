@@ -119,7 +119,8 @@ public final class CompatibilityScanner {
 
                 Member member = new Member(reference.name(), reference.descriptor());
                 if (reference.kind() == SymbolKind.METHOD
-                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.METHOD, new HashSet<>())) {
+                        && !memberExists(gameClasses, reference.owner(), member, SymbolKind.METHOD, new HashSet<>())
+                        && !hasStructuralAdapter(reference, gameClasses)) {
                     findings.add(new Finding(
                             modJar.toString(), "MISSING_METHOD", reference.owner(), reference.name(),
                             reference.descriptor(),
@@ -157,6 +158,57 @@ public final class CompatibilityScanner {
                 orderedMods.stream().map(Path::toString).toList(),
                 summary,
                 findings);
+    }
+
+    private static boolean hasStructuralAdapter(Reference reference, Map<String, ClassInfo> gameClasses) {
+        if (reference.kind() != SymbolKind.METHOD) {
+            return false;
+        }
+
+        String minecraft = "net/minecraft/client/Minecraft";
+        String screen = "net/minecraft/client/gui/screens/Screen";
+        String gui = "net/minecraft/client/gui/Gui";
+        String screenDescriptor = "(L" + screen + ";)V";
+        if (reference.owner().equals(minecraft) && reference.name().equals("setScreen")
+                && reference.descriptor().equals(screenDescriptor)) {
+            return memberExists(gameClasses, minecraft,
+                            new Member("gui", "L" + gui + ";"), SymbolKind.FIELD, new HashSet<>())
+                    && memberExists(gameClasses, gui,
+                            new Member("setScreen", screenDescriptor), SymbolKind.METHOD, new HashSet<>());
+        }
+
+        String displaySlot = "net/minecraft/world/scores/DisplaySlot";
+        String chatFormatting = "net/minecraft/ChatFormatting";
+        String teamColorDescriptor = "(L" + chatFormatting + ";)L" + displaySlot + ";";
+        if (reference.owner().equals(displaySlot) && reference.name().equals("teamColorToSlot")
+                && reference.descriptor().equals(teamColorDescriptor)) {
+            for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
+                    "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
+                    "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
+                if (!memberExists(gameClasses, displaySlot,
+                            new Member("TEAM_" + color, "L" + displaySlot + ";"), SymbolKind.FIELD, new HashSet<>())
+                        || !memberExists(gameClasses, chatFormatting,
+                            new Member(color, "L" + chatFormatting + ";"), SymbolKind.FIELD, new HashSet<>())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        String readOnlyScoreInfo = "net/minecraft/world/scores/ReadOnlyScoreInfo";
+        String numberFormat = "net/minecraft/network/chat/numbers/NumberFormat";
+        String mutableComponent = "net/minecraft/network/chat/MutableComponent";
+        String safeDescriptor = "(L" + readOnlyScoreInfo + ";L" + numberFormat + ";)L"
+                + mutableComponent + ";";
+        String formatDescriptor = "(L" + numberFormat + ";)L" + mutableComponent + ";";
+        String commonComponents = "net/minecraft/network/chat/CommonComponents";
+        return reference.owner().equals(readOnlyScoreInfo)
+                && reference.name().equals("safeFormatValue")
+                && reference.descriptor().equals(safeDescriptor)
+                && memberExists(gameClasses, readOnlyScoreInfo,
+                        new Member("formatValue", formatDescriptor), SymbolKind.METHOD, new HashSet<>())
+                && memberExists(gameClasses, commonComponents,
+                        new Member("EMPTY", "L" + mutableComponent + ";"), SymbolKind.FIELD, new HashSet<>());
     }
 
     private static boolean memberExists(Map<String, ClassInfo> classes, String owner,
@@ -701,6 +753,31 @@ public final class CompatibilityScanner {
             return new AliasSet(Map.of(), Map.of());
         }
 
+        /**
+         * Applies narrowly reviewed class moves that are known to exist in the pinned target
+         * game. These are runtime namespace aliases, not mod-JAR rewrites.
+         */
+        AliasSet withBuiltInCompatibilityAliases(TargetApiIndex targetApi) {
+            Map<String, String> merged = new HashMap<>(classes);
+            String legacy = "net/minecraft/world/level/BlockAndTintGetter";
+            String replacement = "net/minecraft/client/renderer/block/BlockAndTintGetter";
+            // Synthetic/unit-test game JARs may not include the replacement class. Only enable
+            // the built-in alias when the real configured target actually contains that class.
+            if (targetApi != null && !targetApi.hasClass(legacy) && targetApi.hasClass(replacement)) {
+                putBuiltInClassAlias(merged, legacy, replacement);
+            }
+            return new AliasSet(merged, members);
+        }
+
+        private static void putBuiltInClassAlias(Map<String, String> aliases,
+                                                  String legacyName, String targetName) {
+            String previous = aliases.putIfAbsent(legacyName, targetName);
+            if (previous != null && !previous.equals(targetName)) {
+                throw new IllegalArgumentException("Conflicting built-in class alias for "
+                        + legacyName + ": " + previous + " vs " + targetName);
+            }
+        }
+
         static AliasSet load(Path file) throws IOException {
             if (!Files.isRegularFile(file)) {
                 throw new IllegalArgumentException("Alias file does not exist: " + file);
@@ -763,12 +840,61 @@ public final class CompatibilityScanner {
                     mapDescriptor(reference.descriptor()));
         }
 
+        boolean hasExplicitMemberAlias(Reference reference) {
+            return members.containsKey(reference);
+        }
+
         int classAliasCount() {
             return classes.size();
         }
 
         int memberAliasCount() {
             return members.size();
+        }
+
+        /**
+         * Validate every alias target against the actual 26.2 game artifact before the runtime
+         * transformer is installed. This catches typos and stale rules before mods start linking.
+         */
+        void validateAgainstTarget(Path targetGameJar) throws IOException {
+            validateAgainstTarget(TargetApiIndex.load(targetGameJar));
+        }
+
+        void validateAgainstTarget(TargetApiIndex target) throws IOException {
+            if (target == null) {
+                throw new IllegalArgumentException("Target Minecraft API index is required.");
+            }
+            for (Map.Entry<String, String> entry : classes.entrySet()) {
+                if (!target.hasClass(entry.getValue())) {
+                    throw new IOException("Class alias target is absent from Minecraft 26.2: "
+                            + entry.getKey() + " -> " + entry.getValue());
+                }
+            }
+
+            for (Map.Entry<Reference, AliasTarget> entry : members.entrySet()) {
+                Reference source = entry.getKey();
+                AliasTarget destination = entry.getValue();
+                if (!target.hasClass(destination.owner())) {
+                    throw new IOException("Member alias target owner is absent from Minecraft 26.2: "
+                            + destination.owner() + " (from " + source.owner() + "#" + source.name() + ")");
+                }
+                String descriptorExpectedFromClassAliases = mapDescriptor(source.descriptor());
+                if (!descriptorExpectedFromClassAliases.equals(destination.descriptor())) {
+                    throw new IOException("Unsupported descriptor-changing alias for " + source.owner()
+                            + "#" + source.name() + source.descriptor() + ": target descriptor "
+                            + destination.descriptor() + " does not match class-only mapping "
+                            + descriptorExpectedFromClassAliases);
+                }
+
+                boolean found = source.kind() == SymbolKind.METHOD
+                        ? target.methodAccess(destination.owner(), destination.name(), destination.descriptor()) != null
+                        : target.fieldAccess(destination.owner(), destination.name(), destination.descriptor()) != null;
+                if (!found) {
+                    throw new IOException("Member alias target is absent from Minecraft 26.2: "
+                            + destination.owner() + "#" + destination.name() + destination.descriptor()
+                            + " (from " + source.owner() + "#" + source.name() + source.descriptor() + ")");
+                }
+            }
         }
 
         String mapClass(String owner) {
