@@ -35,6 +35,9 @@ final class LegacyApiBridgePatcher {
     private static final String METADATA_FROM_STREAM =
             "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
                     + "Ljava/io/InputStream;Lnet/minecraft/server/packs/PackLocationInfo;)Ljava/lang/Object;";
+    private static final String LOAD_METADATA =
+            "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
+                    + "Ljava/io/InputStream;)Ljava/lang/Object;";
     private static final String SAFE_FORMAT_VALUE =
             "(Lnet/minecraft/world/scores/ReadOnlyScoreInfo;"
                     + "Lnet/minecraft/network/chat/numbers/NumberFormat;)"
@@ -108,7 +111,7 @@ final class LegacyApiBridgePatcher {
 
     private static boolean supportsMetadataFromStreamBridge(TargetApiIndex targetApi) {
         Integer replacementAccess = targetApi.declaredMethodAccess(
-                ABSTRACT_PACK_RESOURCES, "loadMetadata", METADATA_FROM_STREAM);
+                ABSTRACT_PACK_RESOURCES, "loadMetadata", LOAD_METADATA);
         return targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
                 && replacementAccess != null
                 && (replacementAccess & Opcodes.ACC_STATIC) != 0;
@@ -230,11 +233,12 @@ final class LegacyApiBridgePatcher {
     }
 
     private static void writeMetadataFromStreamBridge(MethodVisitor method, String owner) {
+        // 26.2's loadMetadata helper no longer takes PackLocationInfo; its parsing behavior
+        // replaces the old three-argument getMetadataFromStream helper.
         method.visitVarInsn(Opcodes.ALOAD, 0);
         method.visitVarInsn(Opcodes.ALOAD, 1);
-        method.visitVarInsn(Opcodes.ALOAD, 2);
         method.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "loadMetadata",
-                METADATA_FROM_STREAM, false);
+                LOAD_METADATA, false);
         method.visitInsn(Opcodes.ARETURN);
     }
 
