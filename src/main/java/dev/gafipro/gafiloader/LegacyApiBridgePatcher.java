@@ -81,7 +81,7 @@ final class LegacyApiBridgePatcher {
                 && targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
                 && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
                         "getMetadataFromStream", METADATA_FROM_STREAM) == null
-                && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
+                && targetApi.methodAccess(ABSTRACT_PACK_RESOURCES,
                         "loadMetadata", LOAD_METADATA) != null) {
             return addBridgeMethod(original, "getMetadataFromStream", METADATA_FROM_STREAM,
                     LegacyApiBridgePatcher::writeMetadataFromStreamBridge);
