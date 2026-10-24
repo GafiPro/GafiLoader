@@ -56,7 +56,14 @@ public final class GameSideCompatibilityAgent {
                 // Patch Mixin itself before its preprocessor validates legacy @Shadow methods.
                 // This is a runtime-only change; source mods and game files are not rewritten.
                 if (MixinShadowValidationPatcher.TARGET_CLASS.equals(className)) {
-                    return MixinShadowValidationPatcher.transform(className, classfileBuffer);
+                    try {
+                        return MixinShadowValidationPatcher.transform(className, classfileBuffer);
+                    } catch (RuntimeException exception) {
+                        System.err.println("[Gafi Loader] FAILED to patch Mixin @Shadow validation for "
+                                + className + "; original Mixin bytecode will be retained.");
+                        exception.printStackTrace(System.err);
+                        return null;
+                    }
                 }
                 if (className.contains("MinecraftServerMixin")) {
                     System.out.println("[Gafi Loader] DEBUG class-definition transformer received "
