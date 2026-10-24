@@ -467,7 +467,7 @@ final class MixinSelectorRemapper {
             return selector;
         }
         String targetDescriptor = Type.getMethodDescriptor(Type.VOID_TYPE, arguments[0]);
-        if (targetApi.declaredMethodAccess(owner, "handleRespawn", targetDescriptor) == null) {
+        if (targetApi.methodAccess(owner, "handleRespawn", targetDescriptor) == null) {
             return selector;
         }
         String optional = selector.startsWith("?") ? "?" : "";
