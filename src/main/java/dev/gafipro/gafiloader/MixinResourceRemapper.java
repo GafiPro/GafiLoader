@@ -1504,6 +1504,29 @@ public final class MixinResourceRemapper {
         try {
             ClassReader reader = new ClassReader(original);
             String actualClassName = reader.getClassName();
+            if (actualClassName.equals("net/minecraft/client/multiplayer/ClientPacketListener")
+                    || actualClassName.equals("net/minecraft/class_634")) {
+                reader.accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visit(int version, int access, String name, String signature,
+                                      String superName, String[] interfaces) {
+                        System.out.println("[Gafi Loader] DEBUG runtime listener class bytes: "
+                                + name + " super=" + superName);
+                    }
+
+                    @Override
+                    public org.objectweb.asm.MethodVisitor visitMethod(int access, String name,
+                            String descriptor, String signature, String[] exceptions) {
+                        if (name.toLowerCase(java.util.Locale.ROOT).contains("respawn")
+                                || descriptor.contains("ClientboundRespawnPacket")
+                                || descriptor.contains("class_2724")) {
+                            System.out.println("[Gafi Loader] DEBUG runtime listener method: "
+                                    + name + descriptor);
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
             if (skipClassResource(actualClassName)) {
                 return original;
             }
