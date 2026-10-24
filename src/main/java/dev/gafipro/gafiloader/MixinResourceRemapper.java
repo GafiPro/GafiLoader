@@ -1655,13 +1655,12 @@ public final class MixinResourceRemapper {
                     break;
                 }
                 resolvedName = resolvedMemberName;
-                if (shadow.method()) {
-                    String priorDescriptor = methodDescriptors.putIfAbsent(
-                            shadow.name() + shadow.descriptor(), resolvedDescriptor);
-                    if (priorDescriptor != null && !priorDescriptor.equals(resolvedDescriptor)) {
-                        ambiguous = true;
-                        break;
-                    }
+                String shadowKey = shadow.name() + shadow.descriptor();
+                Map<String, String> descriptorMap = shadow.method() ? methodDescriptors : fieldDescriptors;
+                String priorDescriptor = descriptorMap.putIfAbsent(shadowKey, resolvedDescriptor);
+                if (priorDescriptor != null && !priorDescriptor.equals(resolvedDescriptor)) {
+                    ambiguous = true;
+                    break;
                 }
             }
             if (ambiguous || resolvedName == null || resolvedName.equals(lookupName)) {
@@ -1673,7 +1672,6 @@ public final class MixinResourceRemapper {
                 methodRenames.put(key, replacementName);
             } else {
                 fieldRenames.put(key, replacementName);
-                fieldDescriptors.put(key, methodDescriptors.getOrDefault(key, shadow.descriptor()));
             }
         }
         if (methodRenames.isEmpty() && fieldRenames.isEmpty()) {
