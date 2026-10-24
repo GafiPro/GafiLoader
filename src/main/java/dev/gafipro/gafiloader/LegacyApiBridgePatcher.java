@@ -229,7 +229,6 @@ final class LegacyApiBridgePatcher {
         // 26.2 moved metadata parsing away from AbstractPackResources. Recreate the old
         // helper with the stable MetadataSectionType codec API, entirely inside Minecraft's
         // classloader. The legacy PackLocationInfo argument is retained for binary linkage.
-        method.visitVarInsn(Opcodes.ALOAD, 1);
         method.visitTypeInsn(Opcodes.NEW, "java/io/InputStreamReader");
         method.visitInsn(Opcodes.DUP);
         method.visitVarInsn(Opcodes.ALOAD, 1);
