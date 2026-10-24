@@ -399,11 +399,20 @@ public final class MixinResourceRemapper {
                 if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
                     String mixinName = entry.getAsString();
                     classResource = mixinClassResource(mixinPackage, mixinName);
+                    // Fabric Renderer Indigo 0.141.5 overwrites the 1.21.11
+                    // ModelBlockRenderer.renderModel signature. In 26.2 the render path
+                    // was redesigned and the overwrite is structurally incompatible; keep
+                    // the rest of Fabric API enabled rather than crashing the entire client.
+                    if (resourceName.contains("fabric-renderer-indigo.mixins.json")
+                            && mixinName.endsWith("ModelBlockRendererMixin")) {
+                        incompatibility = "legacy Indigo @Overwrite targets the removed 1.21.11 "
+                                + "ModelBlockRenderer.renderModel signature; skipped on 26.2";
+                    }
                     if (mixinName.contains("LivingEntity")) {
                         System.out.println("[Gafi Loader] DEBUG mixin entry=" + mixinName
                                 + " resource=" + classResource + " package=" + mixinPackage);
                     }
-                    if (classResource != null) {
+                    if (classResource != null && incompatibility == null) {
                         boolean inspected = false;
                         try (InputStream input = openMixinClassResource(
                                 classResource, contextLoader, targetLoader,
