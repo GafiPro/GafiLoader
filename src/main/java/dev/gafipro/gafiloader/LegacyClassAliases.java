@@ -21,6 +21,15 @@ final class LegacyClassAliases {
                     "net/minecraft/client/renderer/block/dispatch/BlockStateModelPart"),
             new ClassMove("net/minecraft/client/renderer/block/model/BlockModelDefinition",
                     "net/minecraft/client/renderer/block/dispatch/BlockStateModelDispatcher"),
+            // Minecraft 26.x replaced the old block renderer/shaper pair with model-state APIs.
+            new ClassMove("net/minecraft/client/renderer/block/BlockRenderDispatcher",
+                    "net/minecraft/client/renderer/block/ModelBlockRenderer"),
+            new ClassMove("net/minecraft/client/renderer/block/BlockModelShaper",
+                    "net/minecraft/client/resources/model/BlockStateModelSet"),
+            new ClassMove("net/minecraft/client/renderer/entity/ItemRenderer",
+                    "net/minecraft/client/renderer/item/ItemFeatureRenderer"),
+            new ClassMove("net/minecraft/client/renderer/item/ItemModelShaper",
+                    "net/minecraft/client/renderer/item/ItemModelResolver"),
             // Minecraft 26.2 reorganized the legacy block-model API into block.dispatch.
             new ClassMove("net/minecraft/client/renderer/block/model/Variant",
                     "net/minecraft/client/renderer/block/dispatch/Variant"),
