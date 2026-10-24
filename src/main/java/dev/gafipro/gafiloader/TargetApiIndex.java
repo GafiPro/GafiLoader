@@ -266,6 +266,75 @@ final class TargetApiIndex {
         return candidates.size() == 1 ? candidates.iterator().next() : null;
     }
 
+    /**
+     * Inspects the class resource visible to the active runtime class loader. The target JAR
+     * used for static analysis may not have exactly the same namespace as the live Knot classpath.
+     */
+    static String uniqueRuntimeVoidMethodSelectorByFirstArgument(String owner, String argumentDescriptor) {
+        String resource = owner + ".class";
+        java.util.LinkedHashSet<ClassLoader> loaders = new java.util.LinkedHashSet<>();
+        loaders.add(Thread.currentThread().getContextClassLoader());
+        loaders.add(TargetApiIndex.class.getClassLoader());
+        loaders.add(ClassLoader.getSystemClassLoader());
+        for (ClassLoader loader : loaders) {
+            if (loader == null) {
+                continue;
+            }
+            try (InputStream input = loader.getResourceAsStream(resource)) {
+                if (input == null) {
+                    continue;
+                }
+                ClassReader reader = new ClassReader(input);
+                Set<String> candidates = new HashSet<>();
+                Set<String> relevant = new java.util.TreeSet<>();
+                reader.accept(new ClassVisitor(API) {
+                    @Override
+                    public void visit(int version, int access, String name, String signature,
+                                      String superName, String[] interfaces) {
+                        if (name.equals(owner)) {
+                            System.out.println("[Gafi Loader] DEBUG runtime target class found via "
+                                    + loader + ": " + name);
+                        } else {
+                            System.out.println("[Gafi Loader] DEBUG runtime target resource owner mismatch via "
+                                    + loader + ": requested=" + owner + " actual=" + name);
+                        }
+                    }
+
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                            String signature, String[] exceptions) {
+                        if (name.toLowerCase(java.util.Locale.ROOT).contains("respawn")
+                                || descriptor.contains("RespawnPacket")
+                                || descriptor.contains("class_2724")) {
+                            relevant.add(name + descriptor);
+                        }
+                        try {
+                            Type type = Type.getMethodType(descriptor);
+                            Type[] arguments = type.getArgumentTypes();
+                            if (type.getReturnType().getSort() == Type.VOID && arguments.length > 0
+                                    && arguments[0].getDescriptor().equals(argumentDescriptor)
+                                    && !name.startsWith("<")) {
+                                candidates.add(name + descriptor);
+                            }
+                        } catch (IllegalArgumentException ignored) {
+                            // Ignore malformed descriptors.
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                System.out.println("[Gafi Loader] DEBUG runtime packet-handler candidates via "
+                        + loader + ": " + candidates + "; relevant=" + relevant);
+                if (candidates.size() == 1) {
+                    return candidates.iterator().next();
+                }
+            } catch (IOException | RuntimeException exception) {
+                System.out.println("[Gafi Loader] DEBUG runtime target resource lookup failed via "
+                        + loader + ": " + exception.getMessage());
+            }
+        }
+        return null;
+    }
+
     private void collectVoidMethodSelectorsByFirstArgument(String owner, String argumentDescriptor,
             Set<String> visited, Set<String> candidates) {
         if (owner == null || !visited.add(owner)) {
