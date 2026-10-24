@@ -271,6 +271,10 @@ public final class MixinResourceRemapper {
     public static InputStream transform(String resourceName, InputStream original) {
         IntermediaryMappings currentMappings = mappings;
         boolean classResource = isClassResource(resourceName);
+        if (resourceName != null && resourceName.contains("ClientPacketListenerMixin")) {
+            System.out.println("[Gafi Loader] DEBUG resource stream requested for " + resourceName
+                    + " classResource=" + classResource);
+        }
         if (original == null || currentMappings == null
                 || (!isMixinResource(resourceName) && !classResource
                     && !isPotentialClassResourceName(resourceName))) {
@@ -1504,6 +1508,14 @@ public final class MixinResourceRemapper {
                     bytecodeInput, currentMappings, aliases, targetApi);
             byte[] result = remapped != null ? remapped
                     : selectorsRemapped == null ? pruned : selectorsRemapped;
+            if (requestedClassName != null && requestedClassName.contains("ClientPacketListenerMixin")) {
+                MixinClassMetadata before = readMixinMetadata(original);
+                MixinClassMetadata after = readMixinMetadata(result);
+                System.out.println("[Gafi Loader] DEBUG respawn mixin before="
+                        + (before == null ? "null" : before.targets() + " " + before.selectors())
+                        + " after=" + (after == null ? "null" : after.targets() + " " + after.selectors())
+                        + " selectorsChanged=" + (selectorsRemapped != null));
+            }
             byte[] overwriteAdjusted = addRequiredOverwriteAnnotations(result);
             if (overwriteAdjusted != original || remapped != null
                     || selectorsRemapped != null || pruned != original) {
