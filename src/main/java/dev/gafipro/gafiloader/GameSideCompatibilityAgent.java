@@ -48,6 +48,15 @@ public final class GameSideCompatibilityAgent {
                 if (className == null) {
                     return null;
                 }
+                if (MixinTransformerDiagnosticPatcher.TARGET_CLASS.equals(className)) {
+                    try {
+                        return MixinTransformerDiagnosticPatcher.transform(className, classfileBuffer);
+                    } catch (RuntimeException exception) {
+                        System.err.println("[Gafi Loader] Could not install runtime target diagnostic hook.");
+                        exception.printStackTrace(System.err);
+                        return null;
+                    }
+                }
                 if (className.contains("MixinPreProcessorStandard")) {
                     System.out.println("[Gafi Loader] DEBUG Mixin preprocessor definition seen: "
                             + className + " loader=" + loader + " retransform="
