@@ -481,13 +481,14 @@ final class MixinSelectorRemapper {
             System.out.println("[Gafi Loader] DEBUG respawn selector left unchanged: target class was not resolved.");
             return selector;
         }
-        // The target handler may have acquired additional arguments in 26.2. The legacy
-        // callback only consumes the packet argument, which Mixin permits; match the unique
-        // void handler by its first argument instead of requiring an obsolete exact descriptor.
-        String targetMethodName = targetApi.uniqueVoidMethodNameByFirstArgument(owner, packetDescriptor);
-        System.out.println("[Gafi Loader] DEBUG respawn candidate method=" + targetMethodName
+        // Mixin must scan the target's real descriptor, not the legacy callback descriptor.
+        // The callback may consume only the packet argument while the target handler has
+        // additional trailing arguments; keep the full target signature in the selector.
+        String targetMethodSelector = targetApi.uniqueVoidMethodSelectorByFirstArgument(
+                owner, packetDescriptor);
+        System.out.println("[Gafi Loader] DEBUG respawn candidate selector=" + targetMethodSelector
                 + " packetDescriptor=" + packetDescriptor);
-        if (targetMethodName == null) {
+        if (targetMethodSelector == null) {
             return selector;
         }
         String optional = selector.startsWith("?") ? "?" : "";
@@ -495,10 +496,10 @@ final class MixinSelectorRemapper {
         if (value.startsWith("L")) {
             int ownerEnd = value.indexOf(';');
             if (ownerEnd > 1) {
-                return optional + value.substring(0, ownerEnd + 1) + targetMethodName;
+                return optional + value.substring(0, ownerEnd + 1) + targetMethodSelector;
             }
         }
-        return optional + targetMethodName;
+        return optional + targetMethodSelector;
     }
 
     /**
