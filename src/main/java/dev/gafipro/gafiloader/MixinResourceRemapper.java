@@ -78,14 +78,17 @@ public final class MixinResourceRemapper {
     static String resolveRespawnTargetSelector() {
         String owner = "net/minecraft/client/multiplayer/ClientPacketListener";
         String packetDescriptor = "Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;";
-        String selector = TargetApiIndex.uniqueRuntimeVoidMethodSelectorByFirstArgument(
-                owner, packetDescriptor);
+        // Use the indexed 26.2 game artifact first. getResourceAsStream on Knot can expose
+        // pre-remap source bytes, which are not necessarily the method names Mixin sees on the
+        // transformed target class. The real target artifact is the compatibility authority.
         TargetApiIndex current = targetApi;
-        if (selector == null && current != null) {
-            selector = current.uniqueDeclaredVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
-        }
+        String selector = current == null ? null
+                : current.uniqueDeclaredVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
         if (selector == null && current != null) {
             selector = current.uniqueVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
+        }
+        if (selector == null) {
+            selector = TargetApiIndex.uniqueRuntimeVoidMethodSelectorByFirstArgument(owner, packetDescriptor);
         }
         return selector == null ? "handleRespawn(" + packetDescriptor + ")V" : selector;
     }
