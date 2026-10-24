@@ -66,7 +66,7 @@ final class MixinShadowValidationPatcher {
             code.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL,
                     "org/spongepowered/asm/mixin/transformer/MixinInfo$MixinMethodNode",
                     "getVisibleAnnotation",
-                    "(Ljava/lang/Class;)Lorg/objectweb/asm/tree/AnnotationNode;", false));
+                    String.join("", "(Ljava/lang/Class;)Lorg/", "objectweb/asm/tree/AnnotationNode;"), false));
             code.add(new JumpInsnNode(Opcodes.IFNULL, notShadow));
             // Treat any @Shadow method as a shadow member without requiring the old
             // name/descriptor to exist on the newer game target.
