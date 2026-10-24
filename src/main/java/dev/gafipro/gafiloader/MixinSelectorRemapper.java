@@ -285,6 +285,11 @@ final class MixinSelectorRemapper {
         if (!methodSelector && !atTarget) {
             return value;
         }
+        if (methodSelector && value.contains("handleRespawn")) {
+            System.out.println("[Gafi Loader] DEBUG respawn selector seen value=" + value
+                    + " callback=" + enclosingMethodDescriptor + " targets=" + targets
+                    + " annotation=" + annotationDescriptor);
+        }
         String mapped = remapSelector(value, targets, mappings, aliases);
         if (targetApi != null) {
             mapped = remapSelectorClassAliases(mapped, targetApi);
@@ -433,6 +438,10 @@ final class MixinSelectorRemapper {
         }
         String mappedCallback = LegacyClassAliases.mapDescriptor(
                 aliases.mapDescriptor(mappings.mapDescriptor(callbackDescriptor)), targetApi);
+        if (selector.contains("handleRespawn")) {
+            System.out.println("[Gafi Loader] DEBUG respawn callback raw=" + callbackDescriptor
+                    + " mapped=" + mappedCallback);
+        }
         Type callbackType;
         try {
             callbackType = Type.getMethodType(mappedCallback);
