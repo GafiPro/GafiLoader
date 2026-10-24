@@ -20,7 +20,28 @@ final class LegacyClassAliases {
             new ClassMove("net/minecraft/client/renderer/block/model/BlockModelPart",
                     "net/minecraft/client/renderer/block/dispatch/BlockStateModelPart"),
             new ClassMove("net/minecraft/client/renderer/block/model/BlockModelDefinition",
-                    "net/minecraft/client/renderer/block/dispatch/BlockStateModelDispatcher")
+                    "net/minecraft/client/renderer/block/dispatch/BlockStateModelDispatcher"),
+            // Minecraft 26.2 reorganized the legacy block-model API into block.dispatch.
+            new ClassMove("net/minecraft/client/renderer/block/model/Variant",
+                    "net/minecraft/client/renderer/block/dispatch/Variant"),
+            new ClassMove("net/minecraft/client/renderer/block/model/VariantMutator",
+                    "net/minecraft/client/renderer/block/dispatch/VariantMutator"),
+            new ClassMove("net/minecraft/client/renderer/block/model/VariantSelector",
+                    "net/minecraft/client/renderer/block/dispatch/VariantSelector"),
+            new ClassMove("net/minecraft/client/renderer/block/model/SingleVariant",
+                    "net/minecraft/client/renderer/block/dispatch/SingleVariant"),
+            new ClassMove("net/minecraft/client/resources/model/WeightedVariants",
+                    "net/minecraft/client/renderer/block/dispatch/WeightedVariants"),
+            new ClassMove("net/minecraft/client/resources/model/ModelState",
+                    "net/minecraft/client/renderer/block/dispatch/ModelState"),
+            new ClassMove("net/minecraft/client/renderer/block/model/multipart/Condition",
+                    "net/minecraft/client/renderer/block/dispatch/multipart/Condition"),
+            new ClassMove("net/minecraft/client/renderer/block/model/multipart/KeyValueCondition",
+                    "net/minecraft/client/renderer/block/dispatch/multipart/KeyValueCondition"),
+            new ClassMove("net/minecraft/client/renderer/block/model/multipart/MultiPartModel",
+                    "net/minecraft/client/renderer/block/dispatch/multipart/MultiPartModel"),
+            new ClassMove("net/minecraft/client/renderer/block/model/multipart/Selector",
+                    "net/minecraft/client/renderer/block/dispatch/multipart/Selector")
     );
     private static final Pattern OBJECT_TYPE = Pattern.compile("L([^;]+);");
 
