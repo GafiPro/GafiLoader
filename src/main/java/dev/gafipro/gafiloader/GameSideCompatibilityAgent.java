@@ -93,6 +93,19 @@ public final class GameSideCompatibilityAgent {
                     byte[] bridgeInput = transformed == null ? classfileBuffer : transformed;
                     byte[] bridged = LegacyApiBridgePatcher.transformClassForRuntime(
                             className, bridgeInput, targetApi);
+                    if ("net/minecraft/server/packs/AbstractPackResources".equals(className)) {
+                        System.out.println("[Gafi Loader] DEBUG pack bridge target seen; targetClass="
+                                + targetApi.hasClass("net/minecraft/server/packs/AbstractPackResources")
+                                + " loadMetadata="
+                                + targetApi.methodAccess("net/minecraft/server/packs/AbstractPackResources",
+                                        "loadMetadata", "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
+                                        + "Ljava/io/InputStream;)Ljava/lang/Object;")
+                                + " legacyMethod="
+                                + targetApi.declaredMethodAccess("net/minecraft/server/packs/AbstractPackResources",
+                                        "getMetadataFromStream", "(Lnet/minecraft/server/packs/metadata/MetadataSectionType;"
+                                        + "Ljava/io/InputStream;Lnet/minecraft/server/packs/PackLocationInfo;)Ljava/lang/Object;")
+                                + " patched=" + (bridged != null));
+                    }
                     if (bridged != null) {
                         transformed = bridged;
                         aliasedClasses.increment();
