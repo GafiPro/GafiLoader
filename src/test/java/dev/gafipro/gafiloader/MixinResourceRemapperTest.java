@@ -41,9 +41,9 @@ class MixinResourceRemapperTest {
     void preservesClassResourceUrlsForFabricMixinPluginCodeSourceLookup() throws Exception {
         Path mojangFile = temporaryDirectory.resolve("url-client.txt");
         Path intermediaryFile = temporaryDirectory.resolve("url-intermediary.tiny");
-        Files.writeString(mojangFile, "net.minecraft.Foo -> a:\\n");
-        Files.writeString(intermediaryFile, "tiny\\t2\\t0\\tofficial\\tintermediary\\n"
-                + "c\\ta\\tnet/minecraft/class_1\\n");
+        Files.writeString(mojangFile, "net.minecraft.Foo -> a:\n");
+        Files.writeString(intermediaryFile, "tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\tnet/minecraft/class_1\n");
         MixinResourceRemapper.configure(
                 IntermediaryMappings.load(intermediaryFile, MojangMappings.load(mojangFile)),
                 CompatibilityScanner.AliasSet.empty());
