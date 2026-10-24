@@ -484,8 +484,12 @@ final class MixinSelectorRemapper {
         // Mixin must scan the target's real descriptor, not the legacy callback descriptor.
         // The callback may consume only the packet argument while the target handler has
         // additional trailing arguments; keep the full target signature in the selector.
-        String targetMethodSelector = targetApi.uniqueDeclaredVoidMethodSelectorByFirstArgument(
+        String targetMethodSelector = TargetApiIndex.uniqueRuntimeVoidMethodSelectorByFirstArgument(
                 owner, packetDescriptor);
+        if (targetMethodSelector == null) {
+            targetMethodSelector = targetApi.uniqueDeclaredVoidMethodSelectorByFirstArgument(
+                    owner, packetDescriptor);
+        }
         System.out.println("[Gafi Loader] DEBUG respawn candidate selector=" + targetMethodSelector
                 + " packetDescriptor=" + packetDescriptor);
         if (targetMethodSelector == null) {
