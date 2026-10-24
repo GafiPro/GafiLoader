@@ -332,6 +332,37 @@ final class TargetApiIndex {
         return fieldAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
 
+    /**
+     * Returns a field name only when the descriptor identifies one unambiguous field
+     * in the target class hierarchy. This is a conservative fallback for legacy @Shadow
+     * fields whose name changed while their type remained stable.
+     */
+    String uniqueFieldName(String owner, String descriptor) {
+        Set<String> names = new HashSet<>();
+        collectFieldNamesByDescriptor(owner, descriptor, new HashSet<>(), names);
+        return names.size() == 1 ? names.iterator().next() : null;
+    }
+
+    private void collectFieldNamesByDescriptor(String owner, String descriptor,
+                                               Set<String> visited, Set<String> names) {
+        if (owner == null || !visited.add(owner)) {
+            return;
+        }
+        TargetClass target = classes.get(owner);
+        if (target == null) {
+            return;
+        }
+        for (MemberKey field : target.fields().keySet()) {
+            if (field.descriptor().equals(descriptor)) {
+                names.add(field.name());
+            }
+        }
+        for (String interfaceName : target.interfaces()) {
+            collectFieldNamesByDescriptor(interfaceName, descriptor, visited, names);
+        }
+        collectFieldNamesByDescriptor(target.superName(), descriptor, visited, names);
+    }
+
     private Integer fieldAccess(String owner, MemberKey key, Set<String> visited) {
         if (owner == null || !visited.add(owner)) {
             return null;
