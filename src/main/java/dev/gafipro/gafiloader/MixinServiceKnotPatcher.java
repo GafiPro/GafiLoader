@@ -55,9 +55,11 @@ final class MixinServiceKnotPatcher {
                         super.visitMethod(access, name, descriptor, signature, exceptions);
                 boolean resourceReader = RESOURCE_METHOD.equals(name)
                         && RESOURCE_DESCRIPTOR.equals(descriptor);
+                Type[] bytecodeArguments = Type.getArgumentTypes(descriptor);
                 boolean classBytecodeReader = name.equals("getClassBytes")
-                        && (descriptor.equals("(Ljava/lang/String;Ljava/lang/String;)[B")
-                        || descriptor.equals("(Ljava/lang/String;Z)[B"));
+                        && Type.getReturnType(descriptor).equals(BYTE_ARRAY)
+                        && bytecodeArguments.length >= 1
+                        && bytecodeArguments[0].equals(Type.getType(String.class));
                 boolean classNodeReader = name.equals("getClassNode")
                         && descriptor.equals("(Ljava/lang/String;ZI)Lorg/objectweb/asm/tree/ClassNode;");
                 if (!resourceReader && !classBytecodeReader && !classNodeReader) {
@@ -113,12 +115,18 @@ final class MixinServiceKnotPatcher {
             }
         };
         reader.accept(visitor, ClassReader.EXPAND_FRAMES);
-        if (!patchedResourceReader.get() || !patchedClassBytecodeReader.get() || !patchedClassNodeReader.get()) {
-            throw new IllegalStateException("Gafi Loader could not install all Mixin compatibility hooks in "
-                    + TARGET_CLASS + ". Expected " + RESOURCE_METHOD + RESOURCE_DESCRIPTOR
-                    + ", a getClassBytes overload, and getClassNode(String, boolean, int)."
-                    + " The installed Fabric Loader is not compatible with this resource hook.");
+        // getClassBytes is the decisive path used by Mixin to obtain the bytes of each
+        // mixin class. Resource and ClassNode methods vary between Fabric Loader releases;
+        // they are supplementary hooks and must not disable the bytecode hook when absent.
+        if (!patchedClassBytecodeReader.get()) {
+            throw new IllegalStateException("Gafi Loader could not install the essential Mixin class-byte hook in "
+                    + TARGET_CLASS + ". Hook results: getResourceAsStream=" + patchedResourceReader.get()
+                    + ", getClassBytes=" + patchedClassBytecodeReader.get()
+                    + ", getClassNode=" + patchedClassNodeReader.get()
+                    + ". This Fabric Loader build exposes no supported getClassBytes overload.");
         }
+        System.out.println("[Gafi Loader] Installed Mixin class-byte remapping hook (getClassBytes; resource="
+                + patchedResourceReader.get() + ", ClassNode=" + patchedClassNodeReader.get() + ").");
         return writer.toByteArray();
     }
 }
