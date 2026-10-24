@@ -208,6 +208,14 @@ final class TargetApiIndex {
         return methodAccess(owner, new MemberKey(name, descriptor), new HashSet<>());
     }
 
+    String describeClassMethods(String owner) {
+        TargetClass target = classes.get(owner);
+        if (target == null) return "<class missing>";
+        return target.methods().keySet().stream()
+                .map(key -> key.name() + key.descriptor())
+                .sorted().collect(java.util.stream.Collectors.joining("; "));
+    }
+
     /** Returns the unique method name for an exact descriptor in the class hierarchy. */
     String uniqueMethodName(String owner, String descriptor) {
         Set<String> candidates = new HashSet<>();
