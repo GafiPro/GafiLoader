@@ -132,7 +132,10 @@ public final class MixinShadowValidationPatcher {
                     System.out.println("[Gafi Loader] DEBUG live mixin relevant method="
                             + name + descriptor);
                 }
-                if (!"onPlayerRespawn".equals(name)
+                // Mixin renames injector methods to handler$...$<originalName> before this hook.
+                // Match the preserved source-name suffix, not only the original method name.
+                if (!(name.equals("onPlayerRespawn") || name.endsWith("$onPlayerRespawn")
+                        || name.contains("$onPlayerRespawn$"))
                         || !(descriptor.contains("ClientboundRespawnPacket")
                         || descriptor.contains("class_2724"))) {
                     continue;
