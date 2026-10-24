@@ -2,6 +2,8 @@ package dev.gafipro.gafiloader;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.net.URISyntaxException;
+import java.util.jar.JarFile;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
@@ -28,6 +30,20 @@ public final class GameSideCompatibilityAgent {
         if (agentArguments == null || agentArguments.isBlank()) {
             throw new IllegalArgumentException(
                     "Gafi Loader requires an agent properties file or a legacy rules TSV.");
+        }
+
+        // Minecraft's Knot/game class loader deliberately isolates agent classes. Expose only
+        // the dependency-free runtime bridge to the bootstrap loader so transformed game classes
+        // can resolve it even when Fabric's classPathGroups excludes the agent JAR.
+        try {
+            Path agentJar = Path.of(GameSideCompatibilityAgent.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI()).toAbsolutePath().normalize();
+            if (Files.isRegularFile(agentJar)) {
+                instrumentation.appendToBootstrapClassLoaderSearch(new JarFile(agentJar.toFile()));
+                System.out.println("[Gafi Loader] Exposed runtime compatibility bridge to bootstrap loader.");
+            }
+        } catch (URISyntaxException | IOException exception) {
+            throw new IOException("Could not expose Gafi Loader runtime bridge to Minecraft.", exception);
         }
 
         Path argumentPath = Path.of(agentArguments).toAbsolutePath().normalize();
