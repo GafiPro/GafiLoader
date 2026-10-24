@@ -177,19 +177,32 @@ public final class MixinShadowValidationPatcher {
                     if (!(valuesValue instanceof List<?> rawValues)) continue;
                     @SuppressWarnings("unchecked")
                     List<Object> values = (List<Object>) rawValues;
+                    boolean requirePresent = false;
                     for (int i = 0; i + 1 < values.size(); i += 2) {
-                        if (!"method".equals(values.get(i))) continue;
-                        Object original = values.get(i + 1);
-                        if (original instanceof List<?> selectors) {
-                            values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
-                            System.out.println("[Gafi Loader] Normalized live respawn selector on "
-                                    + name + descriptor + ": " + selectors + " -> " + targetSelector);
-                        } else if (original instanceof String selector) {
-                            values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
-                            System.out.println("[Gafi Loader] Normalized live respawn selector on "
-                                    + name + descriptor + ": " + selector + " -> " + targetSelector);
+                        if ("method".equals(values.get(i))) {
+                            Object original = values.get(i + 1);
+                            if (original instanceof List<?> selectors) {
+                                values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
+                                System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                        + name + descriptor + ": " + selectors + " -> " + targetSelector);
+                            } else if (original instanceof String selector) {
+                                values.set(i + 1, new java.util.ArrayList<>(List.of(targetSelector)));
+                                System.out.println("[Gafi Loader] Normalized live respawn selector on "
+                                        + name + descriptor + ": " + selector + " -> " + targetSelector);
+                            }
+                        } else if ("require".equals(values.get(i))) {
+                            values.set(i + 1, 0);
+                            requirePresent = true;
                         }
                     }
+                    // This legacy Fabric lifecycle hook is optional across target API shapes.
+                    // Keep an unresolved injection from aborting the entire client; it still
+                    // injects normally whenever the selector matches the live target.
+                    if (!requirePresent) {
+                        values.add("require");
+                        values.add(0);
+                    }
+                    System.out.println("[Gafi Loader] Set respawn injection require=0 for compatibility.");
                 }
             }
         } catch (ReflectiveOperationException | RuntimeException exception) {
