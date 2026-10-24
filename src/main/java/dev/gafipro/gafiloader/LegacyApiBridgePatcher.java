@@ -81,8 +81,7 @@ final class LegacyApiBridgePatcher {
                 && targetApi.hasClass(ABSTRACT_PACK_RESOURCES)
                 && targetApi.declaredMethodAccess(ABSTRACT_PACK_RESOURCES,
                         "getMetadataFromStream", METADATA_FROM_STREAM) == null
-                && targetApi.methodAccess(ABSTRACT_PACK_RESOURCES,
-                        "loadMetadata", LOAD_METADATA) != null) {
+                && targetApi.hasClass("net/minecraft/server/packs/metadata/MetadataSectionType")) {
             return addBridgeMethod(original, "getMetadataFromStream", METADATA_FROM_STREAM,
                     LegacyApiBridgePatcher::writeMetadataFromStreamBridge);
         }
@@ -227,12 +226,36 @@ final class LegacyApiBridgePatcher {
     }
 
     private static void writeMetadataFromStreamBridge(MethodVisitor method, String owner) {
-        // 26.2 replaced getMetadataFromStream(type, stream, location) with
-        // loadMetadata(type, stream). Call the game-owned implementation directly so
-        // the transformed class has no dependency on GafiLoader's isolated classloader.
-        method.visitVarInsn(Opcodes.ALOAD, 0);
+        // 26.2 moved metadata parsing away from AbstractPackResources. Recreate the old
+        // helper with the stable MetadataSectionType codec API, entirely inside Minecraft's
+        // classloader. The legacy PackLocationInfo argument is retained for binary linkage.
         method.visitVarInsn(Opcodes.ALOAD, 1);
-        method.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "loadMetadata", LOAD_METADATA, false);
+        method.visitTypeInsn(Opcodes.NEW, "java/io/InputStreamReader");
+        method.visitInsn(Opcodes.DUP);
+        method.visitVarInsn(Opcodes.ALOAD, 1);
+        method.visitFieldInsn(Opcodes.GETSTATIC, "java/nio/charset/StandardCharsets", "UTF_8",
+                "Ljava/nio/charset/Charset;");
+        method.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/io/InputStreamReader", "<init>",
+                "(Ljava/io/InputStream;Ljava/nio/charset/Charset;)V", false);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "com/google/gson/JsonParser", "parseReader",
+                "(Ljava/io/Reader;)Lcom/google/gson/JsonElement;", false);
+        method.visitVarInsn(Opcodes.ASTORE, 3);
+
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitMethodInsn(Opcodes.INVOKEINTERFACE,
+                "net/minecraft/server/packs/metadata/MetadataSectionType", "codec",
+                "()Lcom/mojang/serialization/Codec;", true);
+        method.visitFieldInsn(Opcodes.GETSTATIC, "com/mojang/serialization/JsonOps", "INSTANCE",
+                "Lcom/mojang/serialization/JsonOps;");
+        method.visitVarInsn(Opcodes.ALOAD, 3);
+        method.visitMethodInsn(Opcodes.INVOKEINTERFACE, "com/mojang/serialization/Codec", "parse",
+                "(Lcom/mojang/serialization/DynamicOps;Ljava/lang/Object;)"
+                        + "Lcom/mojang/serialization/DataResult;", true);
+        method.visitMethodInsn(Opcodes.INVOKEINTERFACE, "com/mojang/serialization/DataResult", "result",
+                "()Ljava/util/Optional;", true);
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Optional", "orElse",
+                "(Ljava/lang/Object;)Ljava/lang/Object;", false);
         method.visitInsn(Opcodes.ARETURN);
     }
 
