@@ -17,6 +17,10 @@ public final class Main {
     private Main() {}
 
     public static void main(String[] args) {
+        if (args.length > 0 && args[0].equals("--prepare-legacy-overrides")) {
+            runLegacyOverrideGenerator(args);
+            return;
+        }
         try {
             Options options = parse(args);
             if (options.help()) {
@@ -79,6 +83,62 @@ public final class Main {
             System.exit(2);
         } catch (IOException exception) {
             System.err.println("Gafi Loader: I/O error: " + exception.getMessage());
+            System.exit(2);
+        }
+    }
+
+    private static void runLegacyOverrideGenerator(String[] args) {
+        Path modsPath = null;
+        Path configPath = null;
+        for (int i = 1; i < args.length; i++) {
+            switch (args[i]) {
+                case "--mods" -> {
+                    if (++i >= args.length) {
+                        System.err.println("--mods requires the legacy mods directory.");
+                        System.exit(2);
+                        return;
+                    }
+                    modsPath = Path.of(args[i]);
+                }
+                case "--config" -> {
+                    if (++i >= args.length) {
+                        System.err.println("--config requires an output path.");
+                        System.exit(2);
+                        return;
+                    }
+                    configPath = Path.of(args[i]);
+                }
+                case "--help", "-h" -> {
+                    System.out.println("Usage: gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>");
+                    return;
+                }
+                default -> {
+                    System.err.println("Unknown override-generator argument: " + args[i]);
+                    System.exit(2);
+                    return;
+                }
+            }
+        }
+        if (modsPath == null || configPath == null) {
+            System.err.println("The override generator requires both --mods and --config.");
+            System.err.println("Usage: gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>");
+            System.exit(2);
+            return;
+        }
+        try {
+            LegacyDependencyOverrideGenerator.Result result =
+                    new LegacyDependencyOverrideGenerator().generate(modsPath, configPath);
+            System.out.println("Fabric Loader dependency override config written: " + result.configPath());
+            System.out.println("Mod JARs scanned: " + result.jarsScanned());
+            System.out.println("Legacy mod IDs with Minecraft 1.21.11 dependency gates overridden: "
+                    + result.modIdsOverridden());
+            System.out.println("Original mod JARs were not modified.");
+            System.out.println("WARNING: this only bypasses metadata version checks; binary/API incompatibilities remain.");
+            for (String warning : result.warnings()) {
+                System.out.println("Warning: " + warning);
+            }
+        } catch (IOException | IllegalArgumentException exception) {
+            System.err.println("Gafi Loader: " + exception.getMessage());
             System.exit(2);
         }
     }
@@ -290,12 +350,15 @@ public final class Main {
                 Gafi Loader — Minecraft 26.2 compatibility tools
 
                 Usage:
+                  gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>
                   gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
                   gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
                   Add --mods and --legacy-game to run both analyses.
 
                 Options:
+                  --prepare-legacy-overrides  Generate official Fabric Loader overrides for Minecraft 1.21.11 metadata gates
+                  --config <path>             Output/merge path for fabric_loader_dependencies.json (override mode)
                   --game <path>             Minecraft 26.2 target JAR (always the target)
                   --mods <path>             One mod JAR or a directory of JARs to scan
                   --report <path>           Save the mod symbol scan as JSON
