@@ -1,5 +1,6 @@
 plugins {
     id 'application'
+    id 'com.gradleup.shadow' version '9.6.1'
 }
 
 group = 'dev.gafipro'
@@ -18,6 +19,7 @@ application {
 
 dependencies {
     implementation 'org.ow2.asm:asm:9.9.1'
+    implementation 'org.ow2.asm:asm-commons:9.9.1'
     implementation 'com.google.code.gson:gson:2.13.2'
     implementation 'net.fabricmc:mapping-io:0.9.1'
     implementation 'net.fabricmc:tiny-remapper:0.15.0'
@@ -36,15 +38,69 @@ tasks.withType(Test).configureEach {
     useJUnitPlatform()
     testLogging {
         events 'failed', 'skipped'
+        exceptionFormat = 'full'
+        showStandardStreams = true
     }
 }
 
-jar {
+def gafiManifestAttributes = [
+    'Implementation-Title': 'Gafi Loader',
+    'Implementation-Version': project.version,
+    'Main-Class': application.mainClass.get(),
+    'Premain-Class': 'dev.gafipro.gafiloader.GameSideCompatibilityAgent',
+    'Can-Redefine-Classes': 'false',
+    'Can-Retransform-Classes': 'true'
+]
+
+// Keep the ordinary project JAR available for Gradle's application distribution.
+// The no-classifier output is reserved for the self-contained, relocated agent JAR.
+tasks.named('jar') {
+    archiveClassifier = 'plain'
     manifest {
-        attributes(
-            'Implementation-Title': 'Gafi Loader Compatibility Scanner',
-            'Implementation-Version': project.version,
-            'Main-Class': application.mainClass.get()
-        )
+        attributes(gafiManifestAttributes)
+    }
+}
+
+tasks.named('shadowJar') {
+    archiveClassifier = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
+    exclude '**/module-info.class'
+
+    // Fabric rejects a second org.objectweb.asm copy on the system classpath. The JVM adds
+    // the javaagent JAR to the system loader, so every bundled ASM reference must be relocated.
+    relocate 'org.objectweb.asm', 'dev.gafipro.gafiloader.internal.asm'
+    mergeServiceFiles()
+
+    manifest {
+        attributes(gafiManifestAttributes)
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('shadowJar')
+}
+
+tasks.named('test') {
+    // Exercise the exact self-contained JAR used as the javaagent and command-line scanner.
+    dependsOn tasks.named('shadowJar')
+    systemProperty 'gafi.loader.agent.jar',
+            tasks.named('shadowJar').get().archiveFile.get().asFile.absolutePath
+    def fabricLoaderJar = providers.gradleProperty('gafiFabricLoaderJar')
+    if (fabricLoaderJar.isPresent()) {
+        systemProperty 'gafi.loader.fabric.loader.jar', fabricLoaderJar.get()
+    }
+
+    // Real-artifact integration tests are enabled only when CI provides the pinned public fixtures.
+    [
+        'GAFI_REAL_TARGET_GAME': 'gafi.loader.real.target.jar',
+        'GAFI_REAL_LEGACY_MOD': 'gafi.loader.real.mod.jar',
+        'GAFI_REAL_INTERMEDIARY_MAPPINGS': 'gafi.loader.real.intermediary.jar',
+        'GAFI_REAL_LEGACY_MAPPINGS': 'gafi.loader.real.official.mappings'
+    ].each { environmentName, propertyName ->
+        def configuredPath = System.getenv(environmentName)
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            systemProperty propertyName, configuredPath
+        }
     }
 }

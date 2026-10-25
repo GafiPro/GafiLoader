@@ -1,0 +1,8 @@
+# Game-side aliases are applied to a COPY of the Minecraft 26.2 game JAR.
+# Only same-descriptor method aliases are supported by this first patcher.
+# Dispatch must match the actual 26.2 target method and the old invocation opcode.
+# Format (tab-separated):
+# METHOD_ALIAS<TAB>target-owner-internal-name<TAB>current-method<TAB>descriptor<TAB>legacy-method<TAB>STATIC|INSTANCE
+#
+# Example syntax only; replace with a pair of methods verified against real 26.2 API data.
+# METHOD_ALIAS	net/minecraft/example/Example	currentName	()V	legacyName	STATIC
