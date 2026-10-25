@@ -29,4 +29,25 @@ jobs:
         run: ./gradlew --no-daemon clean test build
       - name: Build and test with the pinned Gradle wrapper (Windows)
         if: runner.os == 'Windows'
-        run: .\gradlew.bat --no-daemon clean test build
+        run: .\gradlew.bat --no-daemon clean test installDist
+      - name: Package Windows app image with bundled Java runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $lib = "build/install/gafi-loader/lib"
+          $mainJar = Get-ChildItem $lib -Filter "gafi-loader-*.jar" | Select-Object -First 1
+          if (-not $mainJar) {
+            throw "Could not find the GafiLoader application JAR in $lib"
+          }
+          New-Item -ItemType Directory -Force -Path "build/package" | Out-Null
+          jpackage --type app-image --name GafiLoader --input $lib --main-jar $mainJar.Name --main-class dev.gafipro.gafiloader.Main --dest build/package --win-console
+          if (-not (Test-Path "build/package/GafiLoader/GafiLoader.exe")) {
+            throw "jpackage did not produce GafiLoader.exe"
+          }
+      - name: Upload Windows app image
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GafiLoader-Windows-x64
+          path: build/package/GafiLoader/
+          if-no-files-found: error
