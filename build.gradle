@@ -42,7 +42,7 @@ tasks.withType(Test).configureEach {
 jar {
     manifest {
         attributes(
-            'Implementation-Title': 'Gafi Loader Compatibility Scanner',
+            'Implementation-Title': 'GafiLoader Compatibility Diagnostic Tools',
             'Implementation-Version': project.version,
             'Main-Class': application.mainClass.get()
         )
