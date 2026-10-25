@@ -17,6 +17,10 @@ public final class Main {
     private Main() {}
 
     public static void main(String[] args) {
+        if (args.length == 0) {
+            runInteractiveWizard();
+            return;
+        }
         if (args.length > 0 && args[0].equals("--prepare-legacy-overrides")) {
             runLegacyOverrideGenerator(args);
             return;
@@ -85,6 +89,58 @@ public final class Main {
             System.err.println("Gafi Loader: I/O error: " + exception.getMessage());
             System.exit(2);
         }
+    }
+
+    private static void runInteractiveWizard() {
+        java.util.Scanner input = new java.util.Scanner(System.in);
+        String appData = System.getenv("APPDATA");
+        Path minecraft = appData == null || appData.isBlank()
+                ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
+                : Path.of(appData, ".minecraft");
+        Path defaultMods = minecraft.resolve("mods");
+        Path defaultConfig = minecraft.resolve("config").resolve("fabric_loader_dependencies.json");
+
+        System.out.println("GafiLoader — Legacy Fabric metadata diagnostic");
+        System.out.println("This utility can only bypass a Minecraft version check; it is not yet a runtime compatibility loader.");
+        System.out.println();
+        System.out.println("Enter the mods folder for the Minecraft 26.2 instance.");
+        System.out.println("Press Enter to use: " + defaultMods);
+        System.out.print("Mods folder: ");
+        String modsText = input.nextLine().trim();
+        Path mods = modsText.isEmpty() ? defaultMods : Path.of(modsText.replace("\"", ""));
+        System.out.println();
+        System.out.println("Enter the config/fabric_loader_dependencies.json path for that same instance.");
+        System.out.println("Press Enter to use: " + defaultConfig);
+        System.out.print("Config path: ");
+        String configText = input.nextLine().trim();
+        Path config = configText.isEmpty() ? defaultConfig : Path.of(configText.replace("\"", ""));
+
+        System.out.println();
+        System.out.println("This will create/merge the override config and will not modify mod JARs.");
+        System.out.print("Continue? Type YES to proceed: ");
+        if (!input.nextLine().trim().equals("YES")) {
+            System.out.println("Cancelled; no files were changed.");
+            return;
+        }
+        try {
+            LegacyDependencyOverrideGenerator.Result result =
+                    new LegacyDependencyOverrideGenerator().generate(mods, config);
+            System.out.println();
+            System.out.println("Config written: " + result.configPath());
+            System.out.println("JARs scanned: " + result.jarsScanned());
+            System.out.println("Mod IDs overridden: " + result.modIdsOverridden());
+            if (!result.overriddenModIds().isEmpty()) {
+                System.out.println(String.join(", ", result.overriddenModIds()));
+            }
+            System.out.println("Original mod JARs were not modified.");
+            System.out.println("Important: this does not fix missing classes, methods, mappings or mixins.");
+            for (String warning : result.warnings()) System.out.println("Warning: " + warning);
+        } catch (IOException | IllegalArgumentException exception) {
+            System.err.println("GafiLoader: " + exception.getMessage());
+        }
+        System.out.println();
+        System.out.println("Press Enter to close.");
+        input.nextLine();
     }
 
     private static void runLegacyOverrideGenerator(String[] args) {
