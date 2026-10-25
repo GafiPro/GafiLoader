@@ -55,6 +55,9 @@ class LegacyDependencyOverrideGeneratorTest {
                 new LegacyDependencyOverrideGenerator().generate(mods, config);
 
         JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertTrue(Files.exists(config.resolveSibling("fabric_loader_dependencies.json.bak")));
+        assertTrue(Files.readString(config.resolveSibling("fabric_loader_dependencies.json.bak"))
+                .contains("\"other-mod\""));
         JsonObject overrides = root.getAsJsonObject("overrides");
         assertEquals(1, root.get("version").getAsInt());
         assertEquals("", overrides.getAsJsonObject("fabric-api")
