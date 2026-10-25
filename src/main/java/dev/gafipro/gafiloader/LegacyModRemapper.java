@@ -139,7 +139,7 @@ public final class LegacyModRemapper {
             try (InputStream input = jar.getInputStream(entry)) {
                 String metadata = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
                 return java.util.regex.Pattern.compile(
-                        "(?s)\\"minecraft\\"\\s*:\\s*\\\"[^\\\"]*1\\.21\\.11[^\\\"]*\\\"")
+                        "(?s)\\\"minecraft\\\"\\\\s*:\\s*\\\"[^\\\"]*1\\\\.21\\\\.11[^\\\"]*\\\"")
                         .matcher(metadata).find();
             }
         }
