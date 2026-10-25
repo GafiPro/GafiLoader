@@ -99,6 +99,12 @@ class LegacyDependencyOverrideGeneratorTest {
                   "depends": { "minecraft": "~26.2" }
                 }
                 """.getBytes(StandardCharsets.UTF_8));
+        writeJar(mods.resolve("version-prefix-trap.jar"), "fabric.mod.json", """
+                {
+                  "id": "version-prefix-trap",
+                  "depends": { "minecraft": "1.21.110" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
 
         Path config = temporaryDirectory.resolve("modern-config/fabric_loader_dependencies.json");
         LegacyDependencyOverrideGenerator.Result result =
