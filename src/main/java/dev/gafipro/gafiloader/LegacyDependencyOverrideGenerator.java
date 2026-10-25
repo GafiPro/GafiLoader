@@ -161,7 +161,8 @@ public final class LegacyDependencyOverrideGenerator {
             JsonObject metadata = parsed.getAsJsonObject();
             if (!metadata.has("id") || !metadata.get("id").isJsonPrimitive()) return;
             String id = metadata.get("id").getAsString();
-            if (id.isBlank() || !dependsOnLegacyMinecraft(metadata.get("depends"))) return;
+            if (id.isBlank() || !(dependsOnLegacyMinecraft(metadata.get("depends"))
+                    || declaresLegacyMinecraftVersion(metadata.get("version")))) return;
             found.put(id, metadata);
         } catch (RuntimeException exception) {
             unreadable.add(source + ": invalid fabric.mod.json (" + exception.getMessage() + ")");
@@ -180,6 +181,11 @@ public final class LegacyDependencyOverrideGenerator {
             }
         }
         return false;
+    }
+
+    private static boolean declaresLegacyMinecraftVersion(JsonElement version) {
+        return version != null && version.isJsonPrimitive()
+                && containsLegacyVersion(version.getAsString());
     }
 
     private static boolean containsLegacyVersion(String range) {

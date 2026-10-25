@@ -18,7 +18,7 @@ public final class Main {
 
     public static void main(String[] args) {
         if (args.length == 0) {
-            runInteractiveWizard();
+            runDefaultSetup();
             return;
         }
         if (args.length > 0 && args[0].equals("--prepare-legacy-overrides")) {
@@ -97,6 +97,51 @@ public final class Main {
         } catch (IOException exception) {
             System.err.println("Gafi Loader: I/O error: " + exception.getMessage());
             System.exit(2);
+        }
+    }
+
+    private static void runDefaultSetup() {
+        String appData = System.getenv("APPDATA");
+        Path minecraft = appData == null || appData.isBlank()
+                ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
+                : Path.of(appData, ".minecraft");
+        Path defaultMods = minecraft.resolve("mods");
+        Path defaultConfig = minecraft.resolve("config").resolve("fabric_loader_dependencies.json");
+
+        System.out.println("GafiLoader — automatic legacy metadata setup");
+        System.out.println("Default Minecraft folder: " + minecraft.toAbsolutePath().normalize());
+        if (Files.isDirectory(defaultMods)) {
+            try {
+                LegacyDependencyOverrideGenerator.Result result =
+                        new LegacyDependencyOverrideGenerator().generate(defaultMods, defaultConfig);
+                System.out.println("Dependency override config: " + result.configPath());
+                System.out.println("JARs scanned: " + result.jarsScanned());
+                System.out.println("Legacy mod IDs detected: " + result.modIdsOverridden());
+                if (!result.overriddenModIds().isEmpty()) {
+                    System.out.println(String.join(", ", result.overriddenModIds()));
+                }
+                if (result.modIdsOverridden() == 0) {
+                    System.out.println("No mod metadata declaring Minecraft 1.21.11 (or a 1.21.11 artifact version) was detected.");
+                    System.out.println("If your 26.2 profile uses a custom game directory, rerun with --prepare-legacy-overrides and its actual paths.");
+                }
+                System.out.println("Restart Minecraft for the dependency override to be read.");
+                System.out.println("This removes only the metadata gate; it does not supply missing APIs or guarantee runtime compatibility.");
+                for (String warning : result.warnings()) System.out.println("Warning: " + warning);
+            } catch (IOException | IllegalArgumentException exception) {
+                System.err.println("GafiLoader: " + exception.getMessage());
+                System.out.println("If this is a custom Minecraft instance, rerun using --prepare-legacy-overrides with its mods and config paths.");
+            }
+        } else {
+            System.out.println("Default mods folder does not exist: " + defaultMods);
+            System.out.println("This installation may use a custom game directory.");
+            runInteractiveWizard();
+        }
+        System.out.println();
+        System.out.println("Press Enter to close.");
+        try {
+            System.in.read();
+        } catch (IOException ignored) {
+            // Closing the console is harmless.
         }
     }
 
