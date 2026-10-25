@@ -168,5 +168,6 @@ public final class LegacyDependencyOverrideGenerator {
         return range != null && TARGET_LEGACY_VERSION.matcher(range).find();
     }
 
-    public record Result(String configPath, int jarsScanned, int modIdsOverridden,\n                         List<String> overriddenModIds, List<String> warnings) {}
+    public record Result(String configPath, int jarsScanned, int modIdsOverridden,
+                         List<String> overriddenModIds, List<String> warnings) {}
 }
