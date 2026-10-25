@@ -12,6 +12,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
 import java.util.jar.JarFile;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Creates a separate remapped copy of legacy mod JARs without changing the originals.
@@ -69,33 +77,26 @@ public final class LegacyModRemapper {
             }
             Files.createDirectories(output.getParent());
 
-            // Fabric API modules and libraries are used as classpath context while remapping,
-            // so descriptors and hierarchy lookups can resolve cross-mod types.
-            TinyRemapper remapper = TinyRemapper.newRemapper()
-                    .withMappings(mappingProvider)
-                    .renameInvalidLocals(false)
-                    .rebuildSourceFilenames(true)
-                    .resolveMissing(true)
-                    .checkPackageAccess(false)
-                    .threads(Math.max(1, Runtime.getRuntime().availableProcessors() - 1))
-                    .build();
-            try (OutputConsumerPath consumer = new OutputConsumerPath.Builder(output).build()) {
-                consumer.addNonClassFiles(input);
-                remapper.readInputs(input);
-                remapper.readClassPath(target);
-                for (Path classpathJar : inputs) {
-                    if (!classpathJar.equals(input)) {
-                        remapper.readClassPath(classpathJar);
-                    }
+            List<Path> classpath = new ArrayList<>();
+            classpath.add(target);
+            for (Path classpathJar : inputs) {
+                if (!classpathJar.equals(input)) classpath.add(classpathJar);
+            }
+
+            try {
+                if (!declaresLegacyMinecraft(input)) {
+                    Files.copy(input, output, StandardCopyOption.REPLACE_EXISTING);
+                    completed.add(input + " -> " + output + " (copied unchanged; not marked 1.21.11)");
+                    continue;
                 }
-                remapper.apply(consumer);
+                remapOne(input, output, classpath, mappingProvider);
+                remapNestedJars(output, outputRoot.resolve(".gafiloader-tmp"), classpath,
+                        mappingProvider, 0);
                 completed.add(input + " -> " + output);
             } catch (RuntimeException | IOException exception) {
                 Files.deleteIfExists(output);
                 throw new IOException("Failed to remap legacy mod " + input + ": " + exception.getMessage(),
                         exception);
-            } finally {
-                remapper.finish();
             }
         }
 
@@ -106,6 +107,109 @@ public final class LegacyModRemapper {
         return new Result(inputRoot.toString(), outputRoot.toString(), completed.size(),
                 List.copyOf(completed), List.copyOf(warnings), intermediary.classCount(),
                 intermediary.memberCount(), aliases.classAliasCount(), aliases.memberAliasCount());
+    }
+
+    private static void remapOne(Path input, Path output, List<Path> classpath,
+                                 net.fabricmc.tinyremapper.IMappingProvider mappings) throws IOException {
+        TinyRemapper remapper = TinyRemapper.newRemapper()
+                .withMappings(mappings)
+                .renameInvalidLocals(false)
+                .rebuildSourceFilenames(true)
+                .resolveMissing(true)
+                .checkPackageAccess(false)
+                .threads(Math.max(1, Runtime.getRuntime().availableProcessors() - 1))
+                .build();
+        try (OutputConsumerPath consumer = new OutputConsumerPath.Builder(output).build()) {
+            consumer.addNonClassFiles(input);
+            remapper.readInputs(input);
+            remapper.readClassPath(classpath.toArray(Path[]::new));
+            remapper.apply(consumer);
+        } catch (RuntimeException exception) {
+            Files.deleteIfExists(output);
+            throw new IOException("TinyRemapper failed for " + input, exception);
+        } finally {
+            remapper.finish();
+        }
+    }
+
+    private static boolean declaresLegacyMinecraft(Path jarPath) throws IOException {
+        try (JarFile jar = new JarFile(jarPath.toFile())) {
+            var entry = jar.getJarEntry("fabric.mod.json");
+            if (entry == null) return false;
+            try (InputStream input = jar.getInputStream(entry)) {
+                String metadata = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                return java.util.regex.Pattern.compile(
+                        "(?s)\\"minecraft\\"\\s*:\\s*\\\"[^\\\"]*1\\.21\\.11[^\\\"]*\\\"")
+                        .matcher(metadata).find();
+            }
+        }
+    }
+
+    /**
+     * Fabric API is commonly a bundle of nested module JARs. Re-map those nested archives too,
+     * otherwise the umbrella JAR would be remapped while the actual API classes stayed Intermediary.
+     */
+    private static void remapNestedJars(Path outerJar, Path temporaryRoot, List<Path> classpath,
+                                        net.fabricmc.tinyremapper.IMappingProvider mappings,
+                                        int depth) throws IOException {
+        if (depth >= 8) throw new IOException("Nested mod JAR depth exceeded the safety limit: " + outerJar);
+        Map<String, byte[]> replacements = new LinkedHashMap<>();
+        try (ZipFile zip = new ZipFile(outerJar.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (entry.isDirectory() || !name.toLowerCase(Locale.ROOT).endsWith(".jar")
+                        || !(name.startsWith("META-INF/jars/") || name.startsWith("META-INF/JARS/"))) {
+                    continue;
+                }
+                Path work = Files.createTempDirectory(temporaryRoot.getParent(), "gafiloader-nested-");
+                Path nestedInput = work.resolve("nested-input.jar");
+                Path nestedOutput = work.resolve("nested-output.jar");
+                try (InputStream input = zip.getInputStream(entry)) {
+                    Files.copy(input, nestedInput, StandardCopyOption.REPLACE_EXISTING);
+                }
+                try {
+                    if (declaresLegacyMinecraft(nestedInput)) {
+                        remapOne(nestedInput, nestedOutput, classpath, mappings);
+                        remapNestedJars(nestedOutput, temporaryRoot, classpath, mappings, depth + 1);
+                        replacements.put(name, Files.readAllBytes(nestedOutput));
+                    } else {
+                        replacements.put(name, Files.readAllBytes(nestedInput));
+                    }
+                } finally {
+                    try (Stream<Path> files = Files.walk(work)) {
+                        for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
+                            Files.deleteIfExists(file);
+                        }
+                    }
+                }
+            }
+        }
+        if (replacements.isEmpty()) return;
+
+        Path rewritten = outerJar.resolveSibling(outerJar.getFileName() + ".nested.tmp");
+        try (ZipFile inputZip = new ZipFile(outerJar.toFile());
+             OutputStream fileOutput = Files.newOutputStream(rewritten);
+             ZipOutputStream outputZip = new ZipOutputStream(fileOutput)) {
+            var entries = inputZip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry old = entries.nextElement();
+                ZipEntry replacement = new ZipEntry(old.getName());
+                if (old.getTime() >= 0) replacement.setTime(old.getTime());
+                outputZip.putNextEntry(replacement);
+                byte[] changed = replacements.get(old.getName());
+                if (changed != null) {
+                    outputZip.write(changed);
+                } else if (!old.isDirectory()) {
+                    try (InputStream stream = inputZip.getInputStream(old)) {
+                        stream.transferTo(outputZip);
+                    }
+                }
+                outputZip.closeEntry();
+            }
+        }
+        Files.move(rewritten, outerJar, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static void requireDirectory(Path path, String description) {
