@@ -91,6 +91,33 @@ try {
         "legacyMappings=$($legacyMappings.Replace('\','/'))"
     ) | Set-Content -Encoding ASCII $configPath
 
+    # Fabric Loader rejects legacy mods before the runtime bridge can remap their APIs.
+    # Keep the original mod JAR untouched and remove only Fabric API's Minecraft version gate.
+    # This is a dependency-resolution override, not a claim that all Fabric API behavior is compatible.
+    $loaderConfigDir = Join-Path $gameDir "config"
+    New-Item -ItemType Directory -Force -Path $loaderConfigDir | Out-Null
+    $dependencyConfigPath = Join-Path $loaderConfigDir "fabric_loader_dependencies.json"
+    if (Test-Path $dependencyConfigPath) {
+        $dependencyConfig = Get-Content -LiteralPath $dependencyConfigPath -Raw | ConvertFrom-Json
+        if ($null -eq $dependencyConfig.overrides) {
+            $dependencyConfig | Add-Member -MemberType NoteProperty -Name overrides -Value ([pscustomobject]@{})
+        }
+    } else {
+        $dependencyConfig = [pscustomobject]@{ version = 1; overrides = [pscustomobject]@{} }
+    }
+    if ($null -eq $dependencyConfig.overrides.'fabric-api') {
+        $dependencyConfig.overrides | Add-Member -MemberType NoteProperty -Name 'fabric-api' -Value ([pscustomobject]@{})
+    }
+    $fabricApiOverride = $dependencyConfig.overrides.'fabric-api'
+    if ($null -eq $fabricApiOverride.'-depends') {
+        $fabricApiOverride | Add-Member -MemberType NoteProperty -Name '-depends' -Value ([pscustomobject]@{})
+    }
+    $fabricApiOverride.'-depends' | Add-Member -MemberType NoteProperty -Name minecraft -Value "" -Force
+    $dependencyConfig.version = 1
+    [IO.File]::WriteAllText($dependencyConfigPath,
+        ($dependencyConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+
     # Keep the -javaagent option as one JVM argument so paths containing spaces remain valid.
     $agentArgument = "-javaagent:$($agentJarPath.Replace('\','/'))=$($configPath.Replace('\','/'))"
     $profile.arguments.jvm = @($profile.arguments.jvm | Where-Object {
