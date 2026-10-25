@@ -19,9 +19,11 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 
 Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, and merges entries into an existing override file rather than replacing unrelated overrides.
 
-~~~bash
-./gradlew run --args="--prepare-legacy-overrides --mods \"C:/Users/you/AppData/Roaming/.minecraft/mods\" --config \"C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json\""
+~~~powershell
+.\gradlew.bat run --args="--prepare-legacy-overrides --mods C:/Users/you/AppData/Roaming/.minecraft/mods --config C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json"
 ~~~
+
+Replace `you` with your Windows account folder, and use the actual game directory if the 26.2 instance has a separate game directory. The command requires the project's JDK 25 development setup; this is not yet exposed as a button in the GafiLoader installer.
 
 Run this only against the mods folder for the **26.2 Fabric instance**. Close the game first. The generator only removes the declared `minecraft` dependency gate for mod IDs that advertise 1.21.11; it does not remove requirements for Fabric Loader or other mods. The format follows the [official Fabric dependency override documentation](https://docs.fabricmc.net/players/troubleshooting/dependency-overrides/).
 
