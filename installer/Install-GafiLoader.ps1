@@ -63,8 +63,8 @@ try {
     if (-not $profile.arguments) {
         throw "Fabric profile did not include launcher arguments; cannot safely install GafiLoader."
     }
-    if (-not $profile.arguments.jvm) { $profile.arguments | Add-Member -MemberType NoteProperty -Name jvm -Value @() }
-    if (-not $profile.arguments.game) { $profile.arguments | Add-Member -MemberType NoteProperty -Name game -Value @() }
+    if ($null -eq $profile.arguments.PSObject.Properties['jvm']) { $profile.arguments | Add-Member -MemberType NoteProperty -Name jvm -Value @() }
+    if ($null -eq $profile.arguments.PSObject.Properties['game']) { $profile.arguments | Add-Member -MemberType NoteProperty -Name game -Value @() }
 
     $gafiDir = Join-Path $gameDir "gafiloader"
     New-Item -ItemType Directory -Force -Path $gafiDir | Out-Null
