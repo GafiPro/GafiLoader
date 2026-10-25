@@ -38,7 +38,7 @@ jobs:
       - name: Compile the Windows setup executable
         shell: pwsh
         run: |
-          $compiler = Join-Path $env:ProgramFiles(x86) 'Inno Setup 6\ISCC.exe'
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $compiler)) {
             $compiler = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'
           }
