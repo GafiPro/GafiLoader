@@ -15,6 +15,18 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 - Automate API-difference discovery, and add only tested compatibility shims.
 - Keep the Fabric ecosystem as the base rather than implementing a new mod ecosystem from scratch.
 
+## Bypass the Fabric metadata version gate (diagnostic step)
+
+Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, and merges entries into an existing override file rather than replacing unrelated overrides.
+
+~~~bash
+./gradlew run --args="--prepare-legacy-overrides --mods \"C:/Users/you/AppData/Roaming/.minecraft/mods\" --config \"C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json\""
+~~~
+
+Run this only against the mods folder for the **26.2 Fabric instance**. Close the game first. The generator only removes the declared `minecraft` dependency gate for mod IDs that advertise 1.21.11; it does not remove requirements for Fabric Loader or other mods. The format follows the [official Fabric dependency override documentation](https://docs.fabricmc.net/players/troubleshooting/dependency-overrides/).
+
+**Important:** this is a diagnostic workaround, not the compatibility layer. It may get past the initial “wrong Minecraft version” rejection, but it does not make 1.21.11 bytecode, mixins, mappings, or Fabric API calls compatible with 26.2. If startup proceeds further and then crashes, that is a separate binary/API compatibility failure which requires a runtime adapter and testing. The generator does not claim that Fabric API 1.21.11 will successfully run on 26.2.
+
 ## Compatibility scanner
 
 The scanner indexes classes, methods, and fields from a Minecraft 26.2 JAR, inspects mod JAR bytecode, and reports references to net/minecraft symbols that are missing from the target index.
