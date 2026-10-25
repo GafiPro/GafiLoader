@@ -132,6 +132,9 @@ public final class Main {
             System.out.println("Mod JARs scanned: " + result.jarsScanned());
             System.out.println("Legacy mod IDs with Minecraft 1.21.11 dependency gates overridden: "
                     + result.modIdsOverridden());
+            if (!result.overriddenModIds().isEmpty()) {
+                System.out.println("Overridden mod IDs: " + String.join(", ", result.overriddenModIds()));
+            }
             System.out.println("Original mod JARs were not modified.");
             System.out.println("WARNING: this only bypasses metadata version checks; binary/API incompatibilities remain.");
             for (String warning : result.warnings()) {
