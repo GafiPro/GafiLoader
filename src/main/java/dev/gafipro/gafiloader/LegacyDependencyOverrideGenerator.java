@@ -94,9 +94,27 @@ public final class LegacyDependencyOverrideGenerator {
         Path output = configPath.toAbsolutePath().normalize();
         Path parent = output.getParent();
         if (parent != null) Files.createDirectories(parent);
-        Files.writeString(output, GSON.toJson(root) + System.lineSeparator(), StandardCharsets.UTF_8);
 
-        return new Result(output.toString(), jars.size(), legacyMods.size(), List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
+        // Keep the previous config recoverable and avoid leaving a truncated file if writing fails.
+        if (Files.exists(output)) {
+            Path backup = output.resolveSibling(output.getFileName() + ".bak");
+            Files.copy(output, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        Path temporary = output.resolveSibling(output.getFileName() + ".tmp");
+        try {
+            Files.writeString(temporary, GSON.toJson(root) + System.lineSeparator(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+                Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+
+        return new Result(output.toString(), jars.size(), legacyMods.size(),
+                List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
     }
 
     private static JsonObject readExistingConfig(Path configPath) throws IOException {
