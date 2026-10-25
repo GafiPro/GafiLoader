@@ -37,6 +37,18 @@ Run this only against the mods folder for the **26.2 Fabric instance**. Close th
 
 **Important:** this is a diagnostic workaround, not the compatibility layer. It may get past the initial “wrong Minecraft version” rejection, but it does not make 1.21.11 bytecode, mixins, mappings, or Fabric API calls compatible with 26.2. If startup proceeds further and then crashes, that is a separate binary/API compatibility failure which requires a runtime adapter and testing. The generator does not claim that Fabric API 1.21.11 will successfully run on 26.2.
 
+## Legacy bytecode remapping preparation
+
+The project now has an experimental remapping command for mods whose metadata declares Minecraft 1.21.11. It maps the old Intermediary namespace through the 1.21.11 Fabric Intermediary artifact and official Mojang mappings into the named namespace used by the 26.2 game. It creates a **separate output directory**, keeps original JARs unchanged, copies mods not marked as 1.21.11 without remapping, and remaps nested JARs under `META-INF/jars/` in legacy bundles such as Fabric API.
+
+~~~powershell
+.gradlew.bat run --args="--remap-legacy-mods --mods C:/path/to/original-mods --intermediary-mappings C:/path/to/intermediary-1.21.11-v2.jar --legacy-mappings C:/path/to/1.21.11-client-mappings.txt --game C:/path/to/26.2-client.jar --output C:/path/to/remapped-mods"
+~~~
+
+This command is an experimental **bytecode preparation stage**, not a runtime loader and not proof that Fabric API 1.21.11 works on 26.2. Name remapping cannot recreate removed methods, changed method semantics, incompatible mixin injections, access wideners, or Fabric Loader internals. The output can still fail at launch; use the scanner/API report to identify missing symbols and add only reviewed aliases whose descriptors remain compatible. Do not put original and remapped copies together in the same active mods folder.
+
+The separate metadata override step may still be needed for Fabric Loader's Minecraft version dependency check. Run it against the mod directory used by the 26.2 instance and its actual `config/fabric_loader_dependencies.json` path. Bypassing the metadata gate and remapping bytecode solve different problems.
+
 ## Compatibility scanner
 
 The scanner indexes classes, methods, and fields from a Minecraft 26.2 JAR, inspects mod JAR bytecode, and reports references to net/minecraft symbols that are missing from the target index.
