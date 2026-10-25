@@ -25,6 +25,15 @@ public final class Main {
             runLegacyOverrideGenerator(args);
             return;
         }
+        if (args.length > 0 && args[0].equals("--remap-legacy-mods")) {
+            try {
+                runLegacyModRemapper(args);
+            } catch (IllegalArgumentException | IOException exception) {
+                System.err.println("GafiLoader: " + exception.getMessage());
+                System.exit(2);
+            }
+            return;
+        }
         try {
             Options options = parse(args);
             if (options.help()) {
@@ -141,6 +150,38 @@ public final class Main {
         System.out.println();
         System.out.println("Press Enter to close.");
         input.nextLine();
+    }
+
+    private static void runLegacyModRemapper(String[] args) throws IOException {
+        Path mods = null, intermediary = null, legacyMappings = null, aliases = null, output = null, game = null;
+        for (int i = 1; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equals("--help") || arg.equals("-h")) {
+                System.out.println("Usage: gafi-loader --remap-legacy-mods --mods <dir> --intermediary-mappings <1.21.11-mappings.jar> --legacy-mappings <official-mappings.txt> --game <26.2.jar> --output <separate-dir> [--aliases aliases.tsv]");
+                return;
+            }
+            if (++i >= args.length) throw new IllegalArgumentException(arg + " requires a value.");
+            Path value = Path.of(args[i]);
+            switch (arg) {
+                case "--mods" -> mods = value;
+                case "--intermediary-mappings" -> intermediary = value;
+                case "--legacy-mappings" -> legacyMappings = value;
+                case "--aliases" -> aliases = value;
+                case "--output" -> output = value;
+                case "--game" -> game = value;
+                default -> throw new IllegalArgumentException("Unknown remapper argument: " + arg);
+            }
+        }
+        if (mods == null || intermediary == null || legacyMappings == null || output == null || game == null) {
+            throw new IllegalArgumentException("Required: --mods, --intermediary-mappings, --legacy-mappings, --game, --output. Use --remap-legacy-mods --help.");
+        }
+        LegacyModRemapper.Result result = new LegacyModRemapper().remap(mods, intermediary, legacyMappings, aliases, output, game);
+        System.out.println("Remapping complete: " + result.jarsRemapped() + " JAR(s).");
+        System.out.println("Original mods: " + result.inputDirectory());
+        System.out.println("Remapped copies: " + result.outputDirectory());
+        System.out.println("Mappings loaded: " + result.mappedClasses() + " classes, " + result.mappedMembers() + " members.");
+        System.out.println("Aliases applied: " + result.classAliases() + " classes, " + result.memberAliases() + " members.");
+        for (String warning : result.warnings()) System.out.println("WARNING: " + warning);
     }
 
     private static void runLegacyOverrideGenerator(String[] args) {
@@ -410,6 +451,7 @@ public final class Main {
 
                 Usage:
                   gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>
+                  gafi-loader --remap-legacy-mods --mods <original-mods> --intermediary-mappings <1.21.11-mappings.jar> --legacy-mappings <official-mappings.txt> --game <26.2.jar> --output <separate-dir> [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
                   gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
@@ -417,6 +459,8 @@ public final class Main {
 
                 Options:
                   --prepare-legacy-overrides  Generate official Fabric Loader overrides for Minecraft 1.21.11 metadata gates
+                  --remap-legacy-mods         Create separate remapped mod copies without overwriting originals
+                  --output <path>             Separate destination directory for remapped copies
                   --config <path>             Output/merge path for fabric_loader_dependencies.json (override mode)
                   --game <path>             Minecraft 26.2 target JAR (always the target)
                   --mods <path>             One mod JAR or a directory of JARs to scan
@@ -430,7 +474,8 @@ public final class Main {
 
                 The API comparison normalizes the 1.21.11 game JAR using Mojang's ProGuard mappings.
                 The mod scanner can normalize production Intermediary references when both mapping files are supplied.
-                Differences and rename candidates are diagnostic only; the current tool does not load old mods.
+                Remapped copies are preparation artifacts, not a runtime loader. They do not repair behavior changes,
+                missing Fabric API internals, mixins, or access wideners. Original JARs are never overwritten.
                 """);
     }
 
