@@ -122,7 +122,10 @@ public final class Main {
                 }
                 if (result.modIdsOverridden() == 0) {
                     System.out.println("No mod metadata declaring Minecraft 1.21.11 (or a 1.21.11 artifact version) was detected.");
-                    System.out.println("If your 26.2 profile uses a custom game directory, rerun with --prepare-legacy-overrides and its actual paths.");
+                    System.out.println("Your launcher may use a separate game directory, or the API version may be declared differently.");
+                    System.out.println();
+                    runInteractiveWizard();
+                    return;
                 }
                 System.out.println("Restart Minecraft for the dependency override to be read.");
                 System.out.println("This removes only the metadata gate; it does not supply missing APIs or guarantee runtime compatibility.");
