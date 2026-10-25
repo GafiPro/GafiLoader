@@ -103,7 +103,7 @@ public final class LegacyModRemapper {
         warnings.add("Original mod JARs were not modified; remapped copies are in " + outputRoot);
         warnings.add("This remapper changes bytecode names, not API behavior or missing functionality.");
         warnings.add("Do not put both original and remapped copies in the same active mods directory.");
-        warnings.add("Nested JARs are preserved as resources and are not recursively remapped yet.");
+        warnings.add("Nested JARs under META-INF/jars are recursively remapped when found inside legacy mod bundles.");
         return new Result(inputRoot.toString(), outputRoot.toString(), completed.size(),
                 List.copyOf(completed), List.copyOf(warnings), intermediary.classCount(),
                 intermediary.memberCount(), aliases.classAliasCount(), aliases.memberAliasCount());
@@ -170,13 +170,11 @@ public final class LegacyModRemapper {
                     Files.copy(input, nestedInput, StandardCopyOption.REPLACE_EXISTING);
                 }
                 try {
-                    if (declaresLegacyMinecraft(nestedInput)) {
-                        remapOne(nestedInput, nestedOutput, classpath, mappings);
-                        remapNestedJars(nestedOutput, temporaryRoot, classpath, mappings, depth + 1);
-                        replacements.put(name, Files.readAllBytes(nestedOutput));
-                    } else {
-                        replacements.put(name, Files.readAllBytes(nestedInput));
-                    }
+                    // This nested archive belongs to an outer mod already confirmed as 1.21.11.
+                    // Remap it even if the module omits its own minecraft dependency metadata.
+                    remapOne(nestedInput, nestedOutput, classpath, mappings);
+                    remapNestedJars(nestedOutput, temporaryRoot, classpath, mappings, depth + 1);
+                    replacements.put(name, Files.readAllBytes(nestedOutput));
                 } finally {
                     try (Stream<Path> files = Files.walk(work)) {
                         for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
