@@ -61,7 +61,8 @@ jobs:
             throw "Could not find the GafiLoader application JAR in $lib"
           }
           New-Item -ItemType Directory -Force -Path "build/package-installer" | Out-Null
-          jpackage --type exe --name GafiLoader --input $lib --main-jar $mainJar.Name --main-class dev.gafipro.gafiloader.Main --dest build/package-installer --app-version 0.1.1 --win-upgrade-uuid 6c8e2d6b-6e8b-4b93-a2de-4d31a1e9d26c --win-per-user-install --win-menu --win-shortcut --win-menu-group GafiLoader --win-console
+          $appVersion = "0.1.$env:GITHUB_RUN_NUMBER"
+          jpackage --type exe --name GafiLoader --input $lib --main-jar $mainJar.Name --main-class dev.gafipro.gafiloader.Main --dest build/package-installer --app-version $appVersion --win-upgrade-uuid 6c8e2d6b-6e8b-4b93-a2de-4d31a1e9d26c --win-per-user-install --win-menu --win-shortcut --win-menu-group GafiLoader --win-console
           if (-not (Get-ChildItem "build/package-installer" -Filter "GafiLoader-*.exe")) {
             throw "jpackage did not produce a GafiLoader installer"
           }
