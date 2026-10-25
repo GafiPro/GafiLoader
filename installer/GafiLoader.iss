@@ -1,5 +1,5 @@
 #define AppName "GafiLoader"
-#define AppVersion "0.1.0"
+#define AppVersion "0.1.1"
 #define AppPublisher "GafiPro"
 #define AgentJarName "gafi-loader-0.1.0-SNAPSHOT.jar"
 
