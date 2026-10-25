@@ -44,6 +44,34 @@ jobs:
           if (-not (Test-Path "build/package/GafiLoader/GafiLoader.exe")) {
             throw "jpackage did not produce GafiLoader.exe"
           }
+      - name: Ensure WiX is available for the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --no-progress -y
+          }
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $lib = "build/install/gafi-loader/lib"
+          $mainJar = Get-ChildItem $lib -Filter "gafi-loader-*.jar" | Select-Object -First 1
+          if (-not $mainJar) {
+            throw "Could not find the GafiLoader application JAR in $lib"
+          }
+          New-Item -ItemType Directory -Force -Path "build/package-installer" | Out-Null
+          jpackage --type exe --name GafiLoader --input $lib --main-jar $mainJar.Name --main-class dev.gafipro.gafiloader.Main --dest build/package-installer --app-version 0.1.1 --win-upgrade-uuid 6c8e2d6b-6e8b-4b93-a2de-4d31a1e9d26c --win-per-user-install --win-menu --win-shortcut --win-menu-group GafiLoader --win-console
+          if (-not (Get-ChildItem "build/package-installer" -Filter "GafiLoader-*.exe")) {
+            throw "jpackage did not produce a GafiLoader installer"
+          }
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GafiLoader-Installer-Windows-x64
+          path: build/package-installer/*.exe
+          if-no-files-found: error
       - name: Upload Windows app image
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
