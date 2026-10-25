@@ -96,7 +96,7 @@ public final class LegacyDependencyOverrideGenerator {
         if (parent != null) Files.createDirectories(parent);
         Files.writeString(output, GSON.toJson(root) + System.lineSeparator(), StandardCharsets.UTF_8);
 
-        return new Result(output.toString(), jars.size(), legacyMods.size(), List.copyOf(unreadable));
+        return new Result(output.toString(), jars.size(), legacyMods.size(), List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
     }
 
     private static JsonObject readExistingConfig(Path configPath) throws IOException {
@@ -168,5 +168,5 @@ public final class LegacyDependencyOverrideGenerator {
         return range != null && TARGET_LEGACY_VERSION.matcher(range).find();
     }
 
-    public record Result(String configPath, int jarsScanned, int modIdsOverridden, List<String> warnings) {}
+    public record Result(String configPath, int jarsScanned, int modIdsOverridden,\n                         List<String> overriddenModIds, List<String> warnings) {}
 }
