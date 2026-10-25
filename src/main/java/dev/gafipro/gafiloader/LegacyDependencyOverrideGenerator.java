@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.TreeMap;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
@@ -30,7 +31,7 @@ import java.util.zip.ZipInputStream;
  */
 public final class LegacyDependencyOverrideGenerator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final String TARGET_LEGACY_VERSION = "1.21.11";
+    private static final Pattern TARGET_LEGACY_VERSION = Pattern.compile("(?<![0-9])1\\\\.21\\\\.11(?![0-9])");
 
     public Result generate(Path modsPath, Path configPath) throws IOException {
         if (modsPath == null || !Files.isDirectory(modsPath)) {
@@ -164,7 +165,7 @@ public final class LegacyDependencyOverrideGenerator {
     }
 
     private static boolean containsLegacyVersion(String range) {
-        return range != null && range.contains(TARGET_LEGACY_VERSION);
+        return range != null && TARGET_LEGACY_VERSION.matcher(range).find();
     }
 
     public record Result(String configPath, int jarsScanned, int modIdsOverridden, List<String> warnings) {}
