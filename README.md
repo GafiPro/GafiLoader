@@ -25,7 +25,7 @@ This packaging step is for the current diagnostic utility; it is **not a finishe
 
 ## Bypass the Fabric metadata version gate (diagnostic step)
 
-Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, and merges entries into an existing override file rather than replacing unrelated overrides.
+Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, merges entries into an existing override file rather than replacing unrelated overrides, saves an existing config as `fabric_loader_dependencies.json.bak`, and writes the replacement atomically.
 
 ~~~powershell
 .\gradlew.bat run --args="--prepare-legacy-overrides --mods C:/Users/you/AppData/Roaming/.minecraft/mods --config C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json"
