@@ -31,7 +31,7 @@ import java.util.zip.ZipInputStream;
  */
 public final class LegacyDependencyOverrideGenerator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Pattern TARGET_LEGACY_VERSION = Pattern.compile("(?<![0-9])1\\\\.21\\\\.11(?![0-9])");
+    private static final Pattern TARGET_LEGACY_VERSION = Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
 
     public Result generate(Path modsPath, Path configPath) throws IOException {
         if (modsPath == null || !Files.isDirectory(modsPath)) {
