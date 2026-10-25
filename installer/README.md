@@ -1,29 +1,32 @@
-# Windows installer
+# GafiLoader Windows installer
 
-The installer script creates a dedicated Minecraft Launcher profile named `gafiloader-26.2`. It uses the official Fabric Loader profile for Minecraft 26.2 and adds the GafiLoader Java agent to the profile's JVM arguments. The original game and mod JARs are not rewritten.
+The Windows installer is packaged as `GafiLoader-Setup-0.1.0.exe`. It installs a dedicated launcher version named `gafiloader-26.2` and places the GafiLoader agent and its configuration under `%APPDATA%\\.minecraft\\gafiloader`.
 
-## Package contents
+## User experience
 
-Place these two files in the same folder:
+1. Install and open the official Minecraft Java Launcher once, and sign in normally.
+2. Run `GafiLoader-Setup-0.1.0.exe`.
+3. The installer downloads the official Minecraft 26.2 client metadata/client JAR when missing, obtains official Minecraft 1.21.11 client mappings and Fabric Intermediary mappings, and creates a Fabric-based launcher version with GafiLoader's Java agent argument.
+4. Open Minecraft Launcher → **Installations** and choose **gafiloader-26.2**. On first launch, the launcher downloads the required libraries/assets.
+5. Put compatible Fabric mods in `%APPDATA%\\.minecraft\\mods` (or the game directory selected in the launcher).
 
-- `Install-GafiLoader.ps1`
-- the self-contained `gafi-loader-*.jar` produced by Gradle's `shadowJar` task (not the `-plain.jar`).
+No manual JVM arguments, mappings, or agent properties are required.
 
-## Install
+## Build locally
 
-1. Install and open the official Minecraft Launcher once so that `.minecraft` exists.
-2. Build GafiLoader with JDK 25: `./gradlew clean build`.
-3. Copy `installer/Install-GafiLoader.ps1` and `build/libs/gafi-loader-0.1.0-SNAPSHOT.jar` into one folder.
-4. Open PowerShell in that folder and run:
+Requires JDK 25 and Inno Setup 6.
 
-   `powershell -ExecutionPolicy Bypass -File .\Install-GafiLoader.ps1`
+```powershell
+.\\gradlew.bat --no-daemon clean shadowJar
+& "$env:ProgramFiles(x86)\\Inno Setup 6\\ISCC.exe" ".\\installer\\GafiLoader.iss"
+```
 
-The script downloads the official Minecraft 26.2 client JAR and metadata if absent, obtains the official 1.21.11 Mojang client mappings and Fabric Intermediary mappings, writes the agent configuration, and creates the launcher profile. The launcher downloads the remaining assets and libraries on first launch.
+The setup executable is written to `dist\\GafiLoader-Setup-0.1.0.exe`. The GitHub Actions workflow **Package Windows installer** builds this executable on a Windows runner and uploads it as an artifact.
 
 ## Uninstall
 
-Delete the `gafiloader-26.2` directory under `.minecraft\versions` and the `.minecraft\gafiloader` directory. The base Minecraft 26.2 files are retained.
+Uninstalling GafiLoader from Windows Apps removes the installer files. To remove the Minecraft launcher version and runtime files too, delete `%APPDATA%\\.minecraft\\versions\\gafiloader-26.2` and `%APPDATA%\\.minecraft\\gafiloader`. The official Minecraft 26.2 installation and original mod JARs are not deleted or rewritten.
 
 ## Compatibility status
 
-Installing a launcher profile is not proof that arbitrary 1.21.11 mods work on 26.2. Runtime compatibility must be verified against real mods; structural changes and behavior changes may still require specific bridges.
+The executable packages the installer and registers the launcher profile; it does **not** make every legacy mod compatible automatically. The current automated smoke test reached resource loading with a pinned 1.21.11 mod on Minecraft 26.2, but title-screen/gameplay compatibility and arbitrary mods are not yet proven. See the main README for current limits.
