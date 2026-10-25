@@ -94,6 +94,26 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void detectsLegacyApiByItsArtifactVersionWhenMinecraftRangeIsIndirect() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("version-only-mods"));
+        writeJar(mods.resolve("fabric-api.jar"), "fabric.mod.json", """
+                {
+                  "id": "fabric-api",
+                  "version": "0.141.6+1.21.11",
+                  "depends": { "fabricloader": ">=0.16.0" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("version-only-config/fabric_loader_dependencies.json");
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertTrue(root.getAsJsonObject("overrides").has("fabric-api"));
+        assertEquals(1, result.modIdsOverridden());
+    }
+
+    @Test
     void ignoresModsForOtherMinecraftVersions() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("modern-mods"));
         writeJar(mods.resolve("modern.jar"), "fabric.mod.json", """
