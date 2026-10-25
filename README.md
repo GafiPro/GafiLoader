@@ -15,6 +15,14 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 - Automate API-difference discovery, and add only tested compatibility shims.
 - Keep the Fabric ecosystem as the base rather than implementing a new mod ecosystem from scratch.
 
+## Windows build artifact
+
+Every push to `main` runs tests on Windows and Linux. The Windows job is configured to publish two GitHub Actions artifacts: `GafiLoader-Installer-Windows-x64` (an installer EXE with a bundled Java runtime) and `GafiLoader-Windows-x64` (the portable application image).
+
+To retrieve them, open the repository's **Actions** tab, open the latest successful **Build and test** run, and download the artifact from its Artifacts section. The installer uses a stable upgrade identifier and an increasing build version so future installers produced by this workflow can upgrade installations produced by the same workflow.
+
+This packaging step is for the current diagnostic utility; it is **not a finished Minecraft compatibility loader**. Do not use the EXE as evidence that Fabric API 1.21.11 is now supported by Minecraft 26.2.
+
 ## Bypass the Fabric metadata version gate (diagnostic step)
 
 Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, and merges entries into an existing override file rather than replacing unrelated overrides.
