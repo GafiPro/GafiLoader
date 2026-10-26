@@ -26,8 +26,8 @@ INTERMEDIARY_URL = (
 # Small Items Mod 1.21.11, Modrinth version ID verified from its version page.
 MODRINTH_VERSION_ID = "oO030Ff9"
 MODRINTH_VERSION_URL = f"https://api.modrinth.com/v2/version/{MODRINTH_VERSION_ID}"
-# Fabric API 0.141.5 for Minecraft 1.21.11, pinned to its public Modrinth version ID.
-FABRIC_API_VERSION_ID = "zGF3drOQ"
+# Fabric API 0.141.6 for Minecraft 1.21.11, pinned to its public Modrinth version ID.
+FABRIC_API_VERSION_ID = "6qAuTtLR"
 FABRIC_API_VERSION_URL = f"https://api.modrinth.com/v2/version/{FABRIC_API_VERSION_ID}"
 
 
@@ -149,7 +149,7 @@ def main() -> int:
     if not api_file or not api_file.get("url"):
         raise RuntimeError("Pinned Fabric API version has no downloadable JAR")
     artifacts["fabric_api"] = download(
-        api_file["url"], output / "fabric-api-0.141.5+1.21.11.jar",
+        api_file["url"], output / "fabric-api-0.141.6+1.21.11.jar",
         api_file.get("hashes", {}).get("sha1")
     )
 
