@@ -58,7 +58,7 @@ public final class GameSideCompatibilityAgent {
                     }
                 }
                 if (className.contains("MixinPreProcessorStandard")) {
-                    System.out.println("[Gafi Loader] DEBUG Mixin preprocessor definition seen: "
+                    DebugLog.debug("[Gafi Loader] DEBUG Mixin preprocessor definition seen: "
                             + className + " loader=" + loader + " retransform="
                             + (classBeingRedefined != null));
                 }
@@ -75,13 +75,13 @@ public final class GameSideCompatibilityAgent {
                     }
                 }
                 if (className.contains("MinecraftServerMixin")) {
-                    System.out.println("[Gafi Loader] DEBUG class-definition transformer received "
+                    DebugLog.debug("[Gafi Loader] DEBUG class-definition transformer received "
                             + className + " bytes=" + classfileBuffer.length);
                 }
                 if (KnotClassLoaderPatcher.TARGET_CLASS.equals(className)
                         || KnotLauncherPatcher.TARGET_CLASS.equals(className)
                         || MixinServiceKnotPatcher.TARGET_CLASS.equals(className)) {
-                    System.out.println("[Gafi Loader] DEBUG transformer received " + className
+                    DebugLog.debug("[Gafi Loader] DEBUG transformer received " + className
                             + " bytes; redefining=" + (classBeingRedefined != null));
                 }
 
@@ -94,7 +94,7 @@ public final class GameSideCompatibilityAgent {
                     byte[] bridged = LegacyApiBridgePatcher.transformClassForRuntime(
                             className, bridgeInput, targetApi);
                     if ("net/minecraft/server/packs/AbstractPackResources".equals(className)) {
-                        System.out.println("[Gafi Loader] DEBUG pack bridge target seen; targetClass="
+                        DebugLog.debug("[Gafi Loader] DEBUG pack bridge target seen; targetClass="
                                 + targetApi.hasClass("net/minecraft/server/packs/AbstractPackResources")
                                 + " loadMetadata="
                                 + targetApi.methodAccess("net/minecraft/server/packs/AbstractPackResources",
@@ -239,18 +239,18 @@ public final class GameSideCompatibilityAgent {
         // transformed. Retransform KnotClassLoader if it is already loaded so its resource hook
         // is still installed; otherwise the normal transformer will patch it on first load.
         if (intermediaryMappings != null) {
-            System.out.println("[Gafi Loader] DEBUG retransformation supported="
+            DebugLog.debug("[Gafi Loader] DEBUG retransformation supported="
                     + instrumentation.isRetransformClassesSupported());
             boolean knotAlreadyLoaded = false;
             for (Class<?> loadedClass : instrumentation.getAllLoadedClasses()) {
                 if (loadedClass.getName().equals(KnotClassLoaderPatcher.TARGET_CLASS.replace('/', '.'))) {
                     knotAlreadyLoaded = true;
-                    System.out.println("[Gafi Loader] DEBUG KnotClassLoader already loaded; modifiable="
+                    DebugLog.debug("[Gafi Loader] DEBUG KnotClassLoader already loaded; modifiable="
                             + instrumentation.isModifiableClass(loadedClass));
                 }
             }
             if (!knotAlreadyLoaded) {
-                System.out.println("[Gafi Loader] DEBUG KnotClassLoader not loaded when transformer was installed.");
+                DebugLog.debug("[Gafi Loader] DEBUG KnotClassLoader not loaded when transformer was installed.");
             }
         }
         if (intermediaryMappings != null && instrumentation.isRetransformClassesSupported()) {
