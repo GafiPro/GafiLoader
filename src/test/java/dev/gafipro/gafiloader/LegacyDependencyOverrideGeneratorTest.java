@@ -115,6 +115,89 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void detectsMinorRangeThatIncludesLegacyRelease() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("minor-range-mods"));
+        writeJar(mods.resolve("smallhands.jar"), "fabric.mod.json", """
+                {
+                  "id": "smallhands",
+                  "version": "1.0.0",
+                  "depends": { "minecraft": "~1.21" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("minor-range-config/fabric_loader_dependencies.json");
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertTrue(root.getAsJsonObject("overrides").has("smallhands"),
+                "A ~1.21 requirement permits 1.21.11 but rejects 26.2");
+        assertEquals(1, result.modIdsOverridden());
+    }
+
+    @Test
+    void understandsComparatorAndWildcardRangesForTheLegacyMinor() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("range-forms-mods"));
+        writeJar(mods.resolve("comparator.jar"), "fabric.mod.json", """
+                {
+                  "id": "comparator-mod",
+                  "version": "1.0.0",
+                  "depends": { "minecraft": ">=1.21 <1.22" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+        writeJar(mods.resolve("wildcard.jar"), "fabric.mod.json", """
+                {
+                  "id": "wildcard-mod",
+                  "version": "1.0.0",
+                  "depends": { "minecraft": "1.21.x" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("range-forms-config/fabric_loader_dependencies.json");
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        JsonObject overrides = root.getAsJsonObject("overrides");
+        assertTrue(overrides.has("comparator-mod"));
+        assertTrue(overrides.has("wildcard-mod"));
+        assertEquals(2, result.modIdsOverridden());
+    }
+
+    @Test
+    void doesNotOverrideWhenAlternativeDependencyAlreadyAllows262() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("alternative-ranges-mods"));
+        writeJar(mods.resolve("already-compatible.jar"), "fabric.mod.json", """
+                {
+                  "id": "already-compatible",
+                  "version": "1.0.0",
+                  "depends": { "minecraft": ["~1.21", "26.2"] }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("alternative-ranges-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        String originalConfig = """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "keep-existing": { "-depends": { "java": "" } }
+                  }
+                }
+                """;
+        Files.writeString(config, originalConfig);
+
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertFalse(root.getAsJsonObject("overrides").has("already-compatible"));
+        assertEquals(originalConfig, Files.readString(config),
+                "No-op detection must preserve pre-existing configuration exactly");
+        assertEquals(0, result.modIdsOverridden());
+    }
+
+    @Test
     void ignoresModsForOtherMinecraftVersions() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("modern-mods"));
         writeJar(mods.resolve("modern.jar"), "fabric.mod.json", """
