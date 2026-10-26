@@ -33,6 +33,7 @@ class IntermediaryMappingsTest {
                 "    int oldField -> c",
                 "    1:1:void oldMethod(net.minecraft.Bar):10:10 -> b",
                 "net.minecraft.Bar -> d:",
+                "net.minecraft.Child -> e:",
                 ""));
 
         Files.writeString(intermediaryMappings, String.join("\n",
@@ -41,6 +42,7 @@ class IntermediaryMappingsTest {
                 "\tf\tI\tc\tfield_1",
                 "\tm\t(Ld;)V\tb\tmethod_2",
                 "c\td\tnet/minecraft/class_2",
+                "c\te\tnet/minecraft/class_3",
                 ""));
 
         writeJar(targetJar,
@@ -52,8 +54,65 @@ class IntermediaryMappingsTest {
                 targetJar, List.of(modJar), null, intermediaryMappings, mojangMappings);
 
         assertTrue(report.findings().isEmpty(), () -> report.findings().toString());
-        assertEquals(2, report.summary().intermediaryClassesMapped());
+        assertEquals(3, report.summary().intermediaryClassesMapped());
         assertEquals(2, report.summary().intermediaryMembersMapped());
+
+        IntermediaryMappings loaded = IntermediaryMappings.load(
+                intermediaryMappings, MojangMappings.load(mojangMappings));
+        assertEquals("net/minecraft/Foo$1", loaded.mapClassName("net/minecraft/class_1$1"));
+        assertEquals("(Lnet/minecraft/Foo$Nested;)V",
+                loaded.mapDescriptor("(Lnet/minecraft/class_1$Nested;)V"));
+        assertEquals("oldMethod", loaded.mapMethodName(
+                "net/minecraft/Foo", "method_2", null),
+                "A named owner must still resolve a legacy Intermediary method selector.");
+        CompatibilityScanner.Reference mixedNamespaceMethod = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/Foo", "method_2", "(Lnet/minecraft/class_2;)V"));
+        assertEquals("net/minecraft/Foo", mixedNamespaceMethod.owner());
+        assertEquals("oldMethod", mixedNamespaceMethod.name());
+        assertEquals("(Lnet/minecraft/Bar;)V", mixedNamespaceMethod.descriptor());
+
+        CompatibilityScanner.Reference inheritedMethod = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/class_3", "method_2", "(Lnet/minecraft/class_2;)V"));
+        assertEquals("net/minecraft/Child", inheritedMethod.owner());
+        assertEquals("oldMethod", inheritedMethod.name());
+        assertEquals("(Lnet/minecraft/Bar;)V", inheritedMethod.descriptor());
+    }
+
+    @Test
+    void doesNotUseAnInheritedFallbackWhenIntermediaryNameIsAmbiguous() throws IOException {
+        Path mojangMappings = temporaryDirectory.resolve("ambiguous-client-mappings.txt");
+        Path intermediaryMappings = temporaryDirectory.resolve("ambiguous-intermediary.tiny");
+
+        Files.writeString(mojangMappings, String.join("\n",
+                "net.minecraft.Foo -> a:",
+                "    1:1:void firstMethod(net.minecraft.Bar):1:1 -> b",
+                "net.minecraft.Baz -> d:",
+                "    1:1:void secondMethod(net.minecraft.Bar):1:1 -> c",
+                "net.minecraft.Bar -> e:",
+                ""));
+
+        Files.writeString(intermediaryMappings, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\ta\tnet/minecraft/class_1",
+                "\tm\t(Le;)V\tb\tmethod_2",
+                "c\td\tnet/minecraft/class_2",
+                "\tm\t(Le;)V\tc\tmethod_2",
+                "c\te\tnet/minecraft/class_3",
+                ""));
+
+        IntermediaryMappings loaded = IntermediaryMappings.load(
+                intermediaryMappings, MojangMappings.load(mojangMappings));
+
+        CompatibilityScanner.Reference result = loaded.normalize(
+                new CompatibilityScanner.Reference(CompatibilityScanner.SymbolKind.METHOD,
+                        "net/minecraft/class_99", "method_2", "(Lnet/minecraft/class_3;)V"));
+
+        assertEquals("net/minecraft/class_99", result.owner());
+        assertEquals("method_2", result.name(),
+                "A name shared by unrelated mappings must not be guessed when the owner is unknown.");
+        assertEquals("(Lnet/minecraft/Bar;)V", result.descriptor());
     }
 
     private static byte[] targetFooClass() {

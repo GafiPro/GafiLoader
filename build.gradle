@@ -1,5 +1,6 @@
 plugins {
     id 'application'
+    id 'com.gradleup.shadow' version '9.6.1'
 }
 
 group = 'dev.gafipro'
@@ -18,6 +19,7 @@ application {
 
 dependencies {
     implementation 'org.ow2.asm:asm:9.9.1'
+    implementation 'org.ow2.asm:asm-commons:9.9.1'
     implementation 'com.google.code.gson:gson:2.13.2'
     implementation 'net.fabricmc:mapping-io:0.9.1'
     implementation 'net.fabricmc:tiny-remapper:0.15.0'
@@ -36,15 +38,61 @@ tasks.withType(Test).configureEach {
     useJUnitPlatform()
     testLogging {
         events 'failed', 'skipped'
+        exceptionFormat = 'full'
     }
 }
 
-jar {
+def gafiManifestAttributes = [
+    'Implementation-Title': 'Gafi Loader',
+    'Implementation-Version': project.version,
+    'Main-Class': application.mainClass.get(),
+    'Premain-Class': 'dev.gafipro.gafiloader.GameSideCompatibilityAgent',
+    'Can-Redefine-Classes': 'false',
+    'Can-Retransform-Classes': 'true'
+]
+
+// Keep the normal application JAR for installDist/jpackage; the shaded JAR is the agent.
+tasks.named('jar') {
+    archiveClassifier = 'plain'
     manifest {
-        attributes(
-            'Implementation-Title': 'GafiLoader Compatibility Diagnostic Tools',
-            'Implementation-Version': project.version,
-            'Main-Class': application.mainClass.get()
-        )
+        attributes(gafiManifestAttributes)
+    }
+}
+
+tasks.named('shadowJar') {
+    archiveClassifier = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
+    exclude '**/module-info.class'
+    relocate 'org.objectweb.asm', 'dev.gafipro.gafiloader.internal.asm'
+    mergeServiceFiles()
+    manifest {
+        attributes(gafiManifestAttributes)
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('shadowJar')
+}
+
+tasks.named('test') {
+    dependsOn tasks.named('shadowJar')
+    systemProperty 'gafi.loader.agent.jar',
+            tasks.named('shadowJar').get().archiveFile.get().asFile.absolutePath
+    def fabricLoaderJar = providers.gradleProperty('gafiFabricLoaderJar')
+    if (fabricLoaderJar.isPresent()) {
+        systemProperty 'gafi.loader.fabric.loader.jar', fabricLoaderJar.get()
+    }
+
+    [
+        'GAFI_REAL_TARGET_GAME': 'gafi.loader.real.target.jar',
+        'GAFI_REAL_LEGACY_MOD': 'gafi.loader.real.mod.jar',
+        'GAFI_REAL_INTERMEDIARY_MAPPINGS': 'gafi.loader.real.intermediary.jar',
+        'GAFI_REAL_LEGACY_MAPPINGS': 'gafi.loader.real.official.mappings'
+    ].each { environmentName, propertyName ->
+        def configuredPath = System.getenv(environmentName)
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            systemProperty propertyName, configuredPath
+        }
     }
 }

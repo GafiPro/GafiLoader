@@ -1,0 +1,114 @@
+name: Runtime compatibility verification
+
+on:
+  push:
+    branches: [main, integration/runtime-compatibility]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gafi-runtime-compatibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Validate Python test harness and startup-milestone regressions
+        run: |
+          python3 -m py_compile scripts/fetch_real_integration_fixtures.py scripts/run_fabric_client_smoke.py scripts/test_fabric_client_smoke.py
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Download released Fabric Loader binary for compatibility checks
+        run: curl --fail --location --retry 3 --silent --show-error https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar --output "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+
+      - name: Download official Minecraft 26.2 and real 1.21.11 artifacts
+        run: python3 scripts/fetch_real_integration_fixtures.py "$RUNNER_TEMP/gafi-real-fixture"
+
+      - name: Build and run all Java tests against the real fixtures
+        run: ./gradlew --no-daemon clean test build -PgafiFabricLoaderJar="$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+
+      - name: Run compatibility scan and official API comparison
+        run: |
+          mkdir -p build/real-artifact-test
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
+          test -n "$agent_jar"
+          java -jar "$agent_jar" \
+            --game "$GAFI_REAL_TARGET_GAME" \
+            --mods "$GAFI_REAL_LEGACY_MOD" \
+            --intermediary-mappings "$GAFI_REAL_INTERMEDIARY_MAPPINGS" \
+            --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
+            --report build/real-artifact-test/compatibility-report.json
+          java -jar "$agent_jar" \
+            --game "$GAFI_REAL_TARGET_GAME" \
+            --legacy-game "$GAFI_REAL_LEGACY_GAME" \
+            --legacy-mappings "$GAFI_REAL_LEGACY_MAPPINGS" \
+            --api-report build/real-artifact-test/api-diff.json \
+            --alias-candidates build/real-artifact-test/method-alias-candidates.tsv \
+            > build/real-artifact-test/api-comparison.log
+          tail -n 25 build/real-artifact-test/api-comparison.log
+          cp "$GAFI_REAL_FIXTURE_METADATA" build/real-artifact-test/fixture-metadata.json
+
+      - name: Ensure virtual display, software OpenGL and narrator dependencies are available
+        run: |
+          missing=0
+          command -v xvfb-run >/dev/null 2>&1 || missing=1
+          for package in xvfb libgl1-mesa-dri libglx-mesa0 libflite1; do
+            status="$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)"
+            if [ "$status" != "installed" ]; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            sudo timeout 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=20 \
+              -o Acquire::https::Timeout=20 \
+              update
+            sudo timeout 180s apt-get \
+              -o DPkg::Lock::Timeout=120 \
+              install --yes --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libflite1
+          else
+            echo "All required headless graphics/audio packages are already installed."
+          fi
+          command -v xvfb-run
+          ldconfig -p | grep -E 'libGLX_mesa|libopenal|libFLAC' | head -n 20 || true
+
+      - name: Launch official Fabric client with the legacy mod and Gafi Loader
+        run: |
+          agent_jar="$(find build/libs -maxdepth 1 -name 'gafi-loader-*.jar' ! -name '*-plain.jar' -print -quit)"
+          test -n "$agent_jar"
+          python3 scripts/run_fabric_client_smoke.py \
+            "$RUNNER_TEMP/gafi-real-fixture" \
+            "$GITHUB_WORKSPACE/$agent_jar" \
+            "$RUNNER_TEMP/fabric-loader-0.20.1.jar"
+
+      - name: Upload agent, reports, and full client logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gafi-runtime-verification-${{ github.sha }}
+          path: |
+            build/libs/gafi-loader-*.jar
+            build/real-artifact-test/compatibility-report.json
+            build/real-artifact-test/api-diff.json
+            build/real-artifact-test/method-alias-candidates.tsv
+            build/real-artifact-test/fixture-metadata.json
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/client-console.log
+            ${{ runner.temp }}/gafi-real-fixture/fabric-client-smoke/game/logs/latest.log
+          if-no-files-found: warn
+          retention-days: 7

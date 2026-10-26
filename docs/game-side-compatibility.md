@@ -8,7 +8,7 @@ Gafi Loader must not rewrite, remap, repackage, or otherwise mutate legacy mod J
 
 This is not a normal Fabric mod feature. A regular mod cannot make arbitrary missing JVM classes appear under names expected by already-compiled mods before those mods are linked, nor can it make Fabric accept a legacy mod whose metadata and references target another Minecraft generation. The integration point must therefore be the loader / launch pipeline, with compatibility classes and method bridges supplied to the 26.2 runtime.
 
-The implementation must preserve every original legacy JAR byte-for-byte. The experimental Java agent now applies reviewed method bridges to Minecraft classes in memory, before class definition; the offline utility can instead write a separate patched copy of the game JAR. Neither route rewrites mod JARs. Rules must be scoped to the exact 1.21.11 -> 26.2 pair.
+The implementation must preserve every original legacy JAR byte-for-byte. The experimental Java agent now applies reviewed method bridges to Minecraft classes in memory, before class definition; it also remaps direct mod bytecode references and recognized Mixin config/refmap JSON at read time. The offline utility can instead write a separate patched copy of the game JAR. Neither route rewrites mod JARs. Rules must be scoped to the exact 1.21.11 -> 26.2 pair.
 
 ## Compatibility strategy
 
@@ -43,15 +43,22 @@ Implemented prototype pieces:
 - Review-only method candidate TSV export. Candidate records are intentionally distinct from executable patch rules.
 - Offline game-JAR copy patcher for explicit same-descriptor method aliases.
 - Java agent that performs those aliases in memory before a target class is defined.
+- Verified structural bridges injected into Minecraft 26.2 class bytes at definition time for the removed `Minecraft.setScreen(Screen)`, `DisplaySlot.teamColorToSlot(ChatFormatting)`, and `ReadOnlyScoreInfo.safeFormatValue(ReadOnlyScoreInfo, NumberFormat)` APIs. These adapters activate only when the configured 26.2 JAR contains the required replacement field/methods; original JARs remain unchanged.
 - Java agent configuration that loads the official 1.21.11 Mojang mappings and Fabric Intermediary artifact, then remaps direct legacy class/member/descriptors in loaded bytecode to 26.2 names without editing the mod JAR.
+- Hooks at Fabric's `MixinServiceKnot.getResourceAsStream` and `getClassBytes` boundaries: known Mixin config/refmap JSON is remapped in memory, and class bytes requested by Mixin for metadata inspection have their direct Intermediary references normalized before Mixin consumes them. The hooks validate the expected method signatures. CI also downloads the released Fabric Loader 0.20.1 JAR and applies the patcher to its actual `MixinServiceKnot` class. That verifies the binary hook points, but is not an actual Fabric 26.2 game launch.
 - Generator for Fabric's documented dependency-override configuration, scoped to an explicitly selected set of legacy mod JARs.
 - Regression tests using synthetic JARs/classes for bytecode delegation, Intermediary owner/member/descriptor remapping in a separate JVM, preservation of source bytes, and dependency-config merging.
 
 Not yet implemented or verified:
 - A reviewed alias catalogue generated from the official 1.21.11 and 26.2 game artifacts.
 - Broad legacy-mod resolution. The dependency-override generator removes only the selected mods' `minecraft` version constraint; it does not make bytecode compatible or adapt other dependencies.
-- Validation against real production 1.21.11 mods and the official 26.2 runtime. The synthetic integration proves direct bytecode references only, not full feature compatibility.
-- Missing-class aliases, semantic descriptor conversions, reflection-string and resource remapping, Mixin/Fabric API adapters, and game-behavior tests.
-- End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod.
+- Full end-to-end launch against the official 26.2 runtime with a production 1.21.11 mod. CI scans a real `Small Items Mod 1.21.11` JAR and checks that the structural adapters can be built against the official target API, but does not launch the full game or verify the mod feature in-game.
+- Missing-class aliases, semantic descriptor conversions, arbitrary reflection-string and unrelated-resource remapping, full Mixin/Fabric API adaptation, and game-behavior tests. The resource hook adapts names/selectors only; it does not port injection semantics.
+- End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod. Remaining game-wide API differences include the `TimerQueue` serialization redesign and removed loot score-provider APIs; they need targeted compatibility work and are not claimed to be adapted.
 
 Therefore this is an early runtime-bridge prototype, not a claim that arbitrary legacy mods already load.
+
+
+### Injection-point validation
+
+The runtime compatibility scanner validates not only whether an `@At` invocation or field exists somewhere in Minecraft 26.2, but whether that exact instruction occurs inside the selected target method. It also validates both supported `NEW` selector forms: constructor descriptors and explicit `<init>` selectors. When an injection anchor is stale, Gafi Loader removes only the incompatible Mixin entry from the in-memory configuration and reports that the skipped behavior is not emulated; it never changes the original mod JAR.

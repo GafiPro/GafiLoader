@@ -1,0 +1,62 @@
+name: Package Windows installer
+
+on:
+  push:
+    branches: [main, integration/runtime-compatibility]
+  pull_request:
+    branches: [main, integration/runtime-compatibility]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gafi-loader-installer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build the self-contained GafiLoader agent
+        shell: pwsh
+        run: .\gradlew.bat --no-daemon clean shadowJar
+
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile the Windows setup executable
+        shell: pwsh
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $compiler)) {
+            $compiler = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'
+          }
+          if (-not (Test-Path $compiler)) {
+            throw 'Inno Setup command-line compiler was not found after installation.'
+          }
+          & $compiler '.\installer\GafiLoader.iss'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path '.\dist\GafiLoader-Setup-0.1.2.exe')) {
+            throw 'Expected setup executable was not produced.'
+          }
+
+      - name: Upload GafiLoader Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: GafiLoader-Windows-Installer
+          path: dist/GafiLoader-Setup-0.1.2.exe
+          if-no-files-found: error
+          retention-days: 14
