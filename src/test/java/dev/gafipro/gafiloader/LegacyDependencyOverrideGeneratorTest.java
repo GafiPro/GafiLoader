@@ -198,6 +198,42 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void doesNotRewriteAnAlreadyPreparedDependencyConfigOnEveryLaunch() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("idempotent-mods"));
+        writeJar(mods.resolve("smallhands.jar"), "fabric.mod.json", """
+                {
+                  "id": "smallhands",
+                  "version": "1.0.0",
+                  "depends": { "minecraft": "~1.21" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("idempotent-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        String originalConfig = """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "smallhands": {
+                      "-depends": { "minecraft": "" }
+                    },
+                    "other-mod": {
+                      "-depends": { "java": "" }
+                    }
+                  }
+                }
+                """;
+        Files.writeString(config, originalConfig);
+
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        assertEquals(originalConfig, Files.readString(config));
+        assertFalse(Files.exists(config.resolveSibling("fabric_loader_dependencies.json.bak")));
+        assertEquals(1, result.modIdsOverridden());
+    }
+
+    @Test
     void ignoresModsForOtherMinecraftVersions() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("modern-mods"));
         writeJar(mods.resolve("modern.jar"), "fabric.mod.json", """
