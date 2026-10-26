@@ -178,23 +178,162 @@ public final class LegacyDependencyOverrideGenerator {
         if (depends == null || !depends.isJsonObject()) return false;
         JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
         if (minecraft == null) return false;
-        if (minecraft.isJsonPrimitive()) return containsLegacyVersion(minecraft.getAsString());
-        if (minecraft.isJsonArray()) {
-            JsonArray ranges = minecraft.getAsJsonArray();
-            for (JsonElement range : ranges) {
-                if (range.isJsonPrimitive() && containsLegacyVersion(range.getAsString())) return true;
+
+        // Only bypass an actual version gate: the declared predicate must allow 1.21.11
+        // but reject the target 26.2. Fabric accepts both strings and arrays of alternatives.
+        // Checking the complete array avoids overriding a mod that already permits 26.2.
+        return matchesAnyMinecraftVersion(minecraft, "1.21.11")
+                && !matchesAnyMinecraftVersion(minecraft, "26.2");
+    }
+
+    private static boolean matchesAnyMinecraftVersion(JsonElement requirement, String version) {
+        if (requirement == null) return false;
+        if (requirement.isJsonPrimitive()) {
+            return matchesFabricVersionPredicate(requirement.getAsString(), version);
+        }
+        if (requirement.isJsonArray()) {
+            for (JsonElement alternative : requirement.getAsJsonArray()) {
+                if (alternative.isJsonPrimitive()
+                        && matchesFabricVersionPredicate(alternative.getAsString(), version)) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
+    /**
+     * Evaluate the numeric forms of Fabric's extended-SemVer predicates needed for
+     * dependency-gate detection: exact versions, comparison conjunctions, tilde/caret,
+     * and .x/.*/.X wildcards. Unknown forms fail closed rather than trigger an override.
+     */
+    private static boolean matchesFabricVersionPredicate(String predicate, String candidate) {
+        if (predicate == null || predicate.isBlank()) return false;
+        String expression = predicate.trim();
+        if (expression.equals("*")) return true;
+
+        if (expression.contains("||")) {
+            for (String alternative : expression.split("\\|\\|")) {
+                if (matchesFabricVersionPredicate(alternative, candidate)) return true;
+            }
+            return false;
+        }
+
+        if (expression.startsWith("~") || expression.startsWith("^")) {
+            char operator = expression.charAt(0);
+            String lowerBound = expression.substring(1).trim();
+            if (!isNumericVersion(lowerBound)
+                    || compareVersions(candidate, lowerBound) < 0) return false;
+            int[] parts = numericComponents(lowerBound);
+            int[] upper;
+            if (operator == '^' || parts.length == 1) {
+                upper = new int[]{parts[0] + 1, 0};
+            } else {
+                upper = new int[]{parts[0], parts[1] + 1, 0};
+            }
+            return compareVersions(candidate, formatVersion(upper)) < 0;
+        }
+
+        // Fabric's .x, .* and .X forms denote a wildcard suffix such as 1.21.x.
+        if (expression.matches("[0-9]+(?:\\.[0-9]+)*\\.(?:x|X|\\*)")) {
+            String[] wanted = expression.split("\\.");
+            String[] actual = candidate.split("\\+")[0].split("[-.]");
+            int numericCount = wanted.length - 1;
+            if (actual.length < numericCount) return false;
+            for (int i = 0; i < numericCount; i++) {
+                if (!wanted[i].equals(actual[i])) return false;
+            }
+            return true;
+        }
+
+        String normalized = expression.replace(',', ' ').trim();
+        String[] terms = normalized.split("\\s+");
+        for (String term : terms) {
+            if (term.isBlank()) continue;
+            String operator = "=";
+            String versionTerm = term;
+            for (String possible : new String[]{">=", "<=", ">", "<", "="}) {
+                if (term.startsWith(possible)) {
+                    operator = possible;
+                    versionTerm = term.substring(possible.length());
+                    break;
+                }
+            }
+            if (!isNumericVersion(versionTerm)) return false;
+            int comparison = compareVersions(candidate, versionTerm);
+            boolean matched = switch (operator) {
+                case ">=" -> comparison >= 0;
+                case "<=" -> comparison <= 0;
+                case ">" -> comparison > 0;
+                case "<" -> comparison < 0;
+                default -> comparison == 0;
+            };
+            if (!matched) return false;
+        }
+        return terms.length > 0;
+    }
+
+    private static boolean isNumericVersion(String version) {
+        return version != null && version.matches(
+                "[0-9]+(?:\\.[0-9]+)*(?:-[A-Za-z0-9.-]+)?(?:\\+[A-Za-z0-9.-]+)?");
+    }
+
+    private static int compareVersions(String left, String right) {
+        String leftWithoutBuild = left.split("\\+", 2)[0];
+        String rightWithoutBuild = right.split("\\+", 2)[0];
+        String[] leftPrerelease = leftWithoutBuild.split("-", 2);
+        String[] rightPrerelease = rightWithoutBuild.split("-", 2);
+        int[] leftParts = numericComponents(leftPrerelease[0]);
+        int[] rightParts = numericComponents(rightPrerelease[0]);
+        int length = Math.max(leftParts.length, rightParts.length);
+        for (int i = 0; i < length; i++) {
+            int l = i < leftParts.length ? leftParts[i] : 0;
+            int r = i < rightParts.length ? rightParts[i] : 0;
+            if (l != r) return Integer.compare(l, r);
+        }
+        boolean leftIsPrerelease = leftPrerelease.length > 1;
+        boolean rightIsPrerelease = rightPrerelease.length > 1;
+        if (leftIsPrerelease != rightIsPrerelease) {
+            return leftIsPrerelease ? -1 : 1;
+        }
+        if (leftIsPrerelease) {
+            return leftPrerelease[1].compareTo(rightPrerelease[1]);
+        }
+        return 0;
+    }
+
+    private static int[] numericComponents(String version) {
+        String core = version.split("[-+]", 2)[0];
+        String[] tokens = core.split("\\.");
+        int[] parts = new int[tokens.length];
+        for (int i = 0; i < tokens.length; i++) {
+            try {
+                parts[i] = Integer.parseInt(tokens[i]);
+            } catch (NumberFormatException exception) {
+                return new int[0];
+            }
+        }
+        return parts;
+    }
+
+    private static String formatVersion(int[] parts) {
+        StringBuilder version = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) version.append('.');
+            version.append(parts[i]);
+        }
+        return version.toString();
+    }
+
     private static boolean declaresLegacyMinecraftVersion(JsonElement version) {
+        // Fabric API artifacts often encode the Minecraft line in their build metadata,
+        // e.g. 0.141.5+1.21.11. This is distinct from a Minecraft dependency predicate.
         return version != null && version.isJsonPrimitive()
                 && containsLegacyVersion(version.getAsString());
     }
 
-    private static boolean containsLegacyVersion(String range) {
-        return range != null && TARGET_LEGACY_VERSION.matcher(range).find();
+    private static boolean containsLegacyVersion(String versionText) {
+        return versionText != null && TARGET_LEGACY_VERSION.matcher(versionText).find();
     }
 
     public record Result(String configPath, int jarsScanned, int modIdsOverridden,
