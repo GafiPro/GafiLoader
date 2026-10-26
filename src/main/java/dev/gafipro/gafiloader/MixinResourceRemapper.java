@@ -300,7 +300,7 @@ public final class MixinResourceRemapper {
             return original;
         }
         if (resourceName != null && resourceName.contains("fabric-events-interaction-v0")) {
-            System.out.println("[Gafi Loader] DEBUG intercepted interaction Mixin resource: " + resourceName);
+            DebugLog.debug("[Gafi Loader] DEBUG intercepted interaction Mixin resource: " + resourceName);
         }
 
         final byte[] source;
@@ -337,7 +337,7 @@ public final class MixinResourceRemapper {
             AtomicBoolean changed = new AtomicBoolean(false);
             JsonElement remapped = remapJson(root, currentMappings, aliases, changed);
             if (resourceName.contains("fabric-particles-v1")) {
-                System.out.println("[Gafi Loader] DEBUG particles config=" + GSON.toJson(remapped));
+                DebugLog.debug("[Gafi Loader] DEBUG particles config=" + GSON.toJson(remapped));
             }
             int prunedMixins = pruneStructurallyIncompatibleMixins(
                     remapped, resourceName, currentMappings, aliases, targetApi);
@@ -409,7 +409,7 @@ public final class MixinResourceRemapper {
                                 + "ModelBlockRenderer.renderModel signature; skipped on 26.2";
                     }
                     if (mixinName.contains("LivingEntity")) {
-                        System.out.println("[Gafi Loader] DEBUG mixin entry=" + mixinName
+                        DebugLog.debug("[Gafi Loader] DEBUG mixin entry=" + mixinName
                                 + " resource=" + classResource + " package=" + mixinPackage);
                     }
                     if (classResource != null && incompatibility == null) {
@@ -422,18 +422,18 @@ public final class MixinResourceRemapper {
                                 inspected = true;
                                 MixinClassMetadata metadata = readMixinMetadata(input.readAllBytes());
                                 if (metadata == null && mixinName.contains("LivingEntity")) {
-                                    System.out.println("[Gafi Loader] DEBUG no @Mixin targets found for " + classResource);
+                                    DebugLog.debug("[Gafi Loader] DEBUG no @Mixin targets found for " + classResource);
                                 }
                                 if (metadata != null) {
                                     if (resourceName.contains("fabric-events-interaction-v0")
                                             || resourceName.contains("fabric-recipe-api-v1")) {
-                                        System.out.println("[Gafi Loader] DEBUG inspected mixin metadata "
+                                        DebugLog.debug("[Gafi Loader] DEBUG inspected mixin metadata "
                                                 + mixinName + " targets=" + metadata.targets()
                                                 + " selectors=" + metadata.selectors()
                                                 + " atTargets=" + metadata.atTargets());
                                     }
                                     if (mixinName.endsWith("LivingEntityMixin")) {
-                                        System.out.println("[Gafi Loader] DEBUG mixin metadata " + mixinName
+                                        DebugLog.debug("[Gafi Loader] DEBUG mixin metadata " + mixinName
                                                 + " targets=" + metadata.targets()
                                                 + " selectors=" + metadata.selectors()
                                                 + " atTargets=" + metadata.atTargets());
@@ -538,7 +538,7 @@ public final class MixinResourceRemapper {
                                             String selectorProblem = MixinSelectorRemapper.incompatibilityReason(
                                                     selector.value(), metadata.targets(), mappings, aliases, targetApi);
                                             if (resourceName.contains("fabric-recipe-api-v1")) {
-                                                System.out.println("[Gafi Loader] DEBUG recipe selector "
+                                                DebugLog.debug("[Gafi Loader] DEBUG recipe selector "
                                                         + mixinName + " " + selector.value()
                                                         + " -> " + selectorProblem);
                                             }
@@ -724,7 +724,7 @@ public final class MixinResourceRemapper {
                                     + mixinName + " in " + resourceName + ": " + exception.getMessage());
                         }
                         if (mixinName.contains("LivingEntity")) {
-                            System.out.println("[Gafi Loader] DEBUG mixin inspection result=" + mixinName
+                            DebugLog.debug("[Gafi Loader] DEBUG mixin inspection result=" + mixinName
                                     + " inspected=" + inspected + " incompatibility=" + incompatibility);
                         }
                         if (!inspected) {
@@ -1563,7 +1563,7 @@ public final class MixinResourceRemapper {
                 @Override
                 public void visit(int version, int access, String internalName, String signature,
                                   String superName, String[] interfaces) {
-                    System.out.println("[Gafi Loader] DEBUG MixinTransformer target bytes: requested="
+                    DebugLog.debug("[Gafi Loader] DEBUG MixinTransformer target bytes: requested="
                             + name + ", transformed=" + transformedName + ", actual=" + internalName
                             + ", super=" + superName);
                 }
@@ -1581,10 +1581,10 @@ public final class MixinResourceRemapper {
                     return null;
                 }
             }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-            System.out.println("[Gafi Loader] DEBUG live listener methods: "
+            DebugLog.debug("[Gafi Loader] DEBUG live listener methods: "
                     + (relevant.isEmpty() ? signatures.stream().limit(35).toList() : relevant));
         } catch (RuntimeException exception) {
-            System.out.println("[Gafi Loader] DEBUG could not inspect live listener bytes: "
+            DebugLog.debug("[Gafi Loader] DEBUG could not inspect live listener bytes: "
                     + exception.getMessage());
         }
     }
@@ -1610,7 +1610,7 @@ public final class MixinResourceRemapper {
                     @Override
                     public void visit(int version, int access, String name, String signature,
                                       String superName, String[] interfaces) {
-                        System.out.println("[Gafi Loader] DEBUG runtime listener class bytes: "
+                        DebugLog.debug("[Gafi Loader] DEBUG runtime listener class bytes: "
                                 + name + " super=" + superName);
                     }
 
@@ -1620,7 +1620,7 @@ public final class MixinResourceRemapper {
                         if (name.toLowerCase(java.util.Locale.ROOT).contains("respawn")
                                 || descriptor.contains("ClientboundRespawnPacket")
                                 || descriptor.contains("class_2724")) {
-                            System.out.println("[Gafi Loader] DEBUG runtime listener method: "
+                            DebugLog.debug("[Gafi Loader] DEBUG runtime listener method: "
                                     + name + descriptor);
                         }
                         return null;
@@ -1670,7 +1670,7 @@ public final class MixinResourceRemapper {
             return originalNode;
         }
         if (requestedClassName.contains("MinecraftServerMixin")) {
-            System.out.println("[Gafi Loader] DEBUG ClassNode hook reached: " + requestedClassName);
+            DebugLog.debug("[Gafi Loader] DEBUG ClassNode hook reached: " + requestedClassName);
         }
         try {
             ClassLoader loader = originalNode.getClass().getClassLoader();
@@ -1681,7 +1681,7 @@ public final class MixinResourceRemapper {
             byte[] originalBytes = (byte[]) writerClass.getMethod("toByteArray").invoke(writer);
             byte[] transformedBytes = transformClassBytes(requestedClassName, originalBytes);
             if (requestedClassName.contains("MinecraftServerMixin")) {
-                System.out.println("[Gafi Loader] DEBUG ClassNode bytes changed="
+                DebugLog.debug("[Gafi Loader] DEBUG ClassNode bytes changed="
                         + (transformedBytes != originalBytes) + " length=" + originalBytes.length);
             }
             if (transformedBytes == originalBytes) {
@@ -1715,7 +1715,7 @@ public final class MixinResourceRemapper {
         MixinClassMetadata metadata = readMixinMetadata(original);
         String debugClassName = new ClassReader(original).getClassName();
         if (debugClassName.contains("MinecraftServerMixin")) {
-            System.out.println("[Gafi Loader] DEBUG shadow metadata class=" + debugClassName
+            DebugLog.debug("[Gafi Loader] DEBUG shadow metadata class=" + debugClassName
                     + " targets=" + (metadata == null ? "<none>" : metadata.targets())
                     + " members=" + (metadata == null ? "<none>" : metadata.shadowMembers()));
         }
@@ -1764,7 +1764,7 @@ public final class MixinResourceRemapper {
                     }
                 }
                 if (debugClassName.contains("MinecraftServerMixin")) {
-                    System.out.println("[Gafi Loader] DEBUG shadow resolve target=" + mappedOwner
+                    DebugLog.debug("[Gafi Loader] DEBUG shadow resolve target=" + mappedOwner
                             + " original=" + lookupName + shadow.descriptor()
                             + " mapped=" + mapped.name() + mappedDescriptor
                             + " resolved=" + resolvedMemberName + resolvedDescriptor
