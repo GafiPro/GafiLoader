@@ -4,7 +4,7 @@
 
 Gafi Loader is an experimental compatibility project targeting **Minecraft Java Edition 26.2** as the game that launches, with the goal of making mods built for **Minecraft 1.21.11** work alongside 26.2 mods without modifying the original mod JARs.
 
-> **Current status: compatibility-analysis milestone.** The repository was empty at project start. This first implementation is a command-line scanner that compares Minecraft API references in legacy mod JARs with the 26.2 game JAR. It is a development tool, **not yet a loader capable of loading 1.21.11 mods**. That distinction is intentional: compatibility rules should be based on measured differences and repeatable tests, not guesses.
+> **Current status: experimental runtime-compatibility prototype.** The codebase now contains a Java agent that remaps selected 1.21.11 Intermediary references in memory, applies target-checked compatibility bridges, and hooks the Fabric/Mixin resource path. The original mod JARs are not rewritten. This still is **not a finished or universal compatibility loader**: an earlier CI attempt stopped during resource loading, so a strict real-client smoke test now requires the legacy mod, the sound engine and texture-atlas creation before it can pass. Reaching the title screen, entering a world and confirming a mod's feature remain separate checks; a clean build or static scan alone does not prove those behaviours.
 
 ## Goals
 
@@ -17,15 +17,15 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 
 ## Windows build artifact
 
-Every push to `main` runs tests on Windows and Linux. The Windows job is configured to publish two GitHub Actions artifacts: `GafiLoader-Installer-Windows-x64` (an installer EXE with a bundled Java runtime) and `GafiLoader-Windows-x64` (the portable application image).
+The **Package Windows installer** workflow produces `GafiLoader-Setup-0.1.1.exe` as the `GafiLoader-Windows-Installer` artifact. It packages the self-contained GafiLoader agent and setup script; Minecraft itself runs using the Java runtime selected by the official launcher, so a development JDK is not required just to play.
 
-To retrieve them, open the repository's **Actions** tab, open the latest successful **Build and test** run, and download the artifact from its Artifacts section. The installer uses a stable upgrade identifier and an increasing build version so future installers produced by this workflow can upgrade installations produced by the same workflow.
+To retrieve the installer, open the repository's **Actions** tab, choose a successful **Package Windows installer** run, and download `GafiLoader-Windows-Installer`. The installer uses a stable Windows upgrade identifier and registers a dedicated `gafiloader-26.2` launcher profile. When the installer asks for a game directory, use the directory you intend to use for this profile; if you choose a custom directory, set the profile's **Game Directory** to the same path in the launcher.
 
-This packaging step is for the current diagnostic utility; it is **not a finished Minecraft compatibility loader**. Do not use the EXE as evidence that Fabric API 1.21.11 is now supported by Minecraft 26.2.
+The installer and runtime integration are experimental. A successful installer build proves packaging, not compatibility of every Fabric API or mod. The separate **Runtime compatibility verification** workflow runs unit/integration tests and attempts a real Minecraft 26.2 startup with pinned 1.21.11 fixtures. Even a passing startup milestone does not prove title-screen/gameplay compatibility for arbitrary mods.
 
 ## Bypass the Fabric metadata version gate (diagnostic step)
 
-Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, merges entries into an existing override file rather than replacing unrelated overrides, saves an existing config as `fabric_loader_dependencies.json.bak`, and writes the replacement atomically.
+Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, merges entries into an existing override file rather than replacing unrelated overrides, saves an existing config as `fabric_loader_dependencies.json.bak`, and writes the replacement atomically. The runtime agent also attempts this preparation automatically, before Fabric starts discovering mods, using the `gameDir` setting in its agent properties (or the inferred launcher directory). If it finds no legacy mods, it leaves the existing dependency config untouched. This relaxes version gates only; it does not implement missing runtime APIs.
 
 ~~~powershell
 .\gradlew.bat run --args="--prepare-legacy-overrides --mods C:/Users/you/AppData/Roaming/.minecraft/mods --config C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json"
