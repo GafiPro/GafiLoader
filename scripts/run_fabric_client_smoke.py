@@ -540,6 +540,9 @@ def main() -> int:
     env = os.environ.copy()
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
     env["MESA_GL_VERSION_OVERRIDE"] = "4.6"
+    # CI has no physical audio device; use OpenAL Soft null output so
+    # the client can complete sound-engine startup deterministically.
+    env["ALSOFT_DRIVERS"] = "null"
     mod_id = read_mod_id(mods_dir / mod_jar.name).lower()
 
     print(f"Starting actual Fabric client with mod id '{mod_id}' (timeout {LAUNCH_TIMEOUT_SECONDS}s)...", flush=True)
