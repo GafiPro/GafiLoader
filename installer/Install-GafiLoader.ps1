@@ -30,12 +30,23 @@ try {
         throw "Put the self-contained gafi-loader JAR beside this installer script."
     }
 
-    Write-Step "Locating the Minecraft Launcher game directory"
-    $gameDir = Join-Path $env:APPDATA ".minecraft"
-    if (-not (Test-Path $gameDir)) {
-        throw "Minecraft Java Edition folder not found at $gameDir. Install/open the official launcher first."
+    Write-Step "Locating the Minecraft Launcher installation"
+    $launcherRoot = Join-Path $env:APPDATA ".minecraft"
+    if (-not (Test-Path $launcherRoot)) {
+        throw "Minecraft Java Edition folder not found at $launcherRoot. Install/open the official launcher first."
     }
-    $versionsDir = Join-Path $gameDir "versions"
+
+    $defaultGameDir = $launcherRoot
+    $gameDirInput = Read-Host "Game directory for GafiLoader [$defaultGameDir] (press Enter to use the default)"
+    if ([string]::IsNullOrWhiteSpace($gameDirInput)) {
+        $gameDir = $defaultGameDir
+    } else {
+        $gameDir = [IO.Path]::GetFullPath($gameDirInput.Trim())
+        New-Item -ItemType Directory -Force -Path $gameDir | Out-Null
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $gameDir "mods") | Out-Null
+
+    $versionsDir = Join-Path $launcherRoot "versions"
     $baseVersionDir = Join-Path $versionsDir $MinecraftVersion
     $baseJsonPath = Join-Path $baseVersionDir "$MinecraftVersion.json"
     $baseJarPath = Join-Path $baseVersionDir "$MinecraftVersion.jar"
@@ -66,7 +77,7 @@ try {
     if ($null -eq $profile.arguments.PSObject.Properties['jvm']) { $profile.arguments | Add-Member -MemberType NoteProperty -Name jvm -Value @() }
     if ($null -eq $profile.arguments.PSObject.Properties['game']) { $profile.arguments | Add-Member -MemberType NoteProperty -Name game -Value @() }
 
-    $gafiDir = Join-Path $gameDir "gafiloader"
+    $gafiDir = Join-Path $launcherRoot "gafiloader"
     New-Item -ItemType Directory -Force -Path $gafiDir | Out-Null
     $agentJarPath = Join-Path $gafiDir $AgentJarName
     Copy-Item -Force $sourceJar.FullName $agentJarPath
@@ -89,34 +100,10 @@ try {
         "targetGameJar=$($baseJarPath.Replace('\','/'))"
         "intermediaryMappings=$($intermediaryJar.Replace('\','/'))"
         "legacyMappings=$($legacyMappings.Replace('\','/'))"
+        "gameDir=$([IO.Path]::GetFullPath($gameDir).Replace('\','/'))"
     ) | Set-Content -Encoding ASCII $configPath
 
-    # Fabric Loader rejects legacy mods before the runtime bridge can remap their APIs.
-    # Keep the original mod JAR untouched and remove only Fabric API's Minecraft version gate.
-    # This is a dependency-resolution override, not a claim that all Fabric API behavior is compatible.
-    $loaderConfigDir = Join-Path $gameDir "config"
-    New-Item -ItemType Directory -Force -Path $loaderConfigDir | Out-Null
-    $dependencyConfigPath = Join-Path $loaderConfigDir "fabric_loader_dependencies.json"
-    if (Test-Path $dependencyConfigPath) {
-        $dependencyConfig = Get-Content -LiteralPath $dependencyConfigPath -Raw | ConvertFrom-Json
-        if ($null -eq $dependencyConfig.overrides) {
-            $dependencyConfig | Add-Member -MemberType NoteProperty -Name overrides -Value ([pscustomobject]@{})
-        }
-    } else {
-        $dependencyConfig = [pscustomobject]@{ version = 1; overrides = [pscustomobject]@{} }
-    }
-    if ($null -eq $dependencyConfig.overrides.'fabric-api') {
-        $dependencyConfig.overrides | Add-Member -MemberType NoteProperty -Name 'fabric-api' -Value ([pscustomobject]@{})
-    }
-    $fabricApiOverride = $dependencyConfig.overrides.'fabric-api'
-    if ($null -eq $fabricApiOverride.'-depends') {
-        $fabricApiOverride | Add-Member -MemberType NoteProperty -Name '-depends' -Value ([pscustomobject]@{})
-    }
-    $fabricApiOverride.'-depends' | Add-Member -MemberType NoteProperty -Name minecraft -Value "" -Force
-    $dependencyConfig.version = 1
-    [IO.File]::WriteAllText($dependencyConfigPath,
-        ($dependencyConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine,
-        [Text.UTF8Encoding]::new($false))
+    Write-Step "Legacy dependency overrides will be prepared automatically before Fabric discovers mods"
 
     # Keep the -javaagent option as one JVM argument so paths containing spaces remain valid.
     $agentArgument = "-javaagent:$($agentJarPath.Replace('\','/'))=$($configPath.Replace('\','/'))"
@@ -138,6 +125,7 @@ try {
     Write-Host ""
     Write-Host "Open Minecraft Launcher -> Installations and select '$ProfileId'."
     Write-Host "Mods go in: $gameDir\mods"
+    if ($gameDir -ne $launcherRoot) { Write-Host "IMPORTANT: edit the GafiLoader installation in Minecraft Launcher and set Game Directory to: $gameDir" -ForegroundColor Yellow }
     Write-Host "Original mod JARs are not modified." -ForegroundColor Green
     Write-Host ""
     Write-Host "Note: this installs the runtime bridge and profile; not every 1.21.11 mod is compatible yet."
