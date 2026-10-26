@@ -23,6 +23,7 @@ import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -46,6 +47,26 @@ class RealModArtifactIntegrationTest {
     @AfterEach
     void clearGlobalMixinConfiguration() {
         MixinResourceRemapper.configure(null, CompatibilityScanner.AliasSet.empty());
+    }
+
+    @Test
+    void verifiesOfficial262MovedThePlayerEntityTypeConstantToEntityTypes() throws IOException {
+        String targetValue = System.getProperty(TARGET_GAME_PROPERTY);
+        assumeTrue(targetValue != null && !targetValue.isBlank(),
+                "Official Minecraft 26.2 target fixture is only configured by the real-artifact CI step.");
+
+        TargetApiIndex target = TargetApiIndex.load(Path.of(targetValue));
+        String entityType = "net/minecraft/world/entity/EntityType";
+        String entityTypes = "net/minecraft/world/entity/EntityTypes";
+        String playerDescriptor = "L" + entityType + ";";
+
+        assertNull(target.fieldAccess(entityType, "PLAYER", playerDescriptor),
+                "The legacy EntityType.PLAYER field must be absent for this relocation to be needed.");
+        Integer relocatedAccess = target.fieldAccess(entityTypes, "PLAYER", playerDescriptor);
+        assertNotNull(relocatedAccess,
+                "The official 26.2 JAR must expose EntityTypes.PLAYER with the original EntityType descriptor.");
+        assertTrue((relocatedAccess & org.objectweb.asm.Opcodes.ACC_STATIC) != 0,
+                "EntityTypes.PLAYER must be a static singleton field.");
     }
 
     @Test
