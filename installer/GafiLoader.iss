@@ -1,7 +1,7 @@
 #define AppName "GafiLoader"
-#define AppVersion "0.1.1"
+#define AppVersion "0.1.2"
 #define AppPublisher "GafiPro"
-#define AgentJarName "gafi-loader-0.1.0-SNAPSHOT.jar"
+#define AgentJarName "gafi-loader-0.1.2.jar"
 
 [Setup]
 AppId={{B0B6A12A-0C78-4F2E-9AF2-8C01B7F3C026}
