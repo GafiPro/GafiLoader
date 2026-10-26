@@ -87,6 +87,14 @@ public final class Main {
                 }
 
                 writeJsonReport(options.apiReportPath(), report, "API comparison");
+                if (options.aliasCandidatesPath() != null) {
+                    MethodAliasCandidateWriter.ExportReport candidates =
+                            new MethodAliasCandidateWriter().write(report, options.aliasCandidatesPath());
+                    System.out.printf("Method alias candidates (review only): %d total, %d unique-name, %d ambiguous%n",
+                            candidates.candidates(), candidates.uniqueCandidates(),
+                            candidates.ambiguousCandidates());
+                    System.out.println("Candidate TSV: " + candidates.outputFile());
+                }
                 System.out.println("Candidate names require review; this report does not apply patches.");
             }
         } catch (IllegalArgumentException exception) {
@@ -385,6 +393,7 @@ public final class Main {
         Path legacyGameJar = null;
         Path legacyMappingsPath = null;
         Path apiReportPath = null;
+        Path aliasCandidatesPath = null;
         boolean help = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -440,12 +449,18 @@ public final class Main {
                     }
                     apiReportPath = Path.of(args[i]);
                 }
+                case "--alias-candidates" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--alias-candidates requires an output path.");
+                    }
+                    aliasCandidatesPath = Path.of(args[i]);
+                }
                 default -> throw new IllegalArgumentException("Unknown argument: " + argument);
             }
         }
 
         if (help) {
-            return new Options(null, null, null, null, null, null, null, null, true);
+            return new Options(null, null, null, null, null, null, null, null, null, true);
         }
         if (gameJar == null) {
             throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
@@ -469,8 +484,8 @@ public final class Main {
         if (modsPath == null && (reportPath != null || aliasesPath != null)) {
             throw new IllegalArgumentException("--report and --aliases require --mods.");
         }
-        if (legacyGameJar == null && apiReportPath != null) {
-            throw new IllegalArgumentException("--api-report requires --legacy-game.");
+        if (legacyGameJar == null && (apiReportPath != null || aliasCandidatesPath != null)) {
+            throw new IllegalArgumentException("--api-report and --alias-candidates require --legacy-game.");
         }
         if (!Files.isRegularFile(gameJar)) {
             throw new IllegalArgumentException("Minecraft 26.2 game JAR does not exist: " + gameJar);
@@ -484,7 +499,7 @@ public final class Main {
             requireJar(legacyGameJar, "Legacy game");
         }
         return new Options(gameJar, modsPath, reportPath, aliasesPath, intermediaryMappingsPath,
-                legacyGameJar, legacyMappingsPath, apiReportPath, false);
+                legacyGameJar, legacyMappingsPath, apiReportPath, aliasCandidatesPath, false);
     }
 
     private static void checkFile(Path path, String description) {
@@ -501,7 +516,7 @@ public final class Main {
                   gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>
                   gafi-loader --remap-legacy-mods --mods <original-mods> --intermediary-mappings <1.21.11-mappings.jar> --legacy-mappings <official-mappings.txt> --game <26.2.jar> --output <separate-dir> [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
-                  gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
+                  gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json] [--alias-candidates candidates.tsv]
                   gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
                   Add --mods and --legacy-game to run both analyses.
 
@@ -518,6 +533,7 @@ public final class Main {
                   --legacy-game <path>      Obfuscated Minecraft 1.21.11 client JAR
                   --legacy-mappings <path>  Official Mojang mappings for Minecraft 1.21.11
                   --api-report <path>       Save the API comparison as JSON
+                  --alias-candidates <path> Export review-only method alias candidates as TSV
                   --help, -h                Show this help
 
                 The API comparison normalizes the 1.21.11 game JAR using Mojang's ProGuard mappings.
@@ -529,5 +545,6 @@ public final class Main {
 
     private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath,
                            Path intermediaryMappingsPath, Path legacyGameJar,
-                           Path legacyMappingsPath, Path apiReportPath, boolean help) {}
+                           Path legacyMappingsPath, Path apiReportPath,
+                           Path aliasCandidatesPath, boolean help) {}
 }
