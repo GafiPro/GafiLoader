@@ -205,7 +205,7 @@ public final class LegacyDependencyOverrideGenerator {
     /**
      * Evaluate the numeric forms of Fabric's extended-SemVer predicates needed for
      * dependency-gate detection: exact versions, comparison conjunctions, tilde/caret,
-     * and .x/.*/.X wildcards. Unknown forms fail closed rather than trigger an override.
+     * and .x, dot-star, or .X wildcards. Unknown forms fail closed rather than trigger an override.
      */
     private static boolean matchesFabricVersionPredicate(String predicate, String candidate) {
         if (predicate == null || predicate.isBlank()) return false;
