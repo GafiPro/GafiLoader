@@ -37,6 +37,14 @@ def sha1_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def fetch_file(url: str, destination: Path, expected_sha1: str | None = None) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_file():
@@ -355,6 +363,10 @@ def main() -> int:
     config_dir.mkdir(parents=True, exist_ok=True)
     # Keep every upstream artifact byte-for-byte intact. Fabric API is required by the
     # pinned production mod; without it, Fabric rejects the fixture before testing the agent.
+    source_hashes = {
+        source_jar.name: sha256_file(source_jar)
+        for source_jar in (mod_jar, fabric_api_jar)
+    }
     for source_jar in (mod_jar, fabric_api_jar):
         destination = mods_dir / source_jar.name
         if not destination.exists() or sha1_file(destination) != sha1_file(source_jar):
@@ -508,6 +520,18 @@ def main() -> int:
             console.write("\n\n" + runtime_diagnostics)
         console_text += "\n\n" + runtime_diagnostics
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+
+    # Assert that neither the source fixtures nor the active mod copies were rewritten.
+    # The compatibility agent must perform its work in memory.
+    for source_jar in (mod_jar, fabric_api_jar):
+        expected_hash = source_hashes[source_jar.name]
+        if sha256_file(source_jar) != expected_hash:
+            raise RuntimeError(f"Original mod artifact was modified: {source_jar}")
+        active_copy = mods_dir / source_jar.name
+        if sha256_file(active_copy) != expected_hash:
+            raise RuntimeError(f"Active mod JAR changed during client launch: {active_copy}")
+        print(f"JAR_INTEGRITY_OK {source_jar.name} SHA-256 {expected_hash}", flush=True)
+
     if not override_path.is_file():
         raise RuntimeError(
             "The Gafi Loader agent did not create config/fabric_loader_dependencies.json "
