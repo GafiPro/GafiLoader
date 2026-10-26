@@ -63,10 +63,30 @@ jobs:
           tail -n 25 build/real-artifact-test/api-comparison.log
           cp "$GAFI_REAL_FIXTURE_METADATA" build/real-artifact-test/fixture-metadata.json
 
-      - name: Install virtual display, software OpenGL and narrator dependency
+      - name: Ensure virtual display, software OpenGL and narrator dependencies are available
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes xvfb libgl1-mesa-dri libglx-mesa0 libflite1
+          missing=0
+          command -v xvfb-run >/dev/null 2>&1 || missing=1
+          for package in xvfb libgl1-mesa-dri libglx-mesa0 libflite1; do
+            status="$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)"
+            if [ "$status" != "installed" ]; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            sudo timeout 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=20 \
+              -o Acquire::https::Timeout=20 \
+              update
+            sudo timeout 180s apt-get \
+              -o DPkg::Lock::Timeout=120 \
+              install --yes --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libflite1
+          else
+            echo "All required headless graphics/audio packages are already installed."
+          fi
+          command -v xvfb-run
+          ldconfig -p | grep -E 'libGLX_mesa|libopenal|libFLAC' | head -n 20 || true
 
       - name: Launch official Fabric client with the legacy mod and Gafi Loader
         run: |
