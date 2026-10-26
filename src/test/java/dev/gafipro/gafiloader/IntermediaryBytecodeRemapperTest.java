@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -202,6 +203,52 @@ class IntermediaryBytecodeRemapperTest {
     }
 
     @Test
+    void relocatesEntityTypeSingletonToVerifiedEntityTypesFieldIn26Dot2() throws Exception {
+        Path mojang = temporaryDirectory.resolve("entity-type-client-mappings.txt");
+        Path intermediary = temporaryDirectory.resolve("entity-type-intermediary.tiny");
+        Path targetJar = temporaryDirectory.resolve("minecraft-26.2-entity-types.jar");
+
+        Files.writeString(mojang, String.join("\n",
+                "net.minecraft.world.entity.EntityType -> abx:",
+                "    net.minecraft.world.entity.EntityType PLAYER -> c",
+                ""));
+        Files.writeString(intermediary, String.join("\n",
+                "tiny\t2\t0\tofficial\tintermediary",
+                "c\tabx\tnet/minecraft/class_1299",
+                "\tf\tLabx;\tc\tfield_12345",
+                ""));
+
+        writeJar(targetJar,
+                "net/minecraft/world/entity/EntityType",
+                emptyClass("net/minecraft/world/entity/EntityType"),
+                "net/minecraft/world/entity/EntityTypes",
+                entityTypesWithPlayerConstant());
+
+        IntermediaryMappings mappings = IntermediaryMappings.load(
+                intermediary, MojangMappings.load(mojang));
+        TargetApiIndex targetApi = TargetApiIndex.load(targetJar);
+        byte[] original = entityTypeReferenceClass();
+        byte[] originalSnapshot = original.clone();
+
+        byte[] transformed = IntermediaryBytecodeRemapper.remap(
+                original, mappings, CompatibilityScanner.AliasSet.empty(), targetApi);
+
+        assertNotNull(transformed, "The removed field reference should be relocated in memory");
+        assertArrayEquals(originalSnapshot, original,
+                "The transformer must never modify the original class bytes");
+        assertEquals(List.of(
+                "FIELD net/minecraft/world/entity/EntityTypes#PLAYER:"
+                        + "Lnet/minecraft/world/entity/EntityType;"
+        ), inspect(transformed).references());
+        assertNull(targetApi.fieldAccess(
+                "net/minecraft/world/entity/EntityType", "PLAYER",
+                "Lnet/minecraft/world/entity/EntityType;"));
+        assertNotNull(targetApi.fieldAccess(
+                "net/minecraft/world/entity/EntityTypes", "PLAYER",
+                "Lnet/minecraft/world/entity/EntityType;"));
+    }
+
+    @Test
     void returnsNullWhenClassContainsNoKnownIntermediarySymbols() throws Exception {
         Path mojang = temporaryDirectory.resolve("client-mappings.txt");
         Path intermediary = temporaryDirectory.resolve("intermediary.tiny");
@@ -277,6 +324,33 @@ class IntermediaryBytecodeRemapperTest {
                 jar.closeEntry();
             }
         }
+    }
+
+    private static byte[] entityTypeReferenceClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "test/EntityTypeFieldReference",
+                null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "run", "()V", null, null);
+        method.visitCode();
+        method.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraft/class_1299",
+                "field_12345", "Lnet/minecraft/class_1299;");
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] entityTypesWithPlayerConstant() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC,
+                "net/minecraft/world/entity/EntityTypes", null, "java/lang/Object", null);
+        writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "PLAYER", "Lnet/minecraft/world/entity/EntityType;", null, null).visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] unrelatedClass() {
