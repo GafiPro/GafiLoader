@@ -49,7 +49,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed with exit code $LASTEXITCODE"
           }
-          if (-not (Test-Path '.\dist\GafiLoader-Setup-0.1.1.exe')) {
+          if (-not (Test-Path '.\dist\GafiLoader-Setup-0.1.2.exe')) {
             throw 'Expected setup executable was not produced.'
           }
 
@@ -57,6 +57,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GafiLoader-Windows-Installer
-          path: dist/GafiLoader-Setup-0.1.1.exe
+          path: dist/GafiLoader-Setup-0.1.2.exe
           if-no-files-found: error
           retention-days: 14
