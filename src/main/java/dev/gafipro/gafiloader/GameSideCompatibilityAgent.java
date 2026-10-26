@@ -31,6 +31,7 @@ public final class GameSideCompatibilityAgent {
         }
 
         Path argumentPath = Path.of(agentArguments).toAbsolutePath().normalize();
+        prepareLegacyDependencyOverrides(argumentPath);
         AgentSetup setup = loadSetup(argumentPath);
         GameJarPatcher.RuntimeRules rules = setup.rules();
         IntermediaryMappings intermediaryMappings = setup.intermediaryMappings();
@@ -345,6 +346,70 @@ public final class GameSideCompatibilityAgent {
                 || className.startsWith("com/google/gson/")
                 || className.startsWith("org/junit/")
                 || className.startsWith("org/slf4j/");
+    }
+
+    /**
+     * Resolve legacy Fabric dependency-version gates before Fabric Loader starts mod discovery.
+     * The generator only modifies config/fabric_loader_dependencies.json; original mod JARs
+     * are read-only. The launcher profile can specify gameDir for custom instances.
+     */
+    static void prepareLegacyDependencyOverrides(Path argumentPath) throws IOException {
+        if (argumentPath == null || !Files.isRegularFile(argumentPath)
+                || argumentPath.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".tsv")) {
+            return;
+        }
+
+        Properties properties = new Properties();
+        try (Reader reader = Files.newBufferedReader(argumentPath, StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        }
+
+        Path gameDir = null;
+        String configuredGameDir = properties.getProperty("gameDir");
+        if (configuredGameDir != null && !configuredGameDir.isBlank()) {
+            Path configured = Path.of(configuredGameDir.trim());
+            Path base = argumentPath.getParent();
+            gameDir = (configured.isAbsolute() || base == null ? configured : base.resolve(configured))
+                    .toAbsolutePath().normalize();
+        } else {
+            Path parent = argumentPath.getParent();
+            if (parent != null && parent.getParent() != null && parent.getFileName() != null
+                    && parent.getFileName().toString().equalsIgnoreCase("gafiloader")) {
+                gameDir = parent.getParent().toAbsolutePath().normalize();
+            } else if (parent != null && Files.isDirectory(parent.resolve("mods"))) {
+                gameDir = parent.toAbsolutePath().normalize();
+            }
+            if (gameDir == null) {
+                gameDir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+            }
+        }
+
+        Path modsDir = gameDir.resolve("mods");
+        if (!Files.isDirectory(modsDir)) {
+            return;
+        }
+
+        boolean hasJar;
+        try (var paths = Files.walk(modsDir)) {
+            hasJar = paths.anyMatch(path -> Files.isRegularFile(path)
+                    && path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar"));
+        }
+        if (!hasJar) {
+            return;
+        }
+
+        Path dependencyConfig = gameDir.resolve("config").resolve("fabric_loader_dependencies.json");
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(modsDir, dependencyConfig);
+        if (result.modIdsOverridden() > 0) {
+            System.out.println("[Gafi Loader] Prepared Fabric dependency overrides for "
+                    + result.modIdsOverridden() + " legacy mod(s).");
+            result.overriddenModIds().forEach(id ->
+                    System.out.println("[Gafi Loader]   dependency override: " + id));
+        }
+        for (String warning : result.warnings()) {
+            System.err.println("[Gafi Loader] Dependency override warning: " + warning);
+        }
     }
 
     private static AgentSetup loadSetup(Path argumentPath) throws IOException {
