@@ -206,6 +206,7 @@ final class IntermediaryBytecodeRemapper {
             TargetApiIndex targetApi, AtomicBoolean changed) {
         CompatibilityScanner.Reference normalized = aliases.normalize(mappings.normalize(
                 new CompatibilityScanner.Reference(kind, owner, name, descriptor)));
+        normalized = relocateMovedEntityTypeConstant(normalized, targetApi);
         CompatibilityScanner.Reference mapped = new CompatibilityScanner.Reference(
                 kind,
                 LegacyClassAliases.mapClass(normalized.owner(), targetApi),
@@ -216,6 +217,42 @@ final class IntermediaryBytecodeRemapper {
             changed.set(true);
         }
         return mapped;
+    }
+
+    /**
+     * Minecraft 26.2 moved vanilla entity-type singleton fields from EntityType to EntityTypes.
+     * Relocate only a static field whose exact name and EntityType descriptor are actually present
+     * on the configured target class. This avoids inventing a duplicate field or guessing a mapping.
+     */
+    private static CompatibilityScanner.Reference relocateMovedEntityTypeConstant(
+            CompatibilityScanner.Reference reference, TargetApiIndex targetApi) {
+        if (targetApi == null
+                || reference.kind() != CompatibilityScanner.SymbolKind.FIELD) {
+            return reference;
+        }
+
+        String legacyOwner = "net/minecraft/world/entity/EntityType";
+        String targetOwner = "net/minecraft/world/entity/EntityTypes";
+        String entityTypeDescriptor = "L" + legacyOwner + ";";
+        if (!legacyOwner.equals(reference.owner())
+                || !entityTypeDescriptor.equals(reference.descriptor())) {
+            return reference;
+        }
+
+        // Keep the reference unchanged if the old declaration still exists in this target build.
+        if (targetApi.fieldAccess(legacyOwner, reference.name(), entityTypeDescriptor) != null) {
+            return reference;
+        }
+
+        Integer destinationAccess = targetApi.fieldAccess(
+                targetOwner, reference.name(), entityTypeDescriptor);
+        if (destinationAccess == null || (destinationAccess & Opcodes.ACC_STATIC) == 0) {
+            return reference;
+        }
+
+        return new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, targetOwner,
+                reference.name(), entityTypeDescriptor);
     }
 
     private static String mapDescriptor(String descriptor, IntermediaryMappings mappings,
@@ -400,7 +437,8 @@ final class IntermediaryBytecodeRemapper {
                                                TargetApiIndex targetApi) {
         CompatibilityScanner.Reference normalized = mappings.normalize(new CompatibilityScanner.Reference(
                 CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor));
-        CompatibilityScanner.Reference mapped = aliases.normalize(normalized);
+        CompatibilityScanner.Reference mapped = relocateMovedEntityTypeConstant(
+                aliases.normalize(normalized), targetApi);
         if (mapped.equals(normalized)) {
             return;
         }
