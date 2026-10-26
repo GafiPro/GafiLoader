@@ -382,8 +382,8 @@ def main() -> int:
 
     override_path = config_dir / "fabric_loader_dependencies.json"
     generation = subprocess.run(
-        ["java", "-jar", str(gafi_jar), "--mods", str(mods_dir),
-         "--generate-dependency-overrides", str(override_path)],
+        ["java", "-jar", str(gafi_jar), "--prepare-legacy-overrides",
+         "--mods", str(mods_dir), "--config", str(override_path)],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
