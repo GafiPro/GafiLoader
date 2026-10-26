@@ -16,6 +16,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LegacyDependencyOverrideGeneratorTest {
@@ -130,11 +131,24 @@ class LegacyDependencyOverrideGeneratorTest {
                 """.getBytes(StandardCharsets.UTF_8));
 
         Path config = temporaryDirectory.resolve("modern-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        String originalConfig = """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "keep-existing": {
+                      "-depends": { "java": "" }
+                    }
+                  }
+                }
+                """;
+        Files.writeString(config, originalConfig);
+
         LegacyDependencyOverrideGenerator.Result result =
                 new LegacyDependencyOverrideGenerator().generate(mods, config);
 
-        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
-        assertTrue(root.getAsJsonObject("overrides").isEmpty());
+        assertEquals(originalConfig, Files.readString(config));
+        assertFalse(Files.exists(config.resolveSibling("fabric_loader_dependencies.json.bak")));
         assertEquals(0, result.modIdsOverridden());
     }
 
