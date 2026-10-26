@@ -2,9 +2,9 @@ name: Package Windows installer
 
 on:
   push:
-    branches: [main, game-side-compatibility]
+    branches: [main, integration/runtime-compatibility]
   pull_request:
-    branches: [main, game-side-compatibility]
+    branches: [main, integration/runtime-compatibility]
   workflow_dispatch:
 
 permissions:
