@@ -25,7 +25,7 @@ from pathlib import Path
 from fetch_real_integration_fixtures import MANIFEST_URL, USER_AGENT, game_version, get_json
 
 LOADER_VERSION = "0.20.1"
-LAUNCH_TIMEOUT_SECONDS = 150
+LAUNCH_TIMEOUT_SECONDS = 300
 POLL_SECONDS = 1
 
 
@@ -303,6 +303,21 @@ def capture_runtime_diagnostics() -> str:
     return "\n\n".join(sections) + "\n"
 
 
+def has_legacy_mod_startup_milestone(log_text: str, mod_id: str) -> bool:
+    """Require the legacy mod plus completed sound and texture-atlas startup.
+
+    Seeing only "Reloading ResourceManager" is too early: it is emitted when
+    resource reload begins, not when the client has finished initial loading.
+    """
+    combined = log_text.lower()
+    return (
+        mod_id.lower() in combined
+        and "sound engine started" in combined
+        and "created:" in combined
+        and "atlas" in combined
+    )
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("usage: run_fabric_client_smoke.py <fixture-dir> <gafi-loader-fat-jar> <fabric-loader-jar>", file=sys.stderr)
@@ -466,16 +481,12 @@ def main() -> int:
                 break
             log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
             combined = log_text.lower()
-            if mod_id in combined and (
-                "sound engine started" in combined
-                or "started minecraft" in combined
-                or "reloading resourcemanager" in combined
-            ):
+            if has_legacy_mod_startup_milestone(log_text, mod_id):
                 if not any(marker in combined for marker in (
                     "mixinapplyerror", "mixin apply failed", "could not execute entrypoint",
                     "crash report", "fatal error",
                 )):
-                    success_reason = "legacy mod present in the client log after resource loading began"
+                    success_reason = "legacy mod present after sound and texture-atlas startup completed"
                     break
             elapsed = int(time.monotonic() - started)
             if elapsed // 15 > last_status // 15:
@@ -487,9 +498,12 @@ def main() -> int:
             time.sleep(POLL_SECONDS)
 
         if process.poll() is None:
-            print("Client startup deadline reached; collecting JVM diagnostics before stopping it...", flush=True)
-            console.flush()
-            runtime_diagnostics = capture_runtime_diagnostics()
+            if success_reason:
+                print("Required startup milestones reached; stopping the still-running client...", flush=True)
+            else:
+                print("Client startup deadline reached without the required milestones; collecting JVM diagnostics...", flush=True)
+                console.flush()
+                runtime_diagnostics = capture_runtime_diagnostics()
             process.terminate()
             try:
                 process.wait(timeout=10)
@@ -509,7 +523,7 @@ def main() -> int:
         print("===== Client console =====", flush=True)
         print(console_text[-15000:], flush=True)
         raise RuntimeError(
-            f"Fabric client did not reach the legacy-mod/resource-load milestone. "
+            f"Fabric client did not reach the legacy-mod + sound-engine + texture-atlas startup milestone. "
             f"Process exit code: {process.returncode}; logs: {log_path}, {console_path}"
         )
 
