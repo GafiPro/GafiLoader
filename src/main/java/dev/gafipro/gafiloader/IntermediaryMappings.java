@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -30,10 +32,94 @@ final class IntermediaryMappings {
     private final Map<String, String> intermediaryToNamedClasses;
     private final Map<MemberKey, MappedMember> intermediaryToNamedMembers;
 
+    // The inherited-member fallback is used for bytecode which names a subclass as the owner
+    // even though Intermediary records the method only on its declaring superclass. Keep a
+    // precomputed index instead of scanning every mapped member for every bytecode reference.
+    private final Map<MemberLookupKey, MappedMember> unambiguousMembersByNameAndDescriptor;
+    private final Set<MemberLookupKey> ambiguousMembersByNameAndDescriptor;
+    private final Map<MemberOwnerNameKey, String> memberNamesByOwnerAndName;
+    private final Set<MemberOwnerNameKey> ambiguousMemberNamesByOwnerAndName;
+    // Mixin selectors can arrive with Mojang-named owners but Intermediary member names.
+    // Keep a second index keyed by the mapped owner to handle this mixed namespace safely.
+    private final Map<MemberOwnerNameKey, String> memberNamesByNamedOwnerAndName;
+    private final Set<MemberOwnerNameKey> ambiguousMemberNamesByNamedOwnerAndName;
+    private final Set<String> namedClassNames;
+    private final Map<MemberNameKey, String> memberNamesByName;
+    private final Set<MemberNameKey> ambiguousMemberNamesByName;
+
     private IntermediaryMappings(Map<String, String> intermediaryToNamedClasses,
                                  Map<MemberKey, MappedMember> intermediaryToNamedMembers) {
         this.intermediaryToNamedClasses = Map.copyOf(intermediaryToNamedClasses);
         this.intermediaryToNamedMembers = Map.copyOf(intermediaryToNamedMembers);
+        this.namedClassNames = Set.copyOf(intermediaryToNamedClasses.values());
+
+        Map<MemberLookupKey, MappedMember> unambiguous = new HashMap<>();
+        Set<MemberLookupKey> ambiguous = new HashSet<>();
+        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+            MemberKey source = entry.getKey();
+            MemberLookupKey lookupKey = new MemberLookupKey(
+                    source.kind(), source.name(), source.descriptor());
+            if (ambiguous.contains(lookupKey)) {
+                continue;
+            }
+
+            MappedMember candidate = entry.getValue();
+            MappedMember previous = unambiguous.putIfAbsent(lookupKey, candidate);
+            // Owners may differ for inherited/overridden methods; only a disagreement on the
+            // resulting member name or descriptor makes the owner-less fallback unsafe.
+            if (previous != null && (!previous.name().equals(candidate.name())
+                    || !previous.descriptor().equals(candidate.descriptor()))) {
+                unambiguous.remove(lookupKey);
+                ambiguous.add(lookupKey);
+            }
+        }
+        this.unambiguousMembersByNameAndDescriptor = Map.copyOf(unambiguous);
+        this.ambiguousMembersByNameAndDescriptor = Set.copyOf(ambiguous);
+
+        Map<MemberOwnerNameKey, String> byOwnerAndName = new HashMap<>();
+        Set<MemberOwnerNameKey> ambiguousByOwnerAndName = new HashSet<>();
+        Map<MemberOwnerNameKey, String> byNamedOwnerAndName = new HashMap<>();
+        Set<MemberOwnerNameKey> ambiguousByNamedOwnerAndName = new HashSet<>();
+        Map<MemberNameKey, String> byName = new HashMap<>();
+        Set<MemberNameKey> ambiguousByName = new HashSet<>();
+        for (Map.Entry<MemberKey, MappedMember> entry : intermediaryToNamedMembers.entrySet()) {
+            MemberKey source = entry.getKey();
+            String mappedName = entry.getValue().name();
+            MemberOwnerNameKey ownerNameKey = new MemberOwnerNameKey(
+                    source.kind(), source.owner(), source.name());
+            if (!ambiguousByOwnerAndName.contains(ownerNameKey)) {
+                String previous = byOwnerAndName.putIfAbsent(ownerNameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byOwnerAndName.remove(ownerNameKey);
+                    ambiguousByOwnerAndName.add(ownerNameKey);
+                }
+            }
+
+            MemberOwnerNameKey namedOwnerNameKey = new MemberOwnerNameKey(
+                    source.kind(), entry.getValue().owner(), source.name());
+            if (!ambiguousByNamedOwnerAndName.contains(namedOwnerNameKey)) {
+                String previous = byNamedOwnerAndName.putIfAbsent(namedOwnerNameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byNamedOwnerAndName.remove(namedOwnerNameKey);
+                    ambiguousByNamedOwnerAndName.add(namedOwnerNameKey);
+                }
+            }
+
+            MemberNameKey nameKey = new MemberNameKey(source.kind(), source.name());
+            if (!ambiguousByName.contains(nameKey)) {
+                String previous = byName.putIfAbsent(nameKey, mappedName);
+                if (previous != null && !previous.equals(mappedName)) {
+                    byName.remove(nameKey);
+                    ambiguousByName.add(nameKey);
+                }
+            }
+        }
+        this.memberNamesByOwnerAndName = Map.copyOf(byOwnerAndName);
+        this.ambiguousMemberNamesByOwnerAndName = Set.copyOf(ambiguousByOwnerAndName);
+        this.memberNamesByNamedOwnerAndName = Map.copyOf(byNamedOwnerAndName);
+        this.ambiguousMemberNamesByNamedOwnerAndName = Set.copyOf(ambiguousByNamedOwnerAndName);
+        this.memberNamesByName = Map.copyOf(byName);
+        this.ambiguousMemberNamesByName = Set.copyOf(ambiguousByName);
     }
 
     static IntermediaryMappings load(Path tinyFileOrJar, MojangMappings mojangMappings) throws IOException {
@@ -190,22 +276,120 @@ final class IntermediaryMappings {
     CompatibilityScanner.Reference normalize(CompatibilityScanner.Reference reference) {
         if (reference.kind() == CompatibilityScanner.SymbolKind.CLASS) {
             return new CompatibilityScanner.Reference(reference.kind(),
-                    intermediaryToNamedClasses.getOrDefault(reference.owner(), reference.owner()),
-                    null, null);
+                    mapClassName(reference.owner()), null, null);
         }
 
-        MappedMember member = intermediaryToNamedMembers.get(new MemberKey(
-                reference.owner(), reference.kind(), reference.name(), reference.descriptor()));
+        MemberKey directKey = new MemberKey(
+                reference.owner(), reference.kind(), reference.name(), reference.descriptor());
+        MappedMember member = intermediaryToNamedMembers.get(directKey);
         if (member != null) {
             return new CompatibilityScanner.Reference(reference.kind(),
                     member.owner(), member.name(), member.descriptor());
         }
 
+        // Some legacy metadata is only partially remapped before Mixin reads it: its owner and
+        // descriptor types can already use Mojang names while the method/field name is Intermediary.
+        // Normalize that mixed form without guessing across ambiguous overload/name mappings.
+        if (namedClassNames.contains(reference.owner())) {
+            String mappedName = mapMemberName(reference.kind(), reference.owner(), reference.name());
+            return new CompatibilityScanner.Reference(reference.kind(), reference.owner(), mappedName,
+                    normalizeDescriptor(reference.descriptor()));
+        }
+
+        // Intermediary names identify override groups, but the mapping row for an inherited
+        // method is usually owned by its declaring superclass. A production mod can legally
+        // reference that method through a subclass owner (for example Button.method_25355,
+        // inherited from AbstractWidget). Only use this fallback when every mapping row with
+        // the exact old name + descriptor agrees on the same named method and descriptor.
+        MappedMember inherited = findUnambiguousMemberByIntermediaryName(directKey);
+        if (inherited != null) {
+            return new CompatibilityScanner.Reference(reference.kind(),
+                    mapClassName(reference.owner()), inherited.name(), inherited.descriptor());
+        }
+
         // Normalize the owner and descriptor even when this particular member has no mapping.
         // Retaining the old member name leaves a useful unresolved-symbol diagnostic.
         return new CompatibilityScanner.Reference(reference.kind(),
-                intermediaryToNamedClasses.getOrDefault(reference.owner(), reference.owner()),
-                reference.name(), normalizeDescriptor(reference.descriptor()));
+                mapClassName(reference.owner()), reference.name(), normalizeDescriptor(reference.descriptor()));
+    }
+
+    private MappedMember findUnambiguousMemberByIntermediaryName(MemberKey requested) {
+        MemberLookupKey key = new MemberLookupKey(
+                requested.kind(), requested.name(), requested.descriptor());
+        if (ambiguousMembersByNameAndDescriptor.contains(key)) {
+            return null;
+        }
+        return unambiguousMembersByNameAndDescriptor.get(key);
+    }
+
+    /**
+     * Map a class name, including anonymous/synthetic inner classes omitted from some mapping artifacts.
+     * Inner binary names keep the outer-class prefix and the same '$' suffix after namespace remapping.
+     */
+    String mapClassName(String intermediaryInternalName) {
+        String direct = intermediaryToNamedClasses.get(intermediaryInternalName);
+        if (direct != null) {
+            return direct;
+        }
+
+        int dollar = intermediaryInternalName.lastIndexOf('$');
+        while (dollar > 0) {
+            String outer = intermediaryToNamedClasses.get(intermediaryInternalName.substring(0, dollar));
+            if (outer != null) {
+                return outer + intermediaryInternalName.substring(dollar);
+            }
+            dollar = intermediaryInternalName.lastIndexOf('$', dollar - 1);
+        }
+        return intermediaryInternalName;
+    }
+
+    String mapMethodName(String owner, String name, String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return mapMemberName(CompatibilityScanner.SymbolKind.METHOD, owner, name);
+        }
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.METHOD, owner, name, descriptor)).name();
+    }
+
+    /**
+     * Remap a selector that has only a member name and no descriptor. Such selectors are legal
+     * in Mixin annotations. Prefer the direct owner/name row, then fall back only when the mapping
+     * is globally unambiguous for this Intermediary name.
+     */
+    String mapMemberName(CompatibilityScanner.SymbolKind kind, String owner, String name) {
+        MemberOwnerNameKey ownerKey = new MemberOwnerNameKey(kind, owner, name);
+        if (!ambiguousMemberNamesByOwnerAndName.contains(ownerKey)) {
+            String direct = memberNamesByOwnerAndName.get(ownerKey);
+            if (direct != null) {
+                return direct;
+            }
+        }
+
+        // Mixin class metadata may already have Mojang class names even when the annotation's
+        // member selector is still Intermediary. Only use a named-owner row when that exact
+        // mapped owner/name pair is unambiguous.
+        if (namedClassNames.contains(owner)
+                && !ambiguousMemberNamesByNamedOwnerAndName.contains(ownerKey)) {
+            String namedOwnerMatch = memberNamesByNamedOwnerAndName.get(ownerKey);
+            if (namedOwnerMatch != null) {
+                return namedOwnerMatch;
+            }
+        }
+
+        MemberNameKey nameKey = new MemberNameKey(kind, name);
+        if (!ambiguousMemberNamesByName.contains(nameKey)) {
+            return memberNamesByName.getOrDefault(nameKey, name);
+        }
+        return name;
+    }
+
+    String mapFieldName(String owner, String name, String descriptor) {
+        return normalize(new CompatibilityScanner.Reference(
+                CompatibilityScanner.SymbolKind.FIELD, owner, name, descriptor)).name();
+    }
+
+    String mapDescriptor(String descriptor) {
+        return normalizeDescriptor(descriptor);
     }
 
     int classCount() {
@@ -216,7 +400,7 @@ final class IntermediaryMappings {
         return intermediaryToNamedMembers.size();
     }
 
-    private String normalizeDescriptor(String descriptor) {
+    String normalizeDescriptor(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return descriptor;
         }
@@ -229,7 +413,7 @@ final class IntermediaryMappings {
     private org.objectweb.asm.Type remapType(org.objectweb.asm.Type type) {
         return switch (type.getSort()) {
             case org.objectweb.asm.Type.OBJECT -> org.objectweb.asm.Type.getObjectType(
-                    intermediaryToNamedClasses.getOrDefault(type.getInternalName(), type.getInternalName()));
+                    mapClassName(type.getInternalName()));
             case org.objectweb.asm.Type.ARRAY -> {
                 org.objectweb.asm.Type element = remapType(type.getElementType());
                 yield org.objectweb.asm.Type.getType(
@@ -299,6 +483,12 @@ final class IntermediaryMappings {
     private record MemberKey(String owner, CompatibilityScanner.SymbolKind kind,
                              String name, String descriptor) {}
 
+    private record MemberLookupKey(CompatibilityScanner.SymbolKind kind, String name, String descriptor) {}
+
     private record MappedMember(String owner, String name, String descriptor) {}
+
+    private record MemberOwnerNameKey(CompatibilityScanner.SymbolKind kind, String owner, String name) {}
+
+    private record MemberNameKey(CompatibilityScanner.SymbolKind kind, String name) {}
 
 }
