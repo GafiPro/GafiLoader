@@ -286,7 +286,7 @@ final class MixinSelectorRemapper {
             return value;
         }
         if (methodSelector && value.contains("handleRespawn")) {
-            System.out.println("[Gafi Loader] DEBUG respawn selector seen value=" + value
+            DebugLog.debug("[Gafi Loader] DEBUG respawn selector seen value=" + value
                     + " callback=" + enclosingMethodDescriptor + " targets=" + targets
                     + " annotation=" + annotationDescriptor);
         }
@@ -439,7 +439,7 @@ final class MixinSelectorRemapper {
         String mappedCallback = LegacyClassAliases.mapDescriptor(
                 aliases.mapDescriptor(mappings.mapDescriptor(callbackDescriptor)), targetApi);
         if (selector.contains("handleRespawn")) {
-            System.out.println("[Gafi Loader] DEBUG respawn callback raw=" + callbackDescriptor
+            DebugLog.debug("[Gafi Loader] DEBUG respawn callback raw=" + callbackDescriptor
                     + " mapped=" + mappedCallback);
         }
         Type callbackType;
@@ -474,11 +474,11 @@ final class MixinSelectorRemapper {
         }
         String packetDescriptor = arguments[0].getDescriptor();
         boolean targetClassPresent = targetApi.hasClass(owner);
-        System.out.println("[Gafi Loader] DEBUG respawn selector=" + selector
+        DebugLog.debug("[Gafi Loader] DEBUG respawn selector=" + selector
                 + " callback=" + mappedCallback + " targets=" + targets
                 + " listenerTarget=" + targetsListener + " targetClassPresent=" + targetClassPresent);
         if (!targetsListener || !targetClassPresent) {
-            System.out.println("[Gafi Loader] DEBUG respawn selector left unchanged: target class was not resolved.");
+            DebugLog.debug("[Gafi Loader] DEBUG respawn selector left unchanged: target class was not resolved.");
             return selector;
         }
         // Mixin must scan the target's real descriptor, not the legacy callback descriptor.
@@ -496,7 +496,7 @@ final class MixinSelectorRemapper {
             targetMethodSelector = TargetApiIndex.uniqueRuntimeVoidMethodSelectorByFirstArgument(
                     owner, packetDescriptor);
         }
-        System.out.println("[Gafi Loader] DEBUG respawn candidate selector=" + targetMethodSelector
+        DebugLog.debug("[Gafi Loader] DEBUG respawn candidate selector=" + targetMethodSelector
                 + " packetDescriptor=" + packetDescriptor);
         if (targetMethodSelector == null) {
             return selector;
