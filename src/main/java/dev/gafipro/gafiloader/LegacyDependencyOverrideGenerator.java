@@ -83,20 +83,46 @@ public final class LegacyDependencyOverrideGenerator {
         JsonObject root = readExistingConfig(configPath);
         JsonObject overrides = root.has("overrides") && root.get("overrides").isJsonObject()
                 ? root.getAsJsonObject("overrides") : new JsonObject();
+        boolean changed = !hasNumericVersionOne(root.get("version"))
+                || !root.has("overrides") || !root.get("overrides").isJsonObject();
 
         for (Map.Entry<String, JsonObject> item : legacyMods.entrySet()) {
-            JsonObject perMod = overrides.has(item.getKey()) && overrides.get(item.getKey()).isJsonObject()
-                    ? overrides.getAsJsonObject(item.getKey()) : new JsonObject();
-            JsonObject removeMinecraft = perMod.has("-depends") && perMod.get("-depends").isJsonObject()
-                    ? perMod.getAsJsonObject("-depends") : new JsonObject();
-            removeMinecraft.addProperty("minecraft", "");
+            JsonElement existingPerMod = overrides.get(item.getKey());
+            if (existingPerMod != null && !existingPerMod.isJsonObject()) {
+                throw new IOException("Existing dependency override for mod '" + item.getKey()
+                        + "' must be a JSON object; refusing to replace it.");
+            }
+            JsonObject perMod = existingPerMod == null ? new JsonObject() : existingPerMod.getAsJsonObject();
+            JsonElement existingDepends = perMod.get("-depends");
+            if (existingDepends != null && !existingDepends.isJsonObject()) {
+                throw new IOException("Existing '-depends' override for mod '" + item.getKey()
+                        + "' must be a JSON object; refusing to replace it.");
+            }
+            JsonObject removeMinecraft = existingDepends == null
+                    ? new JsonObject() : existingDepends.getAsJsonObject();
+            JsonElement existingMinecraft = removeMinecraft.get("minecraft");
+            boolean alreadyCorrect = existingMinecraft != null
+                    && existingMinecraft.isJsonPrimitive()
+                    && existingMinecraft.getAsJsonPrimitive().isString()
+                    && existingMinecraft.getAsString().isEmpty();
+            if (!alreadyCorrect) {
+                removeMinecraft.addProperty("minecraft", "");
+                changed = true;
+            }
+            if (existingDepends == null) changed = true;
+            if (existingPerMod == null) changed = true;
             perMod.add("-depends", removeMinecraft);
             overrides.add(item.getKey(), perMod);
         }
 
+        Path output = configPath.toAbsolutePath().normalize();
+        if (!changed && Files.isRegularFile(output)) {
+            return new Result(output.toString(), jars.size(), legacyMods.size(),
+                    List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
+        }
+
         root.addProperty("version", 1);
         root.add("overrides", overrides);
-        Path output = configPath.toAbsolutePath().normalize();
         Path parent = output.getParent();
         if (parent != null) Files.createDirectories(parent);
 
@@ -120,6 +146,12 @@ public final class LegacyDependencyOverrideGenerator {
 
         return new Result(output.toString(), jars.size(), legacyMods.size(),
                 List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
+    }
+
+    private static boolean hasNumericVersionOne(JsonElement value) {
+        return value != null && value.isJsonPrimitive()
+                && value.getAsJsonPrimitive().isNumber()
+                && value.getAsInt() == 1;
     }
 
     private static JsonObject readExistingConfig(Path configPath) throws IOException {
