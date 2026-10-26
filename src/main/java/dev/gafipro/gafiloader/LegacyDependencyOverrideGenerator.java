@@ -75,6 +75,11 @@ public final class LegacyDependencyOverrideGenerator {
             }
         }
 
+        if (legacyMods.isEmpty()) {
+            return new Result(configPath.toAbsolutePath().normalize().toString(), jars.size(),
+                    0, List.of(), List.copyOf(unreadable));
+        }
+
         JsonObject root = readExistingConfig(configPath);
         JsonObject overrides = root.has("overrides") && root.get("overrides").isJsonObject()
                 ? root.getAsJsonObject("overrides") : new JsonObject();
