@@ -4,7 +4,7 @@
 
 Gafi Loader is an experimental compatibility project targeting **Minecraft Java Edition 26.2** as the game that launches, with the goal of making mods built for **Minecraft 1.21.11** work alongside 26.2 mods without modifying the original mod JARs.
 
-> **Current status: experimental runtime-compatibility prototype.** The codebase now contains a Java agent that remaps selected 1.21.11 Intermediary references in memory, applies target-checked compatibility bridges, and hooks the Fabric/Mixin resource path. The original mod JARs are not rewritten. This still is **not a finished or universal compatibility loader**: an earlier CI attempt stopped during resource loading, so a strict real-client smoke test now requires the legacy mod, the sound engine and texture-atlas creation before it can pass. Reaching the title screen, entering a world and confirming a mod's feature remain separate checks; a clean build or static scan alone does not prove those behaviours.
+> **Current status: experimental runtime-compatibility prototype.** The codebase contains a Java agent that remaps selected 1.21.11 Intermediary references in memory, applies target-checked compatibility bridges, hooks the Fabric/Mixin resource path, and generates dependency overrides before Fabric resolves mods. The original mod JARs are not rewritten. The real-client smoke test previously proved the agent hooks were installed and the static scan found no unresolved direct Minecraft symbols in the pinned mod, but startup then failed at dependency resolution because the detector missed the valid `~1.21` range. The detector has now been extended and regression-tested; the new client run still needs to confirm the next stage. Reaching the title screen, entering a world and checking a mod feature remain separate tests.
 
 ## Goals
 
@@ -17,7 +17,7 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 
 ## Windows build artifact
 
-The **Package Windows installer** workflow produces `GafiLoader-Setup-0.1.1.exe` as the `GafiLoader-Windows-Installer` artifact. It packages the self-contained GafiLoader agent and setup script; Minecraft itself runs using the Java runtime selected by the official launcher, so a development JDK is not required just to play.
+The **Package Windows installer** workflow produces `GafiLoader-Setup-0.1.2.exe` as the `GafiLoader-Windows-Installer` artifact. It packages the self-contained GafiLoader agent and setup script; Minecraft itself runs using the Java runtime selected by the official launcher, so a development JDK is not required just to play.
 
 To retrieve the installer, open the repository's **Actions** tab, choose a successful **Package Windows installer** run, and download `GafiLoader-Windows-Installer`. The installer uses a stable Windows upgrade identifier and registers a dedicated `gafiloader-26.2` launcher profile. When the installer asks for a game directory, use the directory you intend to use for this profile; if you choose a custom directory, set the profile's **Game Directory** to the same path in the launcher.
 
