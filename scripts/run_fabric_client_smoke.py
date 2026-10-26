@@ -375,24 +375,15 @@ def main() -> int:
             f"targetGameJar={target_game}",
             f"intermediaryMappings={intermediary_mappings}",
             f"legacyMappings={legacy_mappings}",
+            f"gameDir={game_dir}",
             "",
         ]),
         encoding="utf-8",
     )
 
+    # Do not create dependency overrides manually before launch. The test must prove
+    # the Java agent generates them before Fabric resolves the actual mod graph.
     override_path = config_dir / "fabric_loader_dependencies.json"
-    generation = subprocess.run(
-        ["java", "-jar", str(gafi_jar), "--prepare-legacy-overrides",
-         "--mods", str(mods_dir), "--config", str(override_path)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=30,
-        check=False,
-    )
-    print(generation.stdout, flush=True)
-    if generation.returncode != 0:
-        raise RuntimeError(f"Could not generate the Fabric override config (exit {generation.returncode})")
 
     replacements = {
         "auth_player_name": "GafiLoaderCI",
@@ -517,6 +508,21 @@ def main() -> int:
             console.write("\n\n" + runtime_diagnostics)
         console_text += "\n\n" + runtime_diagnostics
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+    if not override_path.is_file():
+        raise RuntimeError(
+            "The Gafi Loader agent did not create config/fabric_loader_dependencies.json "
+            "before Fabric mod resolution."
+        )
+    overrides_json = json.loads(override_path.read_text(encoding="utf-8"))
+    overrides = overrides_json.get("overrides", {})
+    for legacy_id in ("smallhands", "fabric-api"):
+        dependency_override = overrides.get(legacy_id, {}).get("-depends", {})
+        if dependency_override.get("minecraft") != "":
+            raise RuntimeError(
+                f"Runtime dependency preparation did not remove the Minecraft gate for '{legacy_id}'. "
+                f"Found: {dependency_override!r}"
+            )
+
     if not success_reason:
         print("===== Minecraft latest.log =====", flush=True)
         print(log_text[-30000:], flush=True)
