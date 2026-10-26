@@ -124,7 +124,7 @@ public final class GameApiComparator {
                             String normalizedMemberName = mappings == null ? name
                                     : mappings.toNamedMember(originalName, MojangMappings.SymbolKind.FIELD,
                                             name, normalizedDescriptor);
-                            fields.add(new Member(normalizedMemberName, normalizedDescriptor));
+                            fields.add(new Member(normalizedMemberName, normalizedDescriptor, access));
                             return null;
                         }
 
@@ -136,7 +136,7 @@ public final class GameApiComparator {
                             String normalizedMemberName = mappings == null ? name
                                     : mappings.toNamedMember(originalName, MojangMappings.SymbolKind.METHOD,
                                             name, normalizedDescriptor);
-                            methods.add(new Member(normalizedMemberName, normalizedDescriptor));
+                            methods.add(new Member(normalizedMemberName, normalizedDescriptor, access));
                             return null;
                         }
 
@@ -176,23 +176,56 @@ public final class GameApiComparator {
         Set<Member> exactTargetMembers = resolveMembers(targetClass.name(), kind, targetClasses, new HashSet<>());
 
         for (Member oldMember : oldMembers) {
-            // Constructors and class initializers are important bytecode details, but they do not
-            // normally represent public compatibility promises. Report them only when missing.
-            if (exactTargetMembers.contains(oldMember)) {
+            // This report models the callable game API surface. Private/package-private
+            // implementation details in vanilla are not generally linkable from ordinary mods;
+            // direct references inside real mod bytecode are handled separately by CompatibilityScanner.
+            if ((oldMember.access() & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) == 0) {
                 continue;
             }
 
-            List<String> sameDescriptor = exactTargetMembers.stream()
+            // Constructors and class initializers are important bytecode details, but they do not
+            // normally represent public compatibility promises. Report them only when missing.
+            Member sameSignature = exactTargetMembers.stream()
+                    .filter(candidate -> candidate.name().equals(oldMember.name())
+                            && candidate.descriptor().equals(oldMember.descriptor()))
+                    .findFirst().orElse(null);
+            if (sameSignature != null) {
+                if (isStatic(sameSignature) != isStatic(oldMember)) {
+                    String changedKind = kind == MojangMappings.SymbolKind.METHOD
+                            ? "METHOD_DISPATCH_CHANGED" : "FIELD_STORAGE_KIND_CHANGED";
+                    differences.add(new Difference(changedKind, legacyClass.name(), oldMember.name(),
+                            oldMember.descriptor(), List.of(),
+                            "The name and descriptor still exist, but static/instance semantics changed. "
+                                    + "A name alias cannot safely adapt this difference."));
+                }
+                continue;
+            }
+
+            List<Member> sameDescriptorMembers = exactTargetMembers.stream()
                     .filter(candidate -> candidate.descriptor().equals(oldMember.descriptor()))
+                    .filter(candidate -> !candidate.name().equals(oldMember.name()))
+                    .toList();
+            List<String> sameDispatchNames = sameDescriptorMembers.stream()
+                    .filter(candidate -> isStatic(candidate) == isStatic(oldMember))
                     .map(Member::name)
-                    .filter(name -> !name.equals(oldMember.name()))
                     .distinct().sorted().toList();
-            if (!sameDescriptor.isEmpty()) {
+            if (!sameDispatchNames.isEmpty()) {
                 String suffix = kind == MojangMappings.SymbolKind.METHOD
                         ? "METHOD_NAME_CHANGED_CANDIDATE" : "FIELD_NAME_CHANGED_CANDIDATE";
                 differences.add(new Difference(suffix, legacyClass.name(), oldMember.name(),
-                        oldMember.descriptor(), sameDescriptor,
-                        "Same descriptor exists under another target name. This is a candidate alias, not proof of semantic equivalence."));
+                        oldMember.descriptor(), sameDispatchNames,
+                        "Same descriptor and static/instance kind exist under another target name. "
+                                + "This is a candidate alias, not proof of semantic equivalence."));
+                continue;
+            }
+            if (!sameDescriptorMembers.isEmpty()) {
+                String changedKind = kind == MojangMappings.SymbolKind.METHOD
+                        ? "METHOD_DISPATCH_CHANGED_CANDIDATE" : "FIELD_STORAGE_KIND_CHANGED_CANDIDATE";
+                List<String> candidates = sameDescriptorMembers.stream().map(Member::name).distinct().sorted().toList();
+                differences.add(new Difference(changedKind, legacyClass.name(), oldMember.name(),
+                        oldMember.descriptor(), candidates,
+                        "Same descriptor names were found, but only with a different static/instance kind. "
+                                + "Do not generate an alias from this candidate."));
                 continue;
             }
 
@@ -207,6 +240,11 @@ public final class GameApiComparator {
                 differences.add(new Difference(suffix, legacyClass.name(), oldMember.name(),
                         oldMember.descriptor(), sameNameDifferentDescriptor,
                         "The name remains present with a different descriptor; review the semantic change before adapting callers."));
+                continue;
+            }
+
+            if (kind == MojangMappings.SymbolKind.METHOD
+                    && hasVerifiedStructuralBridge(legacyClass.name(), oldMember, targetClasses)) {
                 continue;
             }
 
@@ -233,6 +271,76 @@ public final class GameApiComparator {
         return members;
     }
 
+    private static boolean hasVerifiedStructuralBridge(String owner, Member oldMember,
+                                                         Map<String, ApiClass> targetClasses) {
+        String displaySlot = "net/minecraft/world/scores/DisplaySlot";
+        String chatFormatting = "net/minecraft/ChatFormatting";
+        String screenBridge = "(Lnet/minecraft/ChatFormatting;)Lnet/minecraft/world/scores/DisplaySlot;";
+        if (owner.equals(displaySlot) && oldMember.name().equals("teamColorToSlot")
+                && oldMember.descriptor().equals(screenBridge) && isStatic(oldMember)) {
+            ApiClass targetSlot = targetClasses.get(displaySlot);
+            ApiClass targetFormatting = targetClasses.get(chatFormatting);
+            if (targetSlot == null || targetFormatting == null) {
+                return false;
+            }
+            for (String color : List.of("BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA",
+                    "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE",
+                    "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE")) {
+                Member slotField = findMember(targetSlot, MojangMappings.SymbolKind.FIELD,
+                        "TEAM_" + color, "L" + displaySlot + ";");
+                Member formattingField = findMember(targetFormatting, MojangMappings.SymbolKind.FIELD,
+                        color, "L" + chatFormatting + ";");
+                if (slotField == null || (slotField.access() & Opcodes.ACC_STATIC) == 0
+                        || formattingField == null || (formattingField.access() & Opcodes.ACC_STATIC) == 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        String readOnlyScoreInfo = "net/minecraft/world/scores/ReadOnlyScoreInfo";
+        String numberFormat = "net/minecraft/network/chat/numbers/NumberFormat";
+        String mutableComponent = "net/minecraft/network/chat/MutableComponent";
+        String commonComponents = "net/minecraft/network/chat/CommonComponents";
+        String safeDescriptor = "(L" + readOnlyScoreInfo + ";L" + numberFormat + ";)L"
+                + mutableComponent + ";";
+        String formatDescriptor = "(L" + numberFormat + ";)L" + mutableComponent + ";";
+        if (owner.equals(readOnlyScoreInfo) && oldMember.name().equals("safeFormatValue")
+                && oldMember.descriptor().equals(safeDescriptor) && isStatic(oldMember)) {
+            ApiClass targetScore = targetClasses.get(readOnlyScoreInfo);
+            ApiClass targetCommon = targetClasses.get(commonComponents);
+            if (targetScore == null || targetCommon == null) {
+                return false;
+            }
+            Member format = findMember(targetScore, MojangMappings.SymbolKind.METHOD,
+                    "formatValue", formatDescriptor);
+            Member empty = findMember(targetCommon, MojangMappings.SymbolKind.FIELD,
+                    "EMPTY", "L" + mutableComponent + ";");
+            return format != null
+                    // Interface implementations may be supplied by concrete score-info records.
+                    && (format.access() & Opcodes.ACC_STATIC) == 0
+                    && empty != null && (empty.access() & Opcodes.ACC_STATIC) != 0;
+        }
+        return false;
+    }
+
+    private static Member findMember(ApiClass owner, MojangMappings.SymbolKind kind,
+                                     String name, String descriptor) {
+        Set<Member> members = kind == MojangMappings.SymbolKind.METHOD ? owner.methods() : owner.fields();
+        return members.stream().filter(member -> member.name().equals(name)
+                && member.descriptor().equals(descriptor)).findFirst().orElse(null);
+    }
+
+    private static boolean isStatic(Member member) {
+        return (member.access() & Opcodes.ACC_STATIC) != 0;
+    }
+
+    private static boolean isPrivateSyntheticLambda(Member member) {
+        return (member.access() & (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC))
+                == (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC)
+                && member.name().startsWith("lambda$");
+    }
+
     private static int count(List<Difference> differences, String kind) {
         return (int) differences.stream().filter(difference -> difference.kind().equals(kind)).count();
     }
@@ -246,7 +354,7 @@ public final class GameApiComparator {
     }
 
     private record ApiClass(String name, String superName, Set<Member> fields, Set<Member> methods) {}
-    private record Member(String name, String descriptor) {}
+    private record Member(String name, String descriptor, int access) {}
 
     private static final class DuplicateClassException extends RuntimeException {
         private final String className;
