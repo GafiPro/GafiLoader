@@ -267,6 +267,77 @@ def flatten_game_arguments(game: dict, replacements: dict[str, str]) -> list[str
     return arguments
 
 
+def create_modern_smoke_mod(output_dir: Path, fabric_loader_jar: Path) -> Path:
+    """Build a tiny 26.2 Fabric mod to verify that modern mods still initialize."""
+    javac = shutil.which("javac")
+    if not javac:
+        raise RuntimeError("javac is required to compile the modern-mod compatibility fixture")
+
+    source_file = output_dir / "src" / "gafi" / "smoketest" / "ModernCompatibilitySmokeMod.java"
+    classes_dir = output_dir / "classes"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    classes_dir.mkdir(parents=True, exist_ok=True)
+    source_file.write_text(
+        """package gafi.smoketest;
+
+import net.fabricmc.api.ModInitializer;
+
+public final class ModernCompatibilitySmokeMod implements ModInitializer {
+    @Override
+    public void onInitialize() {
+        System.out.println("GAFILOADER_MODERN_MOD_INITIALIZED");
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    compile_result = subprocess.run(
+        [
+            javac,
+            "-encoding", "UTF-8",
+            "-classpath", str(fabric_loader_jar),
+            "-d", str(classes_dir),
+            str(source_file),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=60,
+        check=False,
+    )
+    if compile_result.returncode != 0:
+        raise RuntimeError(
+            "Could not compile the 26.2 control mod against the actual Fabric Loader API:\n"
+            + compile_result.stdout
+        )
+
+    mod_jar = output_dir / "modern-26.2-smoke-mod.jar"
+    metadata = {
+        "schemaVersion": 1,
+        "id": "gafi-modern-smoke",
+        "version": "1.0.0",
+        "name": "GafiLoader Modern Compatibility Smoke Mod",
+        "environment": "*",
+        "entrypoints": {
+            "main": ["gafi.smoketest.ModernCompatibilitySmokeMod"]
+        },
+        "depends": {
+            "minecraft": "26.2",
+            "fabricloader": ">=0.20.1"
+        }
+    }
+    class_file = classes_dir / "gafi" / "smoketest" / "ModernCompatibilitySmokeMod.class"
+    if not class_file.is_file():
+        raise RuntimeError("The modern control mod compiled without the expected entrypoint class")
+
+    with zipfile.ZipFile(mod_jar, "w", compression=zipfile.ZIP_DEFLATED) as jar:
+        jar.writestr("fabric.mod.json", json.dumps(metadata, indent=2) + "\n")
+        jar.write(class_file, "gafi/smoketest/ModernCompatibilitySmokeMod.class")
+    print(f"MODERN_CONTROL_MOD_BUILT {mod_jar}", flush=True)
+    return mod_jar
+
+
 def read_mod_id(mod_jar: Path) -> str:
     with zipfile.ZipFile(mod_jar) as jar:
         data = json.loads(jar.read("fabric.mod.json").decode("utf-8"))
@@ -361,13 +432,17 @@ def main() -> int:
     config_dir = game_dir / "config"
     mods_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
-    # Keep every upstream artifact byte-for-byte intact. Fabric API is required by the
-    # pinned production mod; without it, Fabric rejects the fixture before testing the agent.
+    # A modern 26.2 control mod must initialize in the same instance as the old mod.
+    modern_mod_jar = create_modern_smoke_mod(launch_root / "modern-mod-build", fabric_loader_download)
+
+    # Record SHA-256 before launch and keep every upstream / generated mod JAR byte-for-byte intact.
+    # Fabric API is required by the pinned production mod; without it, Fabric rejects the fixture.
+    launch_mod_jars = (mod_jar, fabric_api_jar, modern_mod_jar)
     source_hashes = {
         source_jar.name: sha256_file(source_jar)
-        for source_jar in (mod_jar, fabric_api_jar)
+        for source_jar in launch_mod_jars
     }
-    for source_jar in (mod_jar, fabric_api_jar):
+    for source_jar in launch_mod_jars:
         destination = mods_dir / source_jar.name
         if not destination.exists() or sha1_file(destination) != sha1_file(source_jar):
             shutil.copy2(source_jar, destination)
@@ -523,7 +598,7 @@ def main() -> int:
 
     # Assert that neither the source fixtures nor the active mod copies were rewritten.
     # The compatibility agent must perform its work in memory.
-    for source_jar in (mod_jar, fabric_api_jar):
+    for source_jar in launch_mod_jars:
         expected_hash = source_hashes[source_jar.name]
         if sha256_file(source_jar) != expected_hash:
             raise RuntimeError(f"Original mod artifact was modified: {source_jar}")
@@ -558,6 +633,17 @@ def main() -> int:
         )
 
     combined = (log_text + "\n" + console_text).lower()
+    if "gafi-modern-smoke" not in combined or "gafiloader_modern_mod_initialized" not in combined:
+        print("===== Minecraft latest.log =====", flush=True)
+        print(log_text[-30000:], flush=True)
+        print("===== Client console =====", flush=True)
+        print(console_text[-15000:], flush=True)
+        raise RuntimeError(
+            "The Minecraft 26.2 control mod did not initialize alongside the legacy mod. "
+            "Expected GAFILOADER_MODERN_MOD_INITIALIZED in the actual client output."
+        )
+    print("MODERN_262_CONTROL_MOD_INITIALIZED_OK", flush=True)
+
     if any(marker in combined for marker in (
         "mixinapplyerror", "mixin apply failed", "could not execute entrypoint", "crash report",
     )):
