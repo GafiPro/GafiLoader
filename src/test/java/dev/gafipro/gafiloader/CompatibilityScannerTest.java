@@ -68,6 +68,28 @@ class CompatibilityScannerTest {
     }
 
     @Test
+    void scansMinecraftReferencesInsideNestedLegacyModJars() throws IOException {
+        Path gameJar = temporaryDirectory.resolve("minecraft-nested-target.jar");
+        Path modJar = temporaryDirectory.resolve("legacy-bundle.jar");
+        writeJar(gameJar, "net/minecraft/Target", targetClass());
+
+        byte[] nestedModule = jarBytes("test/NestedLegacyMod.class", nestedMinecraftLegacyClass());
+        try (JarOutputStream outer = new JarOutputStream(java.nio.file.Files.newOutputStream(modJar))) {
+            outer.putNextEntry(new JarEntry("META-INF/jars/legacy-module.jar"));
+            outer.write(nestedModule);
+            outer.closeEntry();
+        }
+
+        CompatibilityScanner.Report report = new CompatibilityScanner().scan(gameJar, List.of(modJar));
+
+        assertEquals(1, report.summary().missingClasses());
+        assertTrue(report.findings().stream().anyMatch(finding ->
+                finding.kind().equals("MISSING_CLASS")
+                        && finding.owner().equals("net/minecraft/Vanished")));
+        assertEquals(1, report.summary().modClassesScanned());
+    }
+
+    @Test
     void detectsMissingFabricApiMethodsFromNestedTargetApiModules() throws IOException {
         Path gameJar = temporaryDirectory.resolve("minecraft-api-target.jar");
         Path modJar = temporaryDirectory.resolve("legacy-fabric-api-mod.jar");
@@ -115,6 +137,22 @@ class CompatibilityScannerTest {
         method.visitMaxs(0, 0);
         method.visitEnd();
 
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] nestedMinecraftLegacyClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "test/NestedLegacyMod",
+                null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "run", "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC,
+                "net/minecraft/Vanished", "call", "()V", false);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
