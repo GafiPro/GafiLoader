@@ -67,6 +67,40 @@ class CompatibilityScannerTest {
         assertEquals(1, report.summary().memberAliasesLoaded());
     }
 
+    @Test
+    void detectsMissingFabricApiMethodsFromNestedTargetApiModules() throws IOException {
+        Path gameJar = temporaryDirectory.resolve("minecraft-api-target.jar");
+        Path modJar = temporaryDirectory.resolve("legacy-fabric-api-mod.jar");
+        Path targetApiJar = temporaryDirectory.resolve("fabric-api-26.2.jar");
+
+        writeJar(gameJar, "net/minecraft/Target", targetClass());
+        writeJar(modJar, "test/LegacyFabricApiMod", fabricApiLegacyModClass());
+
+        byte[] moduleJar = jarBytes("net/fabricmc/fabric/api/event/Event.class", fabricApiTargetClass());
+        try (JarOutputStream outer = new JarOutputStream(java.nio.file.Files.newOutputStream(targetApiJar))) {
+            outer.putNextEntry(new JarEntry("META-INF/jars/fabric-api-event.jar"));
+            outer.write(moduleJar);
+            outer.closeEntry();
+        }
+
+        CompatibilityScanner scanner = new CompatibilityScanner();
+        CompatibilityScanner.Report withoutApi = scanner.scan(gameJar, List.of(modJar));
+        assertTrue(withoutApi.findings().isEmpty(),
+                "Fabric API references are only checked when a target Fabric API JAR is provided");
+
+        CompatibilityScanner.Report report = scanner.scan(
+                gameJar, List.of(modJar), null, null, null, List.of(targetApiJar));
+
+        assertEquals(1, report.summary().missingMethods());
+        assertEquals(0, report.summary().missingClasses());
+        assertTrue(report.findings().stream().anyMatch(finding ->
+                finding.kind().equals("MISSING_METHOD")
+                        && finding.owner().equals("net/fabricmc/fabric/api/event/Event")
+                        && finding.name().equals("removed")));
+        assertEquals(List.of(targetApiJar.toAbsolutePath().normalize().toString()),
+                report.targetApiJars());
+    }
+
     private static byte[] aliasedLegacyModClass() {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "test/AliasedLegacyMod",
@@ -83,6 +117,48 @@ class CompatibilityScannerTest {
 
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static byte[] fabricApiTargetClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/fabricmc/fabric/api/event/Event",
+                null, "java/lang/Object", null);
+        MethodVisitor register = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "register", "()V", null, null);
+        register.visitCode();
+        register.visitInsn(Opcodes.RETURN);
+        register.visitMaxs(0, 0);
+        register.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] fabricApiLegacyModClass() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "test/LegacyFabricApiMod",
+                null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "run", "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC,
+                "net/fabricmc/fabric/api/event/Event", "register", "()V", false);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC,
+                "net/fabricmc/fabric/api/event/Event", "removed", "()V", false);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] jarBytes(String entryName, byte[] classBytes) throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(bytes)) {
+            jar.putNextEntry(new JarEntry(entryName));
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return bytes.toByteArray();
     }
 
     private static byte[] targetClass() {
