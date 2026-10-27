@@ -381,6 +381,11 @@ public final class CompatibilityScanner {
         }
     }
 
+    private static boolean isReferenceNamespace(String owner) {
+        return owner != null
+                && (owner.startsWith(MINECRAFT_PACKAGE) || owner.startsWith(FABRIC_API_PACKAGE));
+    }
+
     private static final class ReferenceCollector extends ClassVisitor {
         private final Set<Reference> references;
 
@@ -737,19 +742,19 @@ public final class CompatibilityScanner {
                 addDescriptor(owner);
                 return;
             }
-            if (owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.CLASS, owner, null, null));
             }
         }
 
         private void addMethod(String owner, String name, String descriptor) {
-            if (owner != null && owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.METHOD, owner, name, descriptor));
             }
         }
 
         private void addField(String owner, String name, String descriptor) {
-            if (owner != null && owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.FIELD, owner, name, descriptor));
             }
         }
