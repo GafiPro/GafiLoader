@@ -7,9 +7,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.jar.Attributes;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,7 +42,7 @@ class ProfileBootstrapInstallerTest {
                 }
                 """;
         Files.writeString(profile, original, StandardCharsets.UTF_8);
-        byte[] jarBytes = "test-bootstrap-jar".getBytes(StandardCharsets.UTF_8);
+        byte[] jarBytes = createBootstrapJar("0.1.586");
 
         ProfileBootstrapInstaller installer = new ProfileBootstrapInstaller();
         ProfileBootstrapInstaller.Result result = installer.install(
@@ -57,7 +63,10 @@ class ProfileBootstrapInstallerTest {
         assertEquals("dev.gafipro:gafiloader-bootstrap:0.1.586",
                 libraries.get(1).getAsJsonObject().get("name").getAsString());
 
-        installer.install(minecraft, new ByteArrayInputStream(jarBytes), "0.1.587");
+        byte[] updatedJarBytes = createBootstrapJar("0.1.587");
+        installer.install(minecraft, new ByteArrayInputStream(updatedJarBytes), "0.1.587");
+        Path updatedBootstrap = minecraft.resolve("libraries/dev/gafipro/gafiloader-bootstrap/0.1.587/gafiloader-bootstrap-0.1.587.jar");
+        assertTrue(java.util.Arrays.equals(updatedJarBytes, Files.readAllBytes(updatedBootstrap)));
         JsonObject updated = JsonParser.parseString(Files.readString(profile)).getAsJsonObject();
         JsonArray updatedLibraries = updated.getAsJsonArray("libraries");
         long bootstrapCount = 0;
@@ -101,4 +110,56 @@ class ProfileBootstrapInstallerTest {
         assertFalse(result.installed());
         assertTrue(result.message().contains("gafiloader-26.2"));
     }
+
+    @Test
+    void refusesAnInvalidBootstrapJarBeforePatchingTheProfile() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("invalid-bootstrap-minecraft"));
+        Path profileDirectory = Files.createDirectories(
+                minecraft.resolve("versions/gafiloader-26.2"));
+        Path profile = profileDirectory.resolve("gafiloader-26.2.json");
+        String original = """
+                {"id":"gafiloader-26.2","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient","libraries":[]}
+                """;
+        Files.writeString(profile, original, StandardCharsets.UTF_8);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () ->
+                new ProfileBootstrapInstaller().install(
+                        minecraft, new ByteArrayInputStream("not a jar".getBytes(StandardCharsets.UTF_8)), "0.1.588"));
+
+        assertEquals(original, Files.readString(profile, StandardCharsets.UTF_8));
+        assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
+        assertFalse(Files.exists(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.588/gafiloader-bootstrap-0.1.588.jar")));
+    }
+
+    private static byte[] createBootstrapJar(String version) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        Manifest manifest = new Manifest();
+        Attributes attributes = manifest.getMainAttributes();
+        attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        attributes.putValue("Main-Class", ProfileBootstrapInstaller.BOOTSTRAP_MAIN_CLASS);
+        attributes.putValue("Implementation-Version", version);
+        String[] entries = {
+                "dev/gafipro/gafiloader/LaunchBootstrap.class",
+                "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
+                "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
+                "com/google/gson/Gson.class",
+                "com/google/gson/GsonBuilder.class",
+                "com/google/gson/JsonParser.class",
+                "com/google/gson/JsonObject.class",
+                "com/google/gson/JsonArray.class",
+                "com/google/gson/JsonElement.class",
+                "com/google/gson/JsonPrimitive.class"
+        };
+        try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
+            for (String name : entries) {
+                jar.putNextEntry(new JarEntry(name));
+                jar.write(new byte[] {0});
+                jar.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
 }
