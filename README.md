@@ -73,6 +73,14 @@ Scan mod references against the 26.2 target JAR:
 ./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/mods --report build/mod-scan.json"
 ~~~
 
+To also detect removed or descriptor-changed references to the **public Fabric API**, pass the Fabric API JAR built for Minecraft 26.2. Gafi Loader indexes its nested `META-INF/jars/` modules as well as classes at the archive root:
+
+~~~bash
+./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/1.21.11-mods --target-api /path/to/fabric-api-26.2.jar --report build/mod-scan.json"
+~~~
+
+Repeat `--target-api` to add more target API JARs. This checks static class/method/field references in `net.fabricmc.fabric.api`; it is still a diagnostic, not a patcher, and cannot prove mixins, runtime behavior, or private Fabric implementation details are compatible. The report records which target API JARs were indexed.
+
 Compare the obfuscated 1.21.11 client JAR with the unobfuscated 26.2 target:
 
 ~~~bash
