@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -111,6 +112,7 @@ public final class Main {
 
         System.out.println("GafiLoader — automatic legacy metadata setup");
         System.out.println("Default Minecraft folder: " + minecraft.toAbsolutePath().normalize());
+        installLaunchBootstrap(minecraft);
         if (Files.isDirectory(defaultMods)) {
             try {
                 LegacyDependencyOverrideGenerator.Result result =
@@ -128,8 +130,8 @@ public final class Main {
                     runInteractiveWizard();
                     return;
                 }
-                System.out.println("Restart Minecraft for the dependency override to be read.");
-                System.out.println("This removes only the metadata gate; it does not supply missing APIs or guarantee runtime compatibility.");
+                System.out.println("The installed gafiloader-26.2 profile will refresh these overrides before each launch.");
+                System.out.println("This removes only the metadata gate; API, mapping, mixin, or runtime incompatibilities may still prevent startup.");
                 for (String warning : result.warnings()) System.out.println("Warning: " + warning);
             } catch (IOException | IllegalArgumentException exception) {
                 System.err.println("GafiLoader: " + exception.getMessage());
@@ -146,6 +148,23 @@ public final class Main {
             System.in.read();
         } catch (IOException ignored) {
             // Closing the console is harmless.
+        }
+    }
+
+    private static void installLaunchBootstrap(Path minecraft) {
+        try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
+            if (bootstrap == null) {
+                System.err.println("GafiLoader: embedded launch bootstrap was not packaged; the profile was not modified.");
+                return;
+            }
+            String version = Main.class.getPackage().getImplementationVersion();
+            if (version == null || version.isBlank()) version = "0.1.0-SNAPSHOT";
+
+            ProfileBootstrapInstaller.Result result =
+                    new ProfileBootstrapInstaller().install(minecraft, bootstrap, version);
+            System.out.println("[GafiLoader] " + result.message());
+        } catch (IOException | IllegalArgumentException exception) {
+            System.err.println("GafiLoader could not install the launch-time bootstrap: " + exception.getMessage());
         }
     }
 
