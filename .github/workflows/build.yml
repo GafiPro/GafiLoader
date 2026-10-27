@@ -73,6 +73,7 @@ jobs:
           name: GafiLoader-Installer-Windows-x64
           path: build/package-installer/*.exe
           if-no-files-found: error
+          retention-days: 3
       - name: Upload Windows app image
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -80,3 +81,4 @@ jobs:
           name: GafiLoader-Windows-x64
           path: build/package/GafiLoader/
           if-no-files-found: error
+          retention-days: 3
