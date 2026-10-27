@@ -73,7 +73,7 @@ Scan mod references against the 26.2 target JAR:
 ./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/mods --report build/mod-scan.json"
 ~~~
 
-To also detect removed or descriptor-changed references to the **public Fabric API**, pass the Fabric API JAR built for Minecraft 26.2. Gafi Loader indexes its nested `META-INF/jars/` modules as well as classes at the archive root:
+To also detect removed or descriptor-changed references to the **public Fabric API**, pass the Fabric API JAR built for Minecraft 26.2. The scanner inspects classes in legacy mod JARs and their nested `META-INF/jars/` modules, and indexes the target API archive's nested modules as well as classes at its root:
 
 ~~~bash
 ./gradlew run --args="--game /path/to/26.2-client.jar --mods /path/to/1.21.11-mods --target-api /path/to/fabric-api-26.2.jar --report build/mod-scan.json"
