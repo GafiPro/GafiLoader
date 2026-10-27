@@ -4,6 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -60,6 +63,36 @@ class LaunchBootstrapTest {
                 System.setProperty("fabric.modsFolder", previous);
             }
         }
+    }
+
+
+    @Test
+    void validatesTheOverrideFileFabricWillRead() throws Exception {
+        Path config = temporaryDirectory.resolve("config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "fabric-api": {
+                      "-depends": { "minecraft": "" }
+                    }
+                  }
+                }
+                """, StandardCharsets.UTF_8);
+
+        LaunchBootstrap.verifyGeneratedOverrides(config, java.util.List.of("fabric-api"));
+    }
+
+    @Test
+    void rejectsAnOverrideFileMissingAnExpectedLegacyMod() throws Exception {
+        Path config = temporaryDirectory.resolve("config/missing-override.json");
+        Files.writeString(config, """
+                {"version":1,"overrides":{}}
+                """, StandardCharsets.UTF_8);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () ->
+                LaunchBootstrap.verifyGeneratedOverrides(config, java.util.List.of("fabric-api")));
     }
 
 }
