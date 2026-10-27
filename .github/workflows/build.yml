@@ -26,10 +26,10 @@ jobs:
           java-version: '25'
       - name: Build and test with the pinned Gradle wrapper (Unix)
         if: runner.os != 'Windows'
-        run: ./gradlew --no-daemon clean test build
+        run: ./gradlew --no-daemon "-Pproject_version=0.1.$GITHUB_RUN_NUMBER" clean test build
       - name: Build and test with the pinned Gradle wrapper (Windows)
         if: runner.os == 'Windows'
-        run: .\gradlew.bat --no-daemon clean test installDist
+        run: .\gradlew.bat --no-daemon "-Pproject_version=0.1.$env:GITHUB_RUN_NUMBER" clean test installDist
       - name: Package Windows app image with bundled Java runtime
         if: runner.os == 'Windows'
         shell: pwsh
