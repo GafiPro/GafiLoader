@@ -45,7 +45,7 @@ public final class LaunchBootstrap {
             } catch (IOException | IllegalArgumentException exception) {
                 throw new IOException("GafiLoader could not prepare Fabric dependency overrides at "
                         + configPath + ". Minecraft was not handed to Fabric so the original "
-                        + incompatible-mod screen would not hide this setup error.", exception);
+                        + "incompatible-mod screen would not hide this setup error.", exception);
             }
         } else {
             System.out.println("[GafiLoader] No mod JARs found under " + modsDirectory
