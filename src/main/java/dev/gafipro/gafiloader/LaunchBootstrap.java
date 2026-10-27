@@ -7,6 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -42,6 +45,7 @@ public final class LaunchBootstrap {
             try {
                 LegacyDependencyOverrideGenerator.Result result =
                         new LegacyDependencyOverrideGenerator().generate(modsDirectory, configPath);
+                verifyGeneratedOverrides(configPath, result.overriddenModIds());
                 log(logPath, "JARs scanned: " + result.jarsScanned(), false);
                 log(logPath, "Legacy mod IDs prepared: " + result.modIdsOverridden(), false);
                 if (!result.overriddenModIds().isEmpty()) {
@@ -120,6 +124,42 @@ public final class LaunchBootstrap {
                     .toAbsolutePath().normalize();
         }
         return gameDirectory.resolve("mods").toAbsolutePath().normalize();
+    }
+
+    /**
+     * Independently validates the exact file Fabric will read before handing control to it.
+     * This catches an incomplete write or unexpected JSON structure at the integration boundary.
+     */
+    static void verifyGeneratedOverrides(Path configPath, List<String> expectedModIds) throws IOException {
+        final JsonElement parsed;
+        try {
+            parsed = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8));
+        } catch (RuntimeException exception) {
+            throw new IOException("Generated dependency override config is not valid JSON: " + configPath, exception);
+        }
+        if (!parsed.isJsonObject()) {
+            throw new IOException("Generated dependency override config must be a JSON object: " + configPath);
+        }
+        JsonObject root = parsed.getAsJsonObject();
+        if (!root.has("version") || !root.get("version").isJsonPrimitive()
+                || root.get("version").getAsInt() != 1) {
+            throw new IOException("Generated dependency override config must use spec version 1: " + configPath);
+        }
+        if (!root.has("overrides") || !root.get("overrides").isJsonObject()) {
+            throw new IOException("Generated dependency override config is missing its 'overrides' object: " + configPath);
+        }
+        JsonObject overrides = root.getAsJsonObject("overrides");
+        for (String modId : expectedModIds) {
+            if (!overrides.has(modId) || !overrides.get(modId).isJsonObject()) {
+                throw new IOException("Generated dependency override is missing mod ID '" + modId + "'.");
+            }
+            JsonObject modOverrides = overrides.getAsJsonObject(modId);
+            if (!modOverrides.has("-depends") || !modOverrides.get("-depends").isJsonObject()
+                    || !modOverrides.getAsJsonObject("-depends").has("minecraft")) {
+                throw new IOException("Generated dependency override for '" + modId
+                        + "' does not remove its minecraft dependency.");
+            }
+        }
     }
 
     private static void initializeLog(Path logPath) {
