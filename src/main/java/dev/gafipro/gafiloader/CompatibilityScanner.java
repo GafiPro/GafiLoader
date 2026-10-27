@@ -329,25 +329,56 @@ public final class CompatibilityScanner {
     private ModScan scanMod(Path modJar) throws IOException {
         Set<Reference> references = new LinkedHashSet<>();
         int[] classCount = {0};
-        try (JarFile jar = new JarFile(modJar.toFile())) {
+        scanModArchive(modJar, modJar.toString(), references, classCount, 0);
+        return new ModScan(classCount[0], Set.copyOf(references));
+    }
+
+    /**
+     * Fabric API and other bundles can place the actual mod classes inside META-INF/jars.
+     * Inspect those bytecode entries as part of the outer mod without modifying either archive.
+     */
+    private void scanModArchive(Path archive, String displaySource, Set<Reference> references,
+                                int[] classCount, int depth) throws IOException {
+        if (depth >= 8) {
+            throw new IOException("Nested mod JAR depth exceeded the safety limit: " + displaySource);
+        }
+        try (JarFile jar = new JarFile(archive.toFile())) {
             var entries = jar.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
-                if (entry.isDirectory() || !entry.getName().endsWith(".class")
-                        || entry.getName().startsWith("META-INF/versions/")) {
+                String name = entry.getName();
+                if (entry.isDirectory() || name.startsWith("META-INF/versions/")) {
                     continue;
                 }
-                classCount[0]++;
-                try (InputStream input = jar.getInputStream(entry)) {
-                    ClassReader reader = new ClassReader(input);
-                    reader.accept(new ReferenceCollector(references), ClassReader.SKIP_DEBUG);
-                } catch (RuntimeException exception) {
-                    throw new IOException("Could not inspect class " + entry.getName()
-                            + " in " + modJar, exception);
+                if (name.endsWith(".class")) {
+                    classCount[0]++;
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        ClassReader reader = new ClassReader(input);
+                        reader.accept(new ReferenceCollector(references), ClassReader.SKIP_DEBUG);
+                    } catch (RuntimeException exception) {
+                        throw new IOException("Could not inspect class " + name
+                                + " in " + displaySource, exception);
+                    }
+                    continue;
+                }
+
+                String lowerName = name.toLowerCase(java.util.Locale.ROOT);
+                if (!lowerName.startsWith("meta-inf/jars/") || !lowerName.endsWith(".jar")) {
+                    continue;
+                }
+                Path nested = Files.createTempFile("gafiloader-legacy-mod-", ".jar");
+                try {
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    scanModArchive(nested, displaySource + "!/" + name, references, classCount, depth + 1);
+                } finally {
+                    Files.deleteIfExists(nested);
                 }
             }
+        } catch (java.util.zip.ZipException exception) {
+            throw new IOException("Mod archive is not a readable JAR: " + displaySource, exception);
         }
-        return new ModScan(classCount[0], Set.copyOf(references));
     }
 
     private static final class ReferenceCollector extends ClassVisitor {
