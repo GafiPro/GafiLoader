@@ -87,6 +87,7 @@ class LaunchBootstrapTest {
     @Test
     void rejectsAnOverrideFileMissingAnExpectedLegacyMod() throws Exception {
         Path config = temporaryDirectory.resolve("config/missing-override.json");
+        Files.createDirectories(config.getParent());
         Files.writeString(config, """
                 {"version":1,"overrides":{}}
                 """, StandardCharsets.UTF_8);
