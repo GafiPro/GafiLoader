@@ -17,7 +17,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import java.util.TreeMap;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
@@ -31,7 +30,6 @@ import java.util.zip.ZipInputStream;
  */
 public final class LegacyDependencyOverrideGenerator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Pattern TARGET_LEGACY_VERSION = Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
 
     public Result generate(Path modsPath, Path configPath) throws IOException {
         if (modsPath == null || !Files.isDirectory(modsPath)) {
@@ -161,35 +159,11 @@ public final class LegacyDependencyOverrideGenerator {
             JsonObject metadata = parsed.getAsJsonObject();
             if (!metadata.has("id") || !metadata.get("id").isJsonPrimitive()) return;
             String id = metadata.get("id").getAsString();
-            if (id.isBlank() || !(dependsOnLegacyMinecraft(metadata.get("depends"))
-                    || declaresLegacyMinecraftVersion(metadata.get("version")))) return;
+            if (id.isBlank() || !LegacyMinecraftVersionDetector.matches(metadata)) return;
             found.put(id, metadata);
         } catch (RuntimeException exception) {
             unreadable.add(source + ": invalid fabric.mod.json (" + exception.getMessage() + ")");
         }
-    }
-
-    private static boolean dependsOnLegacyMinecraft(JsonElement depends) {
-        if (depends == null || !depends.isJsonObject()) return false;
-        JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
-        if (minecraft == null) return false;
-        if (minecraft.isJsonPrimitive()) return containsLegacyVersion(minecraft.getAsString());
-        if (minecraft.isJsonArray()) {
-            JsonArray ranges = minecraft.getAsJsonArray();
-            for (JsonElement range : ranges) {
-                if (range.isJsonPrimitive() && containsLegacyVersion(range.getAsString())) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean declaresLegacyMinecraftVersion(JsonElement version) {
-        return version != null && version.isJsonPrimitive()
-                && containsLegacyVersion(version.getAsString());
-    }
-
-    private static boolean containsLegacyVersion(String range) {
-        return range != null && TARGET_LEGACY_VERSION.matcher(range).find();
     }
 
     public record Result(String configPath, int jarsScanned, int modIdsOverridden,
