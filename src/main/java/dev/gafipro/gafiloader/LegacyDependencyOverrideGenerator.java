@@ -118,9 +118,14 @@ public final class LegacyDependencyOverrideGenerator {
         Path backup = configPath.resolveSibling(configPath.getFileName() + ".bak");
         if (!Files.exists(configPath)) {
             if (Files.isRegularFile(backup)) {
-                JsonObject recovered = parseConfigFile(backup);
-                warnings.add("Dependency override config was missing; recovered the last known-good copy from " + backup);
-                return recovered;
+                try {
+                    JsonObject recovered = parseConfigFile(backup);
+                    warnings.add("Dependency override config was missing; recovered the last known-good copy from " + backup);
+                    return recovered;
+                } catch (IOException exception) {
+                    warnings.add("Dependency override backup is also invalid; rebuilding a fresh config. "
+                            + "The backup was left untouched: " + exception.getMessage());
+                }
             }
             return new JsonObject();
         }
@@ -150,8 +155,12 @@ public final class LegacyDependencyOverrideGenerator {
                     exception.addSuppressed(backupException);
                 }
             }
-            throw new IOException("Existing Fabric dependency overrides config is invalid and no usable "
-                    + "backup exists. The original was preserved at " + preserved + ".", exception);
+            String preservationStatus = Files.isRegularFile(preserved)
+                    ? "The damaged original was preserved at " + preserved + "."
+                    : "The damaged original could not be copied to " + preserved + ".";
+            warnings.add("No valid dependency override config or backup was available; rebuilding a fresh config. "
+                    + preservationStatus + " Custom overrides from the damaged file could not be recovered.");
+            return new JsonObject();
         }
     }
 
