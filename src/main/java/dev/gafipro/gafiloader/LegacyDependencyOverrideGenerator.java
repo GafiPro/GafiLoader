@@ -57,7 +57,7 @@ public final class LegacyDependencyOverrideGenerator {
                 while (entries.hasMoreElements()) {
                     var entry = entries.nextElement();
                     if (entry.isDirectory()) continue;
-                    if (entry.getName().equals("fabric.mod.json")) {
+                    if (entry.getName().equalsIgnoreCase("fabric.mod.json")) {
                         try (InputStream input = jar.getInputStream(entry)) {
                             collectMetadata(input.readAllBytes(), jarPath + "!/" + entry.getName(), legacyMods, unreadable);
                         }
@@ -72,7 +72,7 @@ public final class LegacyDependencyOverrideGenerator {
             }
         }
 
-        JsonObject root = readExistingConfig(configPath);
+        JsonObject root = readExistingConfig(configPath, unreadable);
         JsonObject overrides = root.has("overrides") && root.get("overrides").isJsonObject()
                 ? root.getAsJsonObject("overrides") : new JsonObject();
 
@@ -93,7 +93,7 @@ public final class LegacyDependencyOverrideGenerator {
         if (parent != null) Files.createDirectories(parent);
 
         // Keep the previous config recoverable and avoid leaving a truncated file if writing fails.
-        if (Files.exists(output)) {
+        if (Files.exists(output) && isValidConfigFile(output)) {
             Path backup = output.resolveSibling(output.getFileName() + ".bak");
             Files.copy(output, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
@@ -114,22 +114,82 @@ public final class LegacyDependencyOverrideGenerator {
                 List.copyOf(legacyMods.keySet()), List.copyOf(unreadable));
     }
 
-    private static JsonObject readExistingConfig(Path configPath) throws IOException {
-        if (!Files.exists(configPath)) return new JsonObject();
-        if (!Files.isRegularFile(configPath)) {
-            throw new IllegalArgumentException("Config path is not a file: " + configPath);
-        }
-        try {
-            JsonElement parsed = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8));
-            if (!parsed.isJsonObject()) throw new IllegalArgumentException("Existing config must be a JSON object.");
-            JsonObject root = parsed.getAsJsonObject();
-            if (root.has("overrides") && !root.get("overrides").isJsonObject()) {
-                throw new IllegalArgumentException("Existing config 'overrides' value must be a JSON object.");
+    private static JsonObject readExistingConfig(Path configPath, List<String> warnings) throws IOException {
+        Path backup = configPath.resolveSibling(configPath.getFileName() + ".bak");
+        if (!Files.exists(configPath)) {
+            if (Files.isRegularFile(backup)) {
+                try {
+                    JsonObject recovered = parseConfigFile(backup);
+                    warnings.add("Dependency override config was missing; recovered the last known-good copy from " + backup);
+                    return recovered;
+                } catch (IOException exception) {
+                    warnings.add("Dependency override backup is also invalid; rebuilding a fresh config. "
+                            + "The backup was left untouched: " + exception.getMessage());
+                }
             }
-            return root;
-        } catch (com.google.gson.JsonParseException exception) {
-            throw new IllegalArgumentException("Existing Fabric dependency override config is invalid JSON: "
-                    + configPath, exception);
+            return new JsonObject();
+        }
+        if (!Files.isRegularFile(configPath)) {
+            throw new IOException("Config path is not a file: " + configPath);
+        }
+
+        try {
+            return parseConfigFile(configPath);
+        } catch (IOException exception) {
+            Path preserved = configPath.resolveSibling(configPath.getFileName() + ".corrupt");
+            try {
+                if (!Files.exists(preserved)) {
+                    Files.copy(configPath, preserved);
+                }
+            } catch (IOException preservationException) {
+                exception.addSuppressed(preservationException);
+            }
+
+            if (Files.isRegularFile(backup)) {
+                try {
+                    JsonObject recovered = parseConfigFile(backup);
+                    warnings.add("Invalid dependency override config was preserved at " + preserved
+                            + "; recovered the last known-good copy from " + backup);
+                    return recovered;
+                } catch (IOException backupException) {
+                    exception.addSuppressed(backupException);
+                }
+            }
+            String preservationStatus = Files.isRegularFile(preserved)
+                    ? "The damaged original was preserved at " + preserved + "."
+                    : "The damaged original could not be copied to " + preserved + ".";
+            warnings.add("No valid dependency override config or backup was available; rebuilding a fresh config. "
+                    + preservationStatus + " Custom overrides from the damaged file could not be recovered.");
+            return new JsonObject();
+        }
+    }
+
+    private static JsonObject parseConfigFile(Path path) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            throw new IOException("Config path is not a regular file: " + path);
+        }
+        final JsonElement parsed;
+        try {
+            parsed = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (RuntimeException exception) {
+            throw new IOException("Config contains invalid JSON: " + path, exception);
+        }
+        if (!parsed.isJsonObject()) {
+            throw new IOException("Config must contain a JSON object: " + path);
+        }
+        JsonObject root = parsed.getAsJsonObject();
+        if (root.has("overrides") && !root.get("overrides").isJsonObject()) {
+            throw new IOException("Config 'overrides' value must be a JSON object: " + path);
+        }
+        return root;
+    }
+
+    private static boolean isValidConfigFile(Path path) {
+        try {
+            parseConfigFile(path);
+            return true;
+        } catch (IOException exception) {
+            return false;
         }
     }
 
@@ -139,7 +199,7 @@ public final class LegacyDependencyOverrideGenerator {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
-                if (entry.getName().equals("fabric.mod.json")) {
+                if (entry.getName().equalsIgnoreCase("fabric.mod.json")) {
                     collectMetadata(zip.readAllBytes(), source + "!/" + entry.getName(), found, unreadable);
                 } else if (entry.getName().toLowerCase().endsWith(".jar")) {
                     collectNestedJar(zip.readAllBytes(), source + "!/" + entry.getName(), found, unreadable);
