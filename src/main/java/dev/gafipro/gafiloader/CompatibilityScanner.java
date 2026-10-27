@@ -36,6 +36,7 @@ import java.util.jar.JarFile;
  */
 public final class CompatibilityScanner {
     private static final String MINECRAFT_PACKAGE = "net/minecraft/";
+    private static final String FABRIC_API_PACKAGE = "net/fabricmc/fabric/api/";
 
     public Report scan(Path gameJar, Collection<Path> modJars) throws IOException {
         return scan(gameJar, modJars, null, null, null);
@@ -51,6 +52,17 @@ public final class CompatibilityScanner {
      */
     public Report scan(Path gameJar, Collection<Path> modJars, Path aliasesFile,
                        Path intermediaryMappingsFile, Path legacyMojangMappingsFile) throws IOException {
+        return scan(gameJar, modJars, aliasesFile, intermediaryMappingsFile,
+                legacyMojangMappingsFile, List.of());
+    }
+
+    /**
+     * Scans Minecraft symbols and, when supplied, public Fabric API symbols against the target API JAR.
+     * Fabric API is often a bundle whose actual classes live inside META-INF/jars, which is indexed too.
+     */
+    public Report scan(Path gameJar, Collection<Path> modJars, Path aliasesFile,
+                       Path intermediaryMappingsFile, Path legacyMojangMappingsFile,
+                       Collection<Path> targetApiJars) throws IOException {
         AliasSet aliases = aliasesFile == null ? AliasSet.empty() : AliasSet.load(aliasesFile);
         IntermediaryMappings intermediaryMappings = null;
         if (intermediaryMappingsFile != null) {
@@ -61,11 +73,17 @@ public final class CompatibilityScanner {
             MojangMappings mojangMappings = MojangMappings.load(legacyMojangMappingsFile);
             intermediaryMappings = IntermediaryMappings.load(intermediaryMappingsFile, mojangMappings);
         }
-        return scanInternal(gameJar, modJars, aliases, intermediaryMappings);
+        List<Path> apiJars = targetApiJars == null ? List.of() : targetApiJars.stream()
+                .map(path -> path.toAbsolutePath().normalize())
+                .distinct()
+                .sorted(Comparator.comparing(Path::toString))
+                .toList();
+        return scanInternal(gameJar, modJars, aliases, intermediaryMappings, apiJars);
     }
 
     private Report scanInternal(Path gameJar, Collection<Path> modJars, AliasSet aliases,
-                                IntermediaryMappings intermediaryMappings) throws IOException {
+                                IntermediaryMappings intermediaryMappings,
+                                List<Path> targetApiJars) throws IOException {
         if (gameJar == null || !Files.isRegularFile(gameJar)) {
             throw new IllegalArgumentException("The target game JAR does not exist: " + gameJar);
         }
@@ -74,6 +92,9 @@ public final class CompatibilityScanner {
         }
 
         Map<String, ClassInfo> gameClasses = indexGame(gameJar);
+        for (Path targetApiJar : targetApiJars) {
+            indexTargetApiJar(targetApiJar, gameClasses, 0);
+        }
         List<Path> orderedMods = modJars.stream()
                 .map(path -> path.toAbsolutePath().normalize())
                 .distinct()
@@ -91,15 +112,18 @@ public final class CompatibilityScanner {
 
             ModScan scan = scanMod(modJar);
             scannedClasses += scan.classCount();
-            inspectedReferences += scan.references().size();
 
             for (Reference sourceReference : scan.references()) {
                 Reference normalized = intermediaryMappings == null
                         ? sourceReference : intermediaryMappings.normalize(sourceReference);
                 Reference reference = aliases.normalize(normalized);
-                if (!reference.owner().startsWith(MINECRAFT_PACKAGE)) {
+                boolean minecraftReference = reference.owner().startsWith(MINECRAFT_PACKAGE);
+                boolean fabricApiReference = !targetApiJars.isEmpty()
+                        && reference.owner().startsWith(FABRIC_API_PACKAGE);
+                if (!minecraftReference && !fabricApiReference) {
                     continue;
                 }
+                inspectedReferences++;
 
                 ClassInfo targetClass = gameClasses.get(reference.owner());
                 if (reference.kind() == SymbolKind.CLASS) {
@@ -154,6 +178,7 @@ public final class CompatibilityScanner {
 
         return new Report(
                 gameJar.toAbsolutePath().normalize().toString(),
+                targetApiJars.stream().map(Path::toString).toList(),
                 orderedMods.stream().map(Path::toString).toList(),
                 summary,
                 findings);
@@ -202,46 +227,7 @@ public final class CompatibilityScanner {
                     continue;
                 }
                 try (InputStream input = jar.getInputStream(entry)) {
-                    ClassReader reader = new ClassReader(input);
-                    reader.accept(new ClassVisitor(Opcodes.ASM9) {
-                        private String className;
-                        private String superName;
-                        private List<String> interfaces = List.of();
-                        private final Set<Member> fields = new HashSet<>();
-                        private final Set<Member> methods = new HashSet<>();
-
-                        @Override
-                        public void visit(int version, int access, String name, String signature,
-                                          String superName, String[] interfaces) {
-                            className = name;
-                            this.superName = superName;
-                            this.interfaces = interfaces == null ? List.of() : List.of(interfaces.clone());
-                        }
-
-                        @Override
-                        public FieldVisitor visitField(int access, String name, String descriptor,
-                                                       String signature, Object value) {
-                            fields.add(new Member(name, descriptor));
-                            return null;
-                        }
-
-                        @Override
-                        public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                                         String signature, String[] exceptions) {
-                            methods.add(new Member(name, descriptor));
-                            return null;
-                        }
-
-                        @Override
-                        public void visitEnd() {
-                            classes.putIfAbsent(className,
-                                    new ClassInfo(Set.copyOf(fields), Set.copyOf(methods),
-                                            superName, List.copyOf(interfaces)));
-                        }
-                    }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-                } catch (RuntimeException exception) {
-                    throw new IOException("Could not index class " + entry.getName()
-                            + " in " + gameJar, exception);
+                    indexClass(input, entry.getName(), gameJar, classes);
                 }
             }
         }
@@ -251,28 +237,153 @@ public final class CompatibilityScanner {
         return classes;
     }
 
-    private ModScan scanMod(Path modJar) throws IOException {
-        Set<Reference> references = new LinkedHashSet<>();
-        int[] classCount = {0};
-        try (JarFile jar = new JarFile(modJar.toFile())) {
+    /**
+     * Indexes a target Fabric API archive and its nested modules. The official Fabric API
+     * distribution is an umbrella mod and stores most API classes in META-INF/jars/*.jar.
+     */
+    private void indexTargetApiJar(Path apiJar, Map<String, ClassInfo> classes, int depth) throws IOException {
+        if (depth >= 8) {
+            throw new IOException("Nested target API JAR depth exceeded the safety limit: " + apiJar);
+        }
+        if (apiJar == null || !Files.isRegularFile(apiJar)) {
+            throw new IllegalArgumentException("Target Fabric API JAR does not exist: " + apiJar);
+        }
+        try (JarFile jar = new JarFile(apiJar.toFile())) {
             var entries = jar.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
-                if (entry.isDirectory() || !entry.getName().endsWith(".class")
-                        || entry.getName().startsWith("META-INF/versions/")) {
+                String name = entry.getName();
+                if (entry.isDirectory() || name.startsWith("META-INF/versions/")) {
                     continue;
                 }
-                classCount[0]++;
-                try (InputStream input = jar.getInputStream(entry)) {
-                    ClassReader reader = new ClassReader(input);
-                    reader.accept(new ReferenceCollector(references), ClassReader.SKIP_DEBUG);
-                } catch (RuntimeException exception) {
-                    throw new IOException("Could not inspect class " + entry.getName()
-                            + " in " + modJar, exception);
+                if (name.endsWith(".class")) {
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        indexClass(input, name, apiJar, classes);
+                    }
+                } else {
+                    String lowerName = name.toLowerCase(java.util.Locale.ROOT);
+                    if (!lowerName.startsWith("meta-inf/jars/") || !lowerName.endsWith(".jar")) {
+                        continue;
+                    }
+                    Path nested = Files.createTempFile("gafiloader-target-api-", ".jar");
+                    try {
+                        try (InputStream input = jar.getInputStream(entry)) {
+                            Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        indexTargetApiJar(nested, classes, depth + 1);
+                    } finally {
+                        Files.deleteIfExists(nested);
+                    }
                 }
             }
+        } catch (java.util.zip.ZipException exception) {
+            throw new IOException("Target Fabric API is not a readable JAR: " + apiJar, exception);
         }
+    }
+
+    private static void indexClass(InputStream input, String entryName, Path sourceJar,
+                                   Map<String, ClassInfo> classes) throws IOException {
+        try {
+            ClassReader reader = new ClassReader(input);
+            reader.accept(new ClassVisitor(Opcodes.ASM9) {
+                private String className;
+                private String superName;
+                private List<String> interfaces = List.of();
+                private final Set<Member> fields = new HashSet<>();
+                private final Set<Member> methods = new HashSet<>();
+
+                @Override
+                public void visit(int version, int access, String name, String signature,
+                                  String superName, String[] interfaces) {
+                    className = name;
+                    this.superName = superName;
+                    this.interfaces = interfaces == null ? List.of() : List.of(interfaces.clone());
+                }
+
+                @Override
+                public FieldVisitor visitField(int access, String name, String descriptor,
+                                               String signature, Object value) {
+                    fields.add(new Member(name, descriptor));
+                    return null;
+                }
+
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                 String signature, String[] exceptions) {
+                    methods.add(new Member(name, descriptor));
+                    return null;
+                }
+
+                @Override
+                public void visitEnd() {
+                    classes.putIfAbsent(className,
+                            new ClassInfo(Set.copyOf(fields), Set.copyOf(methods),
+                                    superName, List.copyOf(interfaces)));
+                }
+            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        } catch (RuntimeException exception) {
+            throw new IOException("Could not index class " + entryName + " in " + sourceJar, exception);
+        }
+    }
+
+    private ModScan scanMod(Path modJar) throws IOException {
+        Set<Reference> references = new LinkedHashSet<>();
+        int[] classCount = {0};
+        scanModArchive(modJar, modJar.toString(), references, classCount, 0);
         return new ModScan(classCount[0], Set.copyOf(references));
+    }
+
+    /**
+     * Fabric API and other bundles can place the actual mod classes inside META-INF/jars.
+     * Inspect those bytecode entries as part of the outer mod without modifying either archive.
+     */
+    private void scanModArchive(Path archive, String displaySource, Set<Reference> references,
+                                int[] classCount, int depth) throws IOException {
+        if (depth >= 8) {
+            throw new IOException("Nested mod JAR depth exceeded the safety limit: " + displaySource);
+        }
+        try (JarFile jar = new JarFile(archive.toFile())) {
+            var entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (entry.isDirectory() || name.startsWith("META-INF/versions/")) {
+                    continue;
+                }
+                if (name.endsWith(".class")) {
+                    classCount[0]++;
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        ClassReader reader = new ClassReader(input);
+                        reader.accept(new ReferenceCollector(references), ClassReader.SKIP_DEBUG);
+                    } catch (RuntimeException exception) {
+                        throw new IOException("Could not inspect class " + name
+                                + " in " + displaySource, exception);
+                    }
+                    continue;
+                }
+
+                String lowerName = name.toLowerCase(java.util.Locale.ROOT);
+                if (!lowerName.startsWith("meta-inf/jars/") || !lowerName.endsWith(".jar")) {
+                    continue;
+                }
+                Path nested = Files.createTempFile("gafiloader-legacy-mod-", ".jar");
+                try {
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    scanModArchive(nested, displaySource + "!/" + name, references, classCount, depth + 1);
+                } finally {
+                    Files.deleteIfExists(nested);
+                }
+            }
+        } catch (java.util.zip.ZipException exception) {
+            throw new IOException("Mod archive is not a readable JAR: " + displaySource, exception);
+        }
+    }
+
+    private static boolean isReferenceNamespace(String owner) {
+        return owner != null
+                && (owner.startsWith(MINECRAFT_PACKAGE) || owner.startsWith(FABRIC_API_PACKAGE));
     }
 
     private static final class ReferenceCollector extends ClassVisitor {
@@ -631,19 +742,19 @@ public final class CompatibilityScanner {
                 addDescriptor(owner);
                 return;
             }
-            if (owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.CLASS, owner, null, null));
             }
         }
 
         private void addMethod(String owner, String name, String descriptor) {
-            if (owner != null && owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.METHOD, owner, name, descriptor));
             }
         }
 
         private void addField(String owner, String name, String descriptor) {
-            if (owner != null && owner.startsWith(MINECRAFT_PACKAGE)) {
+            if (isReferenceNamespace(owner)) {
                 references.add(new Reference(SymbolKind.FIELD, owner, name, descriptor));
             }
         }
@@ -832,6 +943,6 @@ public final class CompatibilityScanner {
                           int memberAliasesLoaded, int intermediaryClassesMapped,
                           int intermediaryMembersMapped) {}
 
-    public record Report(String targetGameJar, List<String> modJars, Summary summary,
-                         List<Finding> findings) {}
+    public record Report(String targetGameJar, List<String> targetApiJars, List<String> modJars,
+                         Summary summary, List<Finding> findings) {}
 }

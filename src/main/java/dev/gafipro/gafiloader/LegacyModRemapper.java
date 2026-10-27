@@ -137,10 +137,10 @@ public final class LegacyModRemapper {
             var entry = jar.getJarEntry("fabric.mod.json");
             if (entry == null) return false;
             try (InputStream input = jar.getInputStream(entry)) {
-                String metadata = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                return java.util.regex.Pattern.compile(
-                        "(?s)\"minecraft\"\\s*:\\s*\"[^\"]*1\\.21\\.11[^\"]*\"")
-                        .matcher(metadata).find();
+                var metadata = com.google.gson.JsonParser.parseString(
+                        new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                return metadata.isJsonObject()
+                        && LegacyMinecraftVersionDetector.matches(metadata.getAsJsonObject());
             }
         }
     }

@@ -1,0 +1,41 @@
+package dev.gafipro.gafiloader;
+
+import com.google.gson.JsonParser;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class LegacyMinecraftVersionDetectorTest {
+    @Test
+    void recognizesMinecraftDependencyRanges() {
+        assertTrue(matches("""
+                {"id":"legacy","depends":{"minecraft":"~1.21.11"}}
+                """));
+        assertTrue(matches("""
+                {"id":"legacy","depends":{"minecraft":["1.21.11","~1.21.10"]}}
+                """));
+    }
+
+    @Test
+    void recognizesLegacyArtifactVersionWhenMinecraftRangeIsIndirect() {
+        assertTrue(matches("""
+                {"id":"fabric-api","version":"0.141.6+1.21.11","depends":{"fabricloader":">=0.16.0"}}
+                """));
+    }
+
+    @Test
+    void rejectsOtherMinecraftVersionsAndNumericPrefixTraps() {
+        assertFalse(matches("""
+                {"id":"modern","version":"0.160.0+26.2","depends":{"minecraft":"~26.2"}}
+                """));
+        assertFalse(matches("""
+                {"id":"not-legacy","version":"1.21.110","depends":{"minecraft":"1.21.110"}}
+                """));
+    }
+
+    private static boolean matches(String metadata) {
+        return LegacyMinecraftVersionDetector.matches(
+                JsonParser.parseString(metadata).getAsJsonObject());
+    }
+}
