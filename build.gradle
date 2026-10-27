@@ -48,3 +48,36 @@ jar {
         )
     }
 }
+
+/*
+ * This deliberately small JAR is inserted into the dedicated Minecraft profile classpath.
+ * It contains only the pre-launch bootstrap, the metadata override generator, and Gson;
+ * Minecraft itself remains launched by Fabric Loader after the preflight completes.
+ */
+def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
+    dependsOn tasks.named('compileJava')
+    archiveFileName = 'gafiloader-bootstrap.jar'
+    destinationDirectory = layout.buildDirectory.dir('bootstrap')
+    from(sourceSets.main.output.classesDirs) {
+        include 'dev/gafipro/gafiloader/LaunchBootstrap.class'
+        include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class'
+        include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class'
+        include 'dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class'
+    }
+    from(configurations.runtimeClasspath.filter { it.name.startsWith('gson-') }.collect { zipTree(it) }) {
+        include 'com/google/gson/**'
+    }
+    manifest {
+        attributes(
+            'Main-Class': 'dev.gafipro.gafiloader.LaunchBootstrap',
+            'Implementation-Version': project.version
+        )
+    }
+}
+
+tasks.named('processResources') {
+    dependsOn bootstrapJarTask
+    from(bootstrapJarTask.flatMap { it.archiveFile }) {
+        into 'bootstrap'
+    }
+}
