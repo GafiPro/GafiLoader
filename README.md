@@ -4,7 +4,7 @@
 
 Gafi Loader is an experimental compatibility project targeting **Minecraft Java Edition 26.2** as the game that launches, with the goal of making mods built for **Minecraft 1.21.11** work alongside 26.2 mods without modifying the original mod JARs.
 
-> **Current status: compatibility-analysis milestone.** The repository was empty at project start. This first implementation is a command-line scanner that compares Minecraft API references in legacy mod JARs with the 26.2 game JAR. It is a development tool, **not yet a loader capable of loading 1.21.11 mods**. That distinction is intentional: compatibility rules should be based on measured differences and repeatable tests, not guesses.
+> **Current status: launch-time dependency-gate workaround + compatibility analysis.** After you run the GafiLoader application once, it patches only the dedicated `gafiloader-26.2` version profile to run a small bootstrap before Fabric Loader. On every launch, the bootstrap scans the actual game directory and removes the declared Minecraft-version gate for mods whose metadata targets **1.21.11**. This lets Fabric get past that *first* rejection; it does **not** recreate removed Minecraft/Fabric APIs or guarantee that a legacy mod will finish loading.
 
 ## Goals
 
@@ -21,21 +21,19 @@ Every push to `main` runs tests on Windows and Linux. The Windows job is configu
 
 To retrieve them, open the repository's **Actions** tab, open the latest successful **Build and test** run, and download the artifact from its Artifacts section. The installer uses a stable upgrade identifier and an increasing build version so future installers produced by this workflow can upgrade installations produced by the same workflow.
 
-This packaging step is for the current diagnostic utility; it is **not a finished Minecraft compatibility loader**. Do not use the EXE as evidence that Fabric API 1.21.11 is now supported by Minecraft 26.2.
+The EXE installs the pre-launch bootstrap into the `gafiloader-26.2` version profile. It does not change vanilla profiles, original mod JARs, or the Minecraft Launcher executable. The bootstrap's scope is the metadata rejection; API, mappings, and Mixin compatibility remain separate work.
 
-## Bypass the Fabric metadata version gate (diagnostic step)
+## Automatic pre-launch version-gate override
 
-Fabric Loader supports `config/fabric_loader_dependencies.json` to override a mod's declared dependencies. Gafi Loader can generate this file for mods whose `fabric.mod.json` explicitly declares Minecraft **1.21.11**. It scans top-level mod JARs and nested JARs (including Fabric API modules), leaves the original JARs untouched, merges entries into an existing override file rather than replacing unrelated overrides, saves an existing config as `fabric_loader_dependencies.json.bak`, and writes the replacement atomically.
+Fabric Loader reads `config/fabric_loader_dependencies.json` during mod resolution. The GafiLoader bootstrap now creates/merges the override file **before it calls Fabric Loader**, which avoids the previous ordering problem where running the utility separately was required.
 
-~~~powershell
-.\gradlew.bat run --args="--prepare-legacy-overrides --mods C:/Users/you/AppData/Roaming/.minecraft/mods --config C:/Users/you/AppData/Roaming/.minecraft/config/fabric_loader_dependencies.json"
-~~~
+1. Install/update GafiLoader and run its EXE once. It looks for `.minecraft/versions/gafiloader-26.2/gafiloader-26.2.json`, installs a small bootstrap JAR in `.minecraft/libraries/`, and changes only that profile's main class. The original version JSON is backed up as `gafiloader-26.2.json.gafiloader-backup`.
+2. In the official Minecraft Launcher, select and launch **`gafiloader-26.2`**. Do not launch the vanilla 26.2 profile if you expect GafiLoader's preflight to run.
+3. Before Fabric resolves mods, the bootstrap reads the real `--gameDir` launch argument, scans that instance's `mods` folder (including nested API modules), and updates `config/fabric_loader_dependencies.json`. The original mods are never modified.
 
-Replace `you` with your Windows account folder, and use the actual game directory if the 26.2 instance has a separate game directory. The command requires the project's JDK 25 development setup; this is not yet exposed as a button in the GafiLoader installer.
+The override removes only the declared `minecraft` dependency for metadata that advertises 1.21.11; it leaves Fabric Loader, other required mods, and conflict rules alone. Existing overrides are merged and the previous config is backed up as `fabric_loader_dependencies.json.bak`. This follows the [official Fabric dependency override format](https://docs.fabricmc.net/players/troubleshooting/dependency-overrides/).
 
-Run this only against the mods folder for the **26.2 Fabric instance**. Close the game first. The generator only removes the declared `minecraft` dependency gate for mod IDs that advertise 1.21.11; it does not remove requirements for Fabric Loader or other mods. The format follows the [official Fabric dependency override documentation](https://docs.fabricmc.net/players/troubleshooting/dependency-overrides/).
-
-**Important:** this is a diagnostic workaround, not the compatibility layer. It may get past the initial “wrong Minecraft version” rejection, but it does not make 1.21.11 bytecode, mixins, mappings, or Fabric API calls compatible with 26.2. If startup proceeds further and then crashes, that is a separate binary/API compatibility failure which requires a runtime adapter and testing. The generator does not claim that Fabric API 1.21.11 will successfully run on 26.2.
+**Important limitation:** this makes Fabric get past the early “wrong Minecraft version” gate for detected 1.21.11 mods. It does not make old bytecode, removed classes/methods, Fabric API behavior, mappings, Mixins, or access wideners compatible with 26.2. A later crash is a separate compatibility problem. If the bootstrap cannot write the override config, it stops before launching Fabric and reports the config path rather than silently continuing into the same incompatibility screen.
 
 ## Legacy bytecode remapping preparation
 
@@ -47,7 +45,7 @@ The project now has an experimental remapping command for mods whose metadata de
 
 This command is an experimental **bytecode preparation stage**, not a runtime loader and not proof that Fabric API 1.21.11 works on 26.2. Name remapping cannot recreate removed methods, changed method semantics, incompatible mixin injections, access wideners, or Fabric Loader internals. The output can still fail at launch; use the scanner/API report to identify missing symbols and add only reviewed aliases whose descriptors remain compatible. Do not put original and remapped copies together in the same active mods folder.
 
-The separate metadata override step may still be needed for Fabric Loader's Minecraft version dependency check. Run it against the mod directory used by the 26.2 instance and its actual `config/fabric_loader_dependencies.json` path. Bypassing the metadata gate and remapping bytecode solve different problems.
+The launch-time bootstrap handles the metadata override automatically. Bytecode remapping is still a separate experimental step, and is not automatically applied by the launch bootstrap.
 
 ## Compatibility scanner
 
@@ -117,8 +115,8 @@ The scanner reports missing classes, methods, and fields referenced by the mod b
 
 - The API comparator uses official 1.21.11 Mojang mappings to normalize the old game JAR. It reports class/member differences and possible renames, but does not yet infer or apply semantic replacements.
 - The mod scanner can normalize production Intermediary references when the 1.21.11 Intermediary mapping artifact and official Mojang mappings are supplied. It does not yet normalize Yarn-named development JARs or every custom namespace. Explicit TSV aliases can normalize known API changes, but each rule must be verified against the 26.2 API.
-- The scanner currently focuses on Minecraft-owned symbols; Fabric Loader and Fabric API compatibility require separate analysis.
-- It does not modify the launcher, Fabric Loader, or mod JARs and does not yet make legacy mods load.
+- The scanner checks Minecraft-owned symbols and can also check public `net.fabricmc.fabric.api` symbols when a target API JAR is supplied. It does not model Fabric Loader internals or private API implementation details.
+- The installer changes only the dedicated `gafiloader-26.2` version JSON so its bootstrap runs before Fabric Loader. It leaves the launcher executable, Fabric Loader JARs, and mod JARs untouched. The metadata gate is bypassed, but full runtime compatibility is not yet complete.
 - A 26.2 JAR from the official launcher and real mod JARs are required for end-to-end validation.
 
 ## Development approach
