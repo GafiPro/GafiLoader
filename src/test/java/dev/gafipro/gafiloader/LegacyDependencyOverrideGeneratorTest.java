@@ -138,6 +138,47 @@ class LegacyDependencyOverrideGeneratorTest {
         assertEquals(0, result.modIdsOverridden());
     }
 
+
+    @Test
+    void recoversFromCorruptConfigUsingLastKnownGoodBackupWithoutDestroyingEitherCopy() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("recovery-mods"));
+        writeJar(mods.resolve("fabric-api.jar"), "fabric.mod.json", """
+                {
+                  "id": "fabric-api",
+                  "version": "0.141.6+1.21.11",
+                  "depends": { "fabricloader": ">=0.16.0" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("recovery-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, "{ this is broken JSON");
+        Path backup = config.resolveSibling("fabric_loader_dependencies.json.bak");
+        Files.writeString(backup, """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "user-custom-override": {
+                      "-depends": { "java": "" }
+                    }
+                  }
+                }
+                """);
+
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertTrue(Files.exists(config.resolveSibling("fabric_loader_dependencies.json.corrupt")));
+        assertTrue(Files.readString(config.resolveSibling("fabric_loader_dependencies.json.corrupt"))
+                .contains("broken JSON"));
+        assertTrue(Files.readString(backup).contains("user-custom-override"),
+                "Recovery must not replace the last known-good backup with the damaged file");
+        assertTrue(root.getAsJsonObject("overrides").has("user-custom-override"));
+        assertTrue(root.getAsJsonObject("overrides").has("fabric-api"));
+        assertTrue(result.warnings().stream().anyMatch(warning -> warning.contains("recovered the last known-good")));
+    }
+
     private static byte[] zipBytes(String name, byte[] content) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
