@@ -65,3 +65,11 @@ Em cada sessão de trabalho:
 4. Executar testes/builds adequados; separar claramente resultados observados de hipóteses.
 5. Atualizar este ficheiro **na mesma sessão** com data, ficheiros/commits alterados, comandos/testes e resultados, falhas conhecidas e próximos passos numerados.
 6. Nunca marcar uma tarefa como concluída sem evidência verificável. Se uma ferramenta, acesso ou ambiente impedir o trabalho, registar a limitação e continuar com outra tarefa útil.
+
+## Update 2026-10-27 — GitHub Actions artifact retention
+
+- Updated `.github/workflows/build.yml` so both uploaded Windows artifacts (`GafiLoader-Installer-Windows-x64` and `GafiLoader-Windows-x64`) use `retention-days: 3`.
+- Commit: `459ca92cda9d2e024fc25892c64cef6802b723a8`.
+- This controls retention for artifacts uploaded by these workflow steps on future runs; it does not immediately delete existing artifacts or change repository-wide defaults.
+- Automation cadence request: ChatGPT Automations currently supports daily/weekly/monthly recurring schedules, not every two hours. The existing `Retomar GafiLoader` schedule was therefore left unchanged rather than pretending an unsupported cadence was configured.
+
