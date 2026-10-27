@@ -112,7 +112,6 @@ public final class CompatibilityScanner {
 
             ModScan scan = scanMod(modJar);
             scannedClasses += scan.classCount();
-            inspectedReferences += scan.references().size();
 
             for (Reference sourceReference : scan.references()) {
                 Reference normalized = intermediaryMappings == null
@@ -124,6 +123,7 @@ public final class CompatibilityScanner {
                 if (!minecraftReference && !fabricApiReference) {
                     continue;
                 }
+                inspectedReferences++;
 
                 ClassInfo targetClass = gameClasses.get(reference.owner());
                 if (reference.kind() == SymbolKind.CLASS) {
