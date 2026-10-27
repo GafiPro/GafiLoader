@@ -179,6 +179,36 @@ class LegacyDependencyOverrideGeneratorTest {
         assertTrue(result.warnings().stream().anyMatch(warning -> warning.contains("recovered the last known-good")));
     }
 
+
+    @Test
+    void rebuildsConfigWhenBothCurrentAndBackupAreCorrupt() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("double-corrupt-mods"));
+        writeJar(mods.resolve("fabric-api.jar"), "fabric.mod.json", """
+                {
+                  "id": "fabric-api",
+                  "version": "0.141.6+1.21.11",
+                  "depends": { "fabricloader": ">=0.16.0" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("double-corrupt-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, "{ broken current config");
+        Path backup = config.resolveSibling("fabric_loader_dependencies.json.bak");
+        Files.writeString(backup, "{ broken backup config");
+
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertTrue(Files.exists(config.resolveSibling("fabric_loader_dependencies.json.corrupt")));
+        assertTrue(Files.readString(backup).contains("broken backup config"),
+                "The invalid backup must remain available for manual recovery");
+        assertTrue(root.getAsJsonObject("overrides").has("fabric-api"),
+                "A fresh, valid config should still include detected legacy mod overrides");
+        assertTrue(result.warnings().stream().anyMatch(warning -> warning.contains("rebuilding a fresh config")));
+    }
+
     private static byte[] zipBytes(String name, byte[] content) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
