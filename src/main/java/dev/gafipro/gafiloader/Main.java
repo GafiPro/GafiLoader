@@ -45,7 +45,8 @@ public final class Main {
                 List<Path> mods = findModJars(options.modsPath());
                 CompatibilityScanner.Report report = new CompatibilityScanner()
                         .scan(options.gameJar(), mods, options.aliasesPath(),
-                                options.intermediaryMappingsPath(), options.legacyMappingsPath());
+                                options.intermediaryMappingsPath(), options.legacyMappingsPath(),
+                                options.targetApiJars());
 
                 printSummary(report);
                 for (CompatibilityScanner.Finding finding : report.findings()) {
@@ -312,7 +313,11 @@ public final class Main {
         System.out.println("Mod JARs scanned:  " + summary.modJarsScanned());
         System.out.println("Mod classes read:  " + summary.modClassesScanned());
         System.out.println("Target classes:    " + summary.targetClassesIndexed());
-        System.out.println("Minecraft refs:    " + summary.referencesInspected());
+        if (!report.targetApiJars().isEmpty()) {
+            System.out.println("Target Fabric API: " + String.join(", ", report.targetApiJars()));
+            System.out.println("Checked namespaces: Minecraft + Fabric API public packages");
+        }
+        System.out.println("References inspected: " + summary.referencesInspected());
         System.out.println("Findings:          " + summary.findingCount()
                 + " (classes: " + summary.missingClasses()
                 + ", methods: " + summary.missingMethods()
@@ -385,6 +390,7 @@ public final class Main {
         Path legacyGameJar = null;
         Path legacyMappingsPath = null;
         Path apiReportPath = null;
+        List<Path> targetApiJars = new java.util.ArrayList<>();
         boolean help = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -414,6 +420,12 @@ public final class Main {
                         throw new IllegalArgumentException("--aliases requires a TSV alias file.");
                     }
                     aliasesPath = Path.of(args[i]);
+                }
+                case "--target-api" -> {
+                    if (++i >= args.length) {
+                        throw new IllegalArgumentException("--target-api requires a target Fabric API JAR.");
+                    }
+                    targetApiJars.add(Path.of(args[i]));
                 }
                 case "--intermediary-mappings" -> {
                     if (++i >= args.length) {
@@ -445,7 +457,7 @@ public final class Main {
         }
 
         if (help) {
-            return new Options(null, null, null, null, null, null, null, null, true);
+            return new Options(null, null, null, null, null, null, null, null, List.of(), true);
         }
         if (gameJar == null) {
             throw new IllegalArgumentException("Missing required --game argument (Minecraft 26.2 target).");
@@ -466,8 +478,8 @@ public final class Main {
         if (intermediaryMappingsPath != null && modsPath == null) {
             throw new IllegalArgumentException("--intermediary-mappings requires --mods.");
         }
-        if (modsPath == null && (reportPath != null || aliasesPath != null)) {
-            throw new IllegalArgumentException("--report and --aliases require --mods.");
+        if (modsPath == null && (reportPath != null || aliasesPath != null || !targetApiJars.isEmpty())) {
+            throw new IllegalArgumentException("--report, --aliases, and --target-api require --mods.");
         }
         if (legacyGameJar == null && apiReportPath != null) {
             throw new IllegalArgumentException("--api-report requires --legacy-game.");
@@ -480,11 +492,15 @@ public final class Main {
         checkFile(intermediaryMappingsPath, "Intermediary mappings file/JAR");
         checkFile(legacyGameJar, "Legacy game JAR");
         checkFile(legacyMappingsPath, "Legacy mappings file");
+        for (Path targetApiJar : targetApiJars) {
+            checkFile(targetApiJar, "Target Fabric API JAR");
+            requireJar(targetApiJar, "Target Fabric API");
+        }
         if (legacyGameJar != null) {
             requireJar(legacyGameJar, "Legacy game");
         }
         return new Options(gameJar, modsPath, reportPath, aliasesPath, intermediaryMappingsPath,
-                legacyGameJar, legacyMappingsPath, apiReportPath, false);
+                legacyGameJar, legacyMappingsPath, apiReportPath, List.copyOf(targetApiJars), false);
     }
 
     private static void checkFile(Path path, String description) {
@@ -500,7 +516,7 @@ public final class Main {
                 Usage:
                   gafi-loader --prepare-legacy-overrides --mods <mods-directory> --config <config/fabric_loader_dependencies.json>
                   gafi-loader --remap-legacy-mods --mods <original-mods> --intermediary-mappings <1.21.11-mappings.jar> --legacy-mappings <official-mappings.txt> --game <26.2.jar> --output <separate-dir> [--aliases aliases.tsv]
-                  gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--report report.json] [--aliases aliases.tsv]
+                  gafi-loader --game <26.2-game.jar> --mods <mod.jar-or-directory> [--target-api <26.2-fabric-api.jar>] [--report report.json] [--aliases aliases.tsv]
                   gafi-loader --game <26.2-game.jar> --legacy-game <1.21.11-game.jar> --legacy-mappings <official-mappings.txt> [--api-report api-diff.json]
                   gafi-loader --game <26.2-game.jar> --mods <mods> --intermediary-mappings <intermediary-v2.jar> --legacy-mappings <official-mappings.txt>
                   Add --mods and --legacy-game to run both analyses.
@@ -512,6 +528,7 @@ public final class Main {
                   --config <path>             Output/merge path for fabric_loader_dependencies.json (override mode)
                   --game <path>             Minecraft 26.2 target JAR (always the target)
                   --mods <path>             One mod JAR or a directory of JARs to scan
+                  --target-api <path>       Target Fabric API JAR (repeatable); check old Fabric API calls
                   --report <path>           Save the mod symbol scan as JSON
                   --aliases <path>          Apply reviewed TSV class/method/field aliases
                   --intermediary-mappings <path>  Tiny file or JAR for 1.21.11 Intermediary mappings
@@ -529,5 +546,6 @@ public final class Main {
 
     private record Options(Path gameJar, Path modsPath, Path reportPath, Path aliasesPath,
                            Path intermediaryMappingsPath, Path legacyGameJar,
-                           Path legacyMappingsPath, Path apiReportPath, boolean help) {}
+                           Path legacyMappingsPath, Path apiReportPath, List<Path> targetApiJars,
+                           boolean help) {}
 }
