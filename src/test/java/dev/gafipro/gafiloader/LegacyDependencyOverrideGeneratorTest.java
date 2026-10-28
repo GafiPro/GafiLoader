@@ -38,7 +38,7 @@ class LegacyDependencyOverrideGeneratorTest {
 
         Path config = temporaryDirectory.resolve("config/fabric_loader_dependencies.json");
         Files.createDirectories(config.getParent());
-        Files.writeString(config, """
+        String originalConfig = """
                 {
                   "version": 1,
                   "overrides": {
@@ -49,7 +49,8 @@ class LegacyDependencyOverrideGeneratorTest {
                     }
                   }
                 }
-                """);
+                """;
+        Files.writeString(config, originalConfig);
 
         LegacyDependencyOverrideGenerator.Result result =
                 new LegacyDependencyOverrideGenerator().generate(mods, config);
@@ -66,6 +67,18 @@ class LegacyDependencyOverrideGeneratorTest {
                 .getAsJsonObject("-depends").get("java").getAsString());
         assertEquals(1, result.modIdsOverridden());
         assertTrue(result.warnings().isEmpty());
+
+        // A later launch must not replace the original backup with our generated config.
+        new LegacyDependencyOverrideGenerator().generate(mods, config);
+        assertEquals(originalConfig,
+                Files.readString(config.resolveSibling("fabric_loader_dependencies.json.bak")));
+        JsonObject afterSecondRun = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        assertEquals("", afterSecondRun.getAsJsonObject("overrides")
+                .getAsJsonObject("fabric-api").getAsJsonObject("-depends")
+                .get("minecraft").getAsString());
+        assertEquals("", afterSecondRun.getAsJsonObject("overrides")
+                .getAsJsonObject("other-mod").getAsJsonObject("-depends")
+                .get("java").getAsString());
     }
 
     @Test
