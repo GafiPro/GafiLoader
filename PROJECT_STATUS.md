@@ -1,7 +1,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-10-27
+> Última atualização: 2026-10-28
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -71,5 +71,17 @@ Em cada sessão de trabalho:
 - Updated `.github/workflows/build.yml` so both uploaded Windows artifacts (`GafiLoader-Installer-Windows-x64` and `GafiLoader-Windows-x64`) use `retention-days: 3`.
 - Commit: `459ca92cda9d2e024fc25892c64cef6802b723a8`.
 - This controls retention for artifacts uploaded by these workflow steps on future runs; it does not immediately delete existing artifacts or change repository-wide defaults.
-- Automation cadence request: ChatGPT Automations currently supports daily/weekly/monthly recurring schedules, not every two hours. The existing `Retomar GafiLoader` schedule was therefore left unchanged rather than pretending an unsupported cadence was configured.
+- Automation cadence request: ChatGPT Automations supports daily/weekly/monthly recurring schedules, not every two hours. `Retomar GafiLoader` remains daily, with a flexible target of 10:00 Europe/Lisbon; the platform does not promise an exact minute.
 
+
+## Update 2026-10-28 — Preserve the original dependency-override backup
+
+- Reviewed the current LaunchBootstrap, LegacyDependencyOverrideGenerator, LegacyMinecraftVersionDetector, related regression tests, installer, and recent commit history before changing code.
+- Confirmed from the official Fabric dependency-override documentation (https://docs.fabricmc.net/players/troubleshooting/dependency-overrides) that version 1, the overrides object, and -depends.minecraft are the documented format. This confirms the intended syntax, but does not prove the user's actual runtime is reading the file.
+- Found a concrete backup-safety defect: every launch copied the current generated fabric_loader_dependencies.json over the fixed .bak file, so after the first launch the backup could cease to be the pre-GafiLoader configuration.
+- Fixed src/main/java/dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.java to create .bak only when no backup exists, preserving the first pre-modification configuration across later launches.
+- Extended src/test/java/dev/gafipro/gafiloader/LegacyDependencyOverrideGeneratorTest.java to run generation a second time and verify the original backup and unrelated override entries remain intact.
+- Commits: daab2e3c0bda434cae3079b5f44fe64862ff6d3b (implementation), c781b56719e4808681e7a024d8d7b9702ef3b6b7 (regression test).
+- Validation: GitHub Actions run 40673710829 (https://github.com/GafiPro/GafiLoader/actions/runs/40673710829) was still running when this entry was written. Do not treat the change as CI-validated until that run completes successfully. No local Gradle command was run in this remote-only session.
+- P0 remains open: no current latest.log, actual generated config/fabric_loader_dependencies.json, or confirmed failing mod ID from the user's 26.2 instance was available here. The current code has tests for direct legacy metadata, the 0.141.6+1.21.11 artifact-version pattern, and nested modules, but these unit tests cannot prove the real launcher run works.
+- Next steps: (1) check the workflow result; (2) obtain the first dependency error plus the bootstrap's [GafiLoader] log lines from the real instance; (3) compare the exact failing mod ID and on-disk override file to determine whether the bootstrap is absent, scanning the wrong game directory, or Fabric is rejecting a different dependency; (4) add a regression test for the observed cause before claiming the gate is fixed.
