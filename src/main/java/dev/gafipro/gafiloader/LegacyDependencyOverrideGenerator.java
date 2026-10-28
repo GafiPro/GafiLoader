@@ -95,7 +95,11 @@ public final class LegacyDependencyOverrideGenerator {
         // Keep the previous config recoverable and avoid leaving a truncated file if writing fails.
         if (Files.exists(output)) {
             Path backup = output.resolveSibling(output.getFileName() + ".bak");
-            Files.copy(output, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            // Preserve the first pre-GafiLoader config. Replacing this on every launch would
+            // eventually turn the backup into a copy of our already-modified override file.
+            if (!Files.exists(backup)) {
+                Files.copy(output, backup);
+            }
         }
         Path temporary = output.resolveSibling(output.getFileName() + ".tmp");
         try {
