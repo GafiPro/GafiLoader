@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,6 +67,56 @@ class LaunchBootstrapTest {
                 "--username", "test", "--gameDir", gameDirectory.toString(), "--version", "gafiloader-26.2"
         });
         assertEquals(gameDirectory.toAbsolutePath().normalize(), resolved);
+    }
+
+    @Test
+    void resolvesFabricCustomModsFolderProperty() {
+        String previous = System.getProperty("fabric.modsFolder");
+        Path gameDirectory = temporaryDirectory.resolve("instance");
+        Path customMods = temporaryDirectory.resolve("shared-mods");
+        try {
+            System.setProperty("fabric.modsFolder", customMods.toString());
+            assertEquals(customMods.toAbsolutePath().normalize(),
+                    LaunchBootstrap.resolveModsDirectory(gameDirectory));
+        } finally {
+            if (previous == null) System.clearProperty("fabric.modsFolder");
+            else System.setProperty("fabric.modsFolder", previous);
+        }
+    }
+
+    @Test
+    void defaultsModsFolderToActualGameDirectory() {
+        String previous = System.getProperty("fabric.modsFolder");
+        Path gameDirectory = temporaryDirectory.resolve("instance");
+        try {
+            System.clearProperty("fabric.modsFolder");
+            assertEquals(gameDirectory.resolve("mods").toAbsolutePath().normalize(),
+                    LaunchBootstrap.resolveModsDirectory(gameDirectory));
+        } finally {
+            if (previous == null) System.clearProperty("fabric.modsFolder");
+            else System.setProperty("fabric.modsFolder", previous);
+        }
+    }
+
+    @Test
+    void validatesTheOverrideFileFabricWillRead() throws Exception {
+        Path config = temporaryDirectory.resolve("config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, """
+                {"version":1,"overrides":{"fabric-api":{"-depends":{"minecraft":""}}}}
+                """, StandardCharsets.UTF_8);
+        LaunchBootstrap.verifyGeneratedOverrides(config, List.of("fabric-api"));
+    }
+
+    @Test
+    void rejectsAnOverrideFileMissingAnExpectedLegacyMod() throws Exception {
+        Path config = temporaryDirectory.resolve("config/missing-override.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, """
+                {"version":1,"overrides":{}}
+                """, StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () ->
+                LaunchBootstrap.verifyGeneratedOverrides(config, List.of("fabric-api")));
     }
 
     @Test
