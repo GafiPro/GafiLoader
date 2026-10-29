@@ -237,6 +237,8 @@ public final class ProfileBootstrapInstaller {
             }
             JsonObject profiles = profilesElement == null ? new JsonObject() : profilesElement.getAsJsonObject();
             JsonElement existing = profiles.get(PROFILE_ID);
+            boolean preserveExistingGameDirectory = existing != null && existing.isJsonObject()
+                    && nonBlankString(existing.getAsJsonObject().get("gameDir"));
             JsonObject profile;
             if (existing == null) {
                 profile = copySourceInstallationSettings(profiles, sourceVersionId);
@@ -247,7 +249,7 @@ public final class ProfileBootstrapInstaller {
                 throw new IOException("The launcher installation entry '" + PROFILE_ID
                         + "' is not a JSON object in " + path + "; refusing to replace it.");
             }
-            // Merge only absent values: preserve any GafiLoader-specific choices made by the user.
+            // Merge only absent values: preserve user choices already made for this GafiLoader profile.
             JsonObject sourceSettings = copySourceInstallationSettings(profiles, sourceVersionId);
             if (sourceSettings != null) {
                 for (var setting : sourceSettings.entrySet()) {
@@ -256,15 +258,12 @@ public final class ProfileBootstrapInstaller {
                     }
                 }
             }
-            // If neither this installation nor its source profile has a custom gameDir, reuse an
-            // already-existing GafiLoader-specific directory. Keep the launcher data root for
-            // versions/libraries; this setting selects only mods, config, saves and logs.
-            String configuredGameDirectory = stringValue(profile.get("gameDir"));
-            if (configuredGameDirectory == null || configuredGameDirectory.isBlank()) {
-                Path dedicatedGameDirectory = existingDedicatedGameDirectory(minecraftDirectory);
-                if (dedicatedGameDirectory != null) {
-                    profile.addProperty("gameDir", dedicatedGameDirectory.toString());
-                }
+            // Prefer an existing GafiLoader-specific game folder when this GafiLoader profile has
+            // no explicit choice of its own, even if the source Fabric profile points elsewhere.
+            // Keep versions/libraries under the launcher data root; gameDir is for mods/config/saves/logs.
+            Path dedicatedGameDirectory = existingDedicatedGameDirectory(minecraftDirectory);
+            if (!preserveExistingGameDirectory && dedicatedGameDirectory != null) {
+                profile.addProperty("gameDir", dedicatedGameDirectory.toString());
             }
             if (!profile.has("created")) profile.addProperty("created", now);
             if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
@@ -276,6 +275,11 @@ public final class ProfileBootstrapInstaller {
             updates.add(new LauncherProfileUpdate(path, originalBytes, root));
         }
         return List.copyOf(updates);
+    }
+
+    private static boolean nonBlankString(JsonElement value) {
+        String string = stringValue(value);
+        return string != null && !string.isBlank();
     }
 
     private static Path existingDedicatedGameDirectory(Path minecraftDirectory) {
