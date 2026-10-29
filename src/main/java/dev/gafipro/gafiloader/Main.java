@@ -5,6 +5,11 @@ import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -107,16 +112,22 @@ public final class Main {
         Path minecraft = appData == null || appData.isBlank()
                 ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
                 : Path.of(appData, ".minecraft");
+        minecraft = minecraft.toAbsolutePath().normalize();
+        Path setupLog = minecraft.resolve("logs").resolve("gafiloader-setup.log");
+        initializeSetupLog(setupLog, minecraft);
 
         System.out.println("GafiLoader — create a dedicated Minecraft installation");
-        System.out.println("Minecraft folder: " + minecraft.toAbsolutePath().normalize());
+        System.out.println("Minecraft folder: " + minecraft);
+        System.out.println("Setup diagnostic log: " + setupLog);
         System.out.println("IMPORTANT: fully close Minecraft Launcher before continuing, then reopen it after setup.");
         System.out.println("GafiLoader will create a separate " + ProfileBootstrapInstaller.PROFILE_NAME
                 + " launcher entry from an installed Fabric " + ProfileBootstrapInstaller.GAME_VERSION + " profile.");
         System.out.println("The source Fabric version and vanilla profiles will remain unchanged.");
         System.out.println("Dependency overrides are generated at launch using the new installation's actual --gameDir.");
 
-        boolean installed = installLaunchBootstrap(minecraft);
+        boolean installed = installLaunchBootstrap(minecraft, setupLog);
+        appendSetupLog(setupLog, (installed ? "RESULT: SUCCESS" : "RESULT: FAILED")
+                + "; minecraftDirectory=" + minecraft);
         System.out.println();
         if (installed) {
             System.out.println("Success: the " + ProfileBootstrapInstaller.PROFILE_NAME
@@ -124,7 +135,7 @@ public final class Main {
             System.out.println("If setup says no Fabric 26.2 profile exists, install Fabric for Minecraft 26.2 once and rerun GafiLoader.");
             System.out.println("Compatibility with every legacy mod is not guaranteed; keep the original mod JARs.");
         } else {
-            System.out.println("The GafiLoader installation was not created. Read the message above; no vanilla profile or mod JAR was intentionally changed.");
+            System.out.println("The GafiLoader installation was not created. Read the message above or inspect the setup log.");
         }
         System.out.println();
         System.out.println("Press Enter to close.");
@@ -135,22 +146,57 @@ public final class Main {
         }
     }
 
-    private static boolean installLaunchBootstrap(Path minecraft) {
+    private static boolean installLaunchBootstrap(Path minecraft, Path setupLog) {
+        appendSetupLog(setupLog, "Starting setup. minecraftDirectory=" + minecraft);
         try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
             if (bootstrap == null) {
-                System.err.println("GafiLoader: embedded launch bootstrap was not packaged; the profile was not modified.");
+                String message = "Embedded launch bootstrap was not packaged; the profile was not modified.";
+                System.err.println("GafiLoader: " + message);
+                appendSetupLog(setupLog, "ERROR: " + message);
                 return false;
             }
             String version = Main.class.getPackage().getImplementationVersion();
             if (version == null || version.isBlank()) version = "0.1.0-SNAPSHOT";
+            appendSetupLog(setupLog, "Application implementation version=" + version);
 
             ProfileBootstrapInstaller.Result result =
                     new ProfileBootstrapInstaller().install(minecraft, bootstrap, version);
             System.out.println("[GafiLoader] " + result.message());
+            appendSetupLog(setupLog, "Installer result: installed=" + result.installed()
+                    + "; message=" + result.message());
+            appendSetupLog(setupLog, "Version JSON path=" + result.profileJson());
+            appendSetupLog(setupLog, "Bootstrap JAR path=" + result.bootstrapJar());
             return result.installed();
-        } catch (IOException | IllegalArgumentException exception) {
+        } catch (IOException | RuntimeException exception) {
             System.err.println("GafiLoader could not install the launch-time bootstrap: " + exception.getMessage());
+            StringWriter details = new StringWriter();
+            exception.printStackTrace(new PrintWriter(details));
+            appendSetupLog(setupLog, "ERROR: " + details);
             return false;
+        }
+    }
+
+    private static void initializeSetupLog(Path logPath, Path minecraftDirectory) {
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath, "GafiLoader setup diagnostics — " + Instant.now()
+                            + System.lineSeparator() + "Minecraft directory: " + minecraftDirectory
+                            + System.lineSeparator(),
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException exception) {
+            System.err.println("[GafiLoader] Could not create setup log: " + logPath
+                    + " (" + exception.getMessage() + ")");
+        }
+    }
+
+    private static void appendSetupLog(Path logPath, String message) {
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath, Instant.now() + " " + message + System.lineSeparator(),
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException exception) {
+            System.err.println("[GafiLoader] Could not append setup log: " + logPath
+                    + " (" + exception.getMessage() + ")");
         }
     }
 
