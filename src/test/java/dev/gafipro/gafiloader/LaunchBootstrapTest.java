@@ -1,5 +1,6 @@
 package dev.gafipro.gafiloader;
 
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -67,6 +68,76 @@ class LaunchBootstrapTest {
                 "--username", "test", "--gameDir", gameDirectory.toString(), "--version", "gafiloader-26.2"
         });
         assertEquals(gameDirectory.toAbsolutePath().normalize(), resolved);
+    }
+
+    @Test
+    void discoversGameDirectorySavedInGafiLoaderLauncherProfileWhenLauncherOmitsArgument() throws IOException {
+        Path appData = Files.createDirectories(temporaryDirectory.resolve("Roaming"));
+        Path launcherRoot = Files.createDirectories(appData.resolve(".minecraft"));
+        Path gameDirectory = Files.createDirectories(launcherRoot.resolve("GafiLoader 26.2"));
+        Files.createDirectories(gameDirectory.resolve("mods"));
+
+        JsonObject document = new JsonObject();
+        JsonObject profiles = new JsonObject();
+        JsonObject gafiProfile = new JsonObject();
+        gafiProfile.addProperty("name", "GafiLoader 26.2");
+        gafiProfile.addProperty("lastVersionId", "gafiloader-26.2");
+        gafiProfile.addProperty("gameDir", gameDirectory.toString());
+        profiles.add("gafiloader-26.2", gafiProfile);
+        document.add("profiles", profiles);
+        Files.writeString(launcherRoot.resolve("launcher_profiles.json"), document.toString(),
+                StandardCharsets.UTF_8);
+
+        Path resolved = LaunchBootstrap.resolveGameDirectory(new String[0], appData.toString(),
+                temporaryDirectory.resolve("home").toString());
+
+        assertEquals(gameDirectory.toAbsolutePath().normalize(), resolved);
+    }
+
+    @Test
+    void discoversDedicatedGafiLoaderFolderWhenLauncherProfileHasNoGameDirSetting() throws IOException {
+        Path appData = Files.createDirectories(temporaryDirectory.resolve("roaming-no-game-dir"));
+        Path launcherRoot = Files.createDirectories(appData.resolve(".minecraft"));
+        Path gameDirectory = Files.createDirectories(launcherRoot.resolve("GafiLoader 26.2"));
+        Files.createDirectories(gameDirectory.resolve("mods"));
+        JsonObject document = new JsonObject();
+        JsonObject profiles = new JsonObject();
+        JsonObject gafiProfile = new JsonObject();
+        gafiProfile.addProperty("name", "GafiLoader 26.2");
+        gafiProfile.addProperty("lastVersionId", "gafiloader-26.2");
+        profiles.add("gafiloader-26.2", gafiProfile);
+        document.add("profiles", profiles);
+        Files.writeString(launcherRoot.resolve("launcher_profiles.json"), document.toString(),
+                StandardCharsets.UTF_8);
+
+        Path resolved = LaunchBootstrap.resolveGameDirectory(new String[0], appData.toString(),
+                temporaryDirectory.resolve("home-no-game-dir").toString());
+
+        assertEquals(gameDirectory.toAbsolutePath().normalize(), resolved);
+    }
+
+    @Test
+    void explicitGameDirectoryArgumentWinsOverSavedLauncherGameDirectory() throws IOException {
+        Path appData = Files.createDirectories(temporaryDirectory.resolve("roaming-arg-priority"));
+        Path launcherRoot = Files.createDirectories(appData.resolve(".minecraft"));
+        Path savedGameDirectory = Files.createDirectories(launcherRoot.resolve("saved-game"));
+        Path actualGameDirectory = temporaryDirectory.resolve("actual-game");
+        JsonObject document = new JsonObject();
+        JsonObject profiles = new JsonObject();
+        JsonObject gafiProfile = new JsonObject();
+        gafiProfile.addProperty("name", "GafiLoader 26.2");
+        gafiProfile.addProperty("lastVersionId", "gafiloader-26.2");
+        gafiProfile.addProperty("gameDir", savedGameDirectory.toString());
+        profiles.add("gafiloader-26.2", gafiProfile);
+        document.add("profiles", profiles);
+        Files.writeString(launcherRoot.resolve("launcher_profiles.json"), document.toString(),
+                StandardCharsets.UTF_8);
+
+        Path resolved = LaunchBootstrap.resolveGameDirectory(new String[] {
+                "--gameDir", actualGameDirectory.toString()
+        }, appData.toString(), temporaryDirectory.resolve("home-arg-priority").toString());
+
+        assertEquals(actualGameDirectory.toAbsolutePath().normalize(), resolved);
     }
 
     @Test

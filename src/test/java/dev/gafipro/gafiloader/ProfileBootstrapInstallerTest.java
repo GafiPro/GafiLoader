@@ -203,6 +203,54 @@ class ProfileBootstrapInstallerTest {
     }
 
     @Test
+    void selectsExistingGafiLoaderGameDirectoryOverInheritedSourceGameDir() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft-custom-gamedir"));
+        Path dedicatedGameDirectory = Files.createDirectories(minecraft.resolve("GafiLoader 26.2"));
+        Files.createDirectories(dedicatedGameDirectory.resolve("mods"));
+
+        Path sourceDirectory = Files.createDirectories(
+                minecraft.resolve("versions/fabric-loader-0.20.1-26.2"));
+        Files.writeString(sourceDirectory.resolve("fabric-loader-0.20.1-26.2.json"), """
+                {
+                  "id": "fabric-loader-0.20.1-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """, StandardCharsets.UTF_8);
+
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        Files.writeString(launcherProfiles, """
+                {
+                  "profiles": {
+                    "fabric-source": {
+                      "name": "Fabric 26.2",
+                      "type": "custom",
+                      "lastVersionId": "fabric-loader-0.20.1-26.2",
+                      "gameDir": "D:/Fabric Instance"
+                    }
+                  },
+                  "settings": {}
+                }
+                """, StandardCharsets.UTF_8);
+
+        ProfileBootstrapInstaller.Result result = new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.620")), "0.1.620");
+
+        assertTrue(result.installed(), result.message());
+        JsonObject launcherRoot = JsonParser.parseString(Files.readString(launcherProfiles)).getAsJsonObject();
+        JsonObject gafiEntry = launcherRoot.getAsJsonObject("profiles").getAsJsonObject("gafiloader-26.2");
+        assertEquals(dedicatedGameDirectory.toAbsolutePath().normalize().toString(),
+                gafiEntry.get("gameDir").getAsString());
+        assertTrue(Files.isRegularFile(minecraft.resolve(
+                "versions/gafiloader-26.2/gafiloader-26.2.json")),
+                "The version profile must remain under the Minecraft data root.");
+        assertTrue(Files.isRegularFile(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.620/gafiloader-bootstrap-0.1.620.jar")),
+                "The bootstrap library must remain under the Minecraft data root.");
+    }
+
+    @Test
     void registersInstallationInMicrosoftStoreLauncherProfileFileWhenThatIsTheOnlyOne() throws Exception {
         Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft-store"));
         Path sourceDirectory = Files.createDirectories(

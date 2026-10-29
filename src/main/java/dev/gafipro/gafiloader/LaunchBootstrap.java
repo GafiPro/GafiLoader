@@ -188,28 +188,140 @@ public final class LaunchBootstrap {
     }
 
     static Path resolveGameDirectory(String[] args) {
+        return resolveGameDirectory(args, System.getenv("APPDATA"), System.getProperty("user.home"));
+    }
+
+    /**
+     * Resolve the per-installation game directory, which may differ from the launcher data root.
+     * The actual --gameDir supplied by Minecraft Launcher is authoritative. If the launcher omits
+     * that argument, fall back to the GafiLoader profile's saved gameDir, then to a recognizable
+     * GafiLoader-specific game directory, and only then to the standard .minecraft folder.
+     */
+    static Path resolveGameDirectory(String[] args, String appData, String userHome) {
         for (int i = 0; i < args.length; i++) {
             String argument = args[i];
             if ("--gameDir".equals(argument) || "--game-directory".equals(argument)) {
                 if (i + 1 < args.length) {
                     String value = unquote(args[i + 1]);
-                    if (!value.isBlank()) {
+                    if (!isUnresolvedDirectoryPlaceholder(value)) {
                         return Path.of(value).toAbsolutePath().normalize();
                     }
                 }
             } else if (argument.startsWith("--gameDir=") || argument.startsWith("--game-directory=")) {
                 String value = unquote(argument.substring(argument.indexOf('=') + 1));
-                if (!value.isBlank()) {
+                if (!isUnresolvedDirectoryPlaceholder(value)) {
                     return Path.of(value).toAbsolutePath().normalize();
                 }
             }
         }
 
-        String appData = System.getenv("APPDATA");
-        Path defaultDirectory = appData == null || appData.isBlank()
-                ? Path.of(System.getProperty("user.home"), ".minecraft")
-                : Path.of(appData, ".minecraft");
-        return defaultDirectory.toAbsolutePath().normalize();
+        String explicitGameDirectory = System.getProperty("gafiloader.gameDir");
+        if (explicitGameDirectory == null || explicitGameDirectory.isBlank()) {
+            explicitGameDirectory = System.getenv("GAFILOADER_GAME_DIR");
+        }
+        if (explicitGameDirectory != null && !explicitGameDirectory.isBlank()) {
+            return Path.of(unquote(explicitGameDirectory)).toAbsolutePath().normalize();
+        }
+
+        List<Path> launcherRoots = findLauncherDataRoots(appData, userHome);
+        for (Path launcherRoot : launcherRoots) {
+            Path configured = configuredGafiLoaderGameDirectory(launcherRoot);
+            if (configured != null) {
+                return configured;
+            }
+        }
+        for (Path launcherRoot : launcherRoots) {
+            Path dedicatedDirectory = launcherRoot.resolve("GafiLoader 26.2").toAbsolutePath().normalize();
+            if (looksLikeGameDirectory(dedicatedDirectory)) {
+                return dedicatedDirectory;
+            }
+        }
+
+        if (appData != null && !appData.isBlank()) {
+            return Path.of(appData, ".minecraft").toAbsolutePath().normalize();
+        }
+        if (userHome != null && !userHome.isBlank()) {
+            return Path.of(userHome, ".minecraft").toAbsolutePath().normalize();
+        }
+        return Path.of(System.getProperty("user.home", "."), ".minecraft").toAbsolutePath().normalize();
+    }
+
+    private static List<Path> findLauncherDataRoots(String appData, String userHome) {
+        java.util.LinkedHashSet<Path> roots = new java.util.LinkedHashSet<>();
+        if (appData != null && !appData.isBlank()) {
+            roots.add(Path.of(appData, ".minecraft").toAbsolutePath().normalize());
+        }
+        if (userHome != null && !userHome.isBlank()) {
+            Path home = Path.of(userHome).toAbsolutePath().normalize();
+            roots.add(home.resolve("AppData").resolve("Roaming").resolve(".minecraft").normalize());
+            roots.add(home.resolve(".minecraft").normalize());
+        }
+        if (roots.isEmpty()) {
+            roots.add(Path.of(System.getProperty("user.home", "."), ".minecraft")
+                    .toAbsolutePath().normalize());
+        }
+        return List.copyOf(roots);
+    }
+
+    private static Path configuredGafiLoaderGameDirectory(Path launcherRoot) {
+        for (String fileName : List.of("launcher_profiles.json", "launcher_profiles_microsoft_store.json")) {
+            Path profileFile = launcherRoot.resolve(fileName);
+            if (!Files.isRegularFile(profileFile)) continue;
+            try {
+                JsonElement parsed = JsonParser.parseString(
+                        Files.readString(profileFile, StandardCharsets.UTF_8));
+                if (!parsed.isJsonObject()) continue;
+                JsonElement profilesElement = parsed.getAsJsonObject().get("profiles");
+                if (profilesElement == null || !profilesElement.isJsonObject()) continue;
+                JsonObject profiles = profilesElement.getAsJsonObject();
+
+                JsonElement exact = profiles.get("gafiloader-26.2");
+                Path exactDirectory = gameDirectoryFromProfile(exact, launcherRoot);
+                if (exactDirectory != null) return exactDirectory;
+
+                for (var entry : profiles.entrySet()) {
+                    JsonElement element = entry.getValue();
+                    if (!element.isJsonObject()) continue;
+                    JsonObject profile = element.getAsJsonObject();
+                    String versionId = stringValue(profile.get("lastVersionId"));
+                    String name = stringValue(profile.get("name"));
+                    if (!"gafiloader-26.2".equals(versionId)
+                            && !"GafiLoader 26.2".equals(name)) continue;
+                    Path configured = gameDirectoryFromProfile(element, launcherRoot);
+                    if (configured != null) return configured;
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Try another launcher profile file/root rather than failing the game launch.
+            }
+        }
+        return null;
+    }
+
+    private static Path gameDirectoryFromProfile(JsonElement element, Path launcherRoot) {
+        if (element == null || !element.isJsonObject()) return null;
+        String value = stringValue(element.getAsJsonObject().get("gameDir"));
+        if (value == null || value.isBlank() || isUnresolvedDirectoryPlaceholder(value)) return null;
+        Path configured = Path.of(unquote(value));
+        return (configured.isAbsolute() ? configured : launcherRoot.resolve(configured))
+                .toAbsolutePath().normalize();
+    }
+
+    private static boolean looksLikeGameDirectory(Path directory) {
+        if (!Files.isDirectory(directory)) return false;
+        for (String marker : List.of("mods", "config", "saves", "logs", "resourcepacks", "shaderpacks")) {
+            if (Files.isDirectory(directory.resolve(marker))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isUnresolvedDirectoryPlaceholder(String value) {
+        return value == null || value.isBlank()
+                || (value.startsWith("${") && value.endsWith("}"));
+    }
+
+    private static String stringValue(JsonElement value) {
+        return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+                ? value.getAsString() : null;
     }
 
     /**

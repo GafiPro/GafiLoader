@@ -121,7 +121,7 @@ public final class ProfileBootstrapInstaller {
         // Register only after the source/version data has been validated. Preserve existing user settings,
         // filling only missing keys from the matching Fabric installation even on subsequent repairs.
         List<LauncherProfileUpdate> launcherUpdates =
-                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId);
+                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId, minecraft);
         assertLauncherProfilesUnchanged(launcherUpdates);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
@@ -195,7 +195,23 @@ public final class ProfileBootstrapInstaller {
                 + "Minecraft Launcher installation in " + registeredIn + ". Close and reopen the Launcher "
                 + "if it was already running. The source Fabric profile and vanilla profiles were left unchanged."
                 + cleanupMessage;
+        String selectedGameDirectory = selectedGameDirectory(launcherUpdates);
+        if (selectedGameDirectory != null) {
+            message += " Game directory selected: " + selectedGameDirectory + ".";
+        }
         return new Result(true, message, profileJson, bootstrapPath);
+    }
+
+    private static String selectedGameDirectory(List<LauncherProfileUpdate> updates) {
+        for (LauncherProfileUpdate update : updates) {
+            JsonElement profilesElement = update.updatedRoot().get("profiles");
+            if (profilesElement == null || !profilesElement.isJsonObject()) continue;
+            JsonElement gafiProfile = profilesElement.getAsJsonObject().get(PROFILE_ID);
+            if (gafiProfile == null || !gafiProfile.isJsonObject()) continue;
+            String gameDirectory = stringValue(gafiProfile.getAsJsonObject().get("gameDir"));
+            if (gameDirectory != null && !gameDirectory.isBlank()) return gameDirectory;
+        }
+        return null;
     }
 
     private static List<Path> existingLauncherProfileFiles(Path minecraft) {
@@ -208,7 +224,7 @@ public final class ProfileBootstrapInstaller {
     }
 
     private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles,
-            String sourceVersionId) throws IOException {
+            String sourceVersionId, Path minecraftDirectory) throws IOException {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
@@ -221,6 +237,8 @@ public final class ProfileBootstrapInstaller {
             }
             JsonObject profiles = profilesElement == null ? new JsonObject() : profilesElement.getAsJsonObject();
             JsonElement existing = profiles.get(PROFILE_ID);
+            boolean preserveExistingGameDirectory = existing != null && existing.isJsonObject()
+                    && nonBlankString(existing.getAsJsonObject().get("gameDir"));
             JsonObject profile;
             if (existing == null) {
                 profile = copySourceInstallationSettings(profiles, sourceVersionId);
@@ -231,7 +249,7 @@ public final class ProfileBootstrapInstaller {
                 throw new IOException("The launcher installation entry '" + PROFILE_ID
                         + "' is not a JSON object in " + path + "; refusing to replace it.");
             }
-            // Merge only absent values: preserve any GafiLoader-specific choices made by the user.
+            // Merge only absent values: preserve user choices already made for this GafiLoader profile.
             JsonObject sourceSettings = copySourceInstallationSettings(profiles, sourceVersionId);
             if (sourceSettings != null) {
                 for (var setting : sourceSettings.entrySet()) {
@@ -239,6 +257,13 @@ public final class ProfileBootstrapInstaller {
                         profile.add(setting.getKey(), setting.getValue().deepCopy());
                     }
                 }
+            }
+            // Prefer an existing GafiLoader-specific game folder when this GafiLoader profile has
+            // no explicit choice of its own, even if the source Fabric profile points elsewhere.
+            // Keep versions/libraries under the launcher data root; gameDir is for mods/config/saves/logs.
+            Path dedicatedGameDirectory = existingDedicatedGameDirectory(minecraftDirectory);
+            if (!preserveExistingGameDirectory && dedicatedGameDirectory != null) {
+                profile.addProperty("gameDir", dedicatedGameDirectory.toString());
             }
             if (!profile.has("created")) profile.addProperty("created", now);
             if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
@@ -250,6 +275,16 @@ public final class ProfileBootstrapInstaller {
             updates.add(new LauncherProfileUpdate(path, originalBytes, root));
         }
         return List.copyOf(updates);
+    }
+
+    private static boolean nonBlankString(JsonElement value) {
+        String string = stringValue(value);
+        return string != null && !string.isBlank();
+    }
+
+    private static Path existingDedicatedGameDirectory(Path minecraftDirectory) {
+        Path candidate = minecraftDirectory.resolve("GafiLoader 26.2").toAbsolutePath().normalize();
+        return Files.isDirectory(candidate) ? candidate : null;
     }
 
     private static JsonObject copySourceInstallationSettings(JsonObject profiles, String sourceVersionId) {
