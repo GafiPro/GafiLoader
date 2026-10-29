@@ -258,6 +258,37 @@ class ProfileBootstrapInstallerTest {
     }
 
     @Test
+    void refusesBootstrapJarWithInvalidClassBytesBeforeChangingLauncherProfiles() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("invalid-class-minecraft"));
+        Path profileDirectory = Files.createDirectories(minecraft.resolve("versions/gafiloader-26.2"));
+        Path profile = profileDirectory.resolve("gafiloader-26.2.json");
+        String original = """
+                {
+                  "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """;
+        Files.writeString(profile, original, StandardCharsets.UTF_8);
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        String launcherOriginal = "{\\"profiles\\":{},\\"settings\\":{}}";
+        Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
+
+        byte[] invalidClassJar = createBootstrapJar(
+                "0.1.589", "dev/gafipro/gafiloader/LaunchBootstrap.class");
+        IOException failure = assertThrows(IOException.class, () -> new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(invalidClassJar), "0.1.589"));
+        assertTrue(failure.getMessage().contains("valid Java class file"));
+
+        assertEquals(original, Files.readString(profile, StandardCharsets.UTF_8));
+        assertEquals(launcherOriginal, Files.readString(launcherProfiles, StandardCharsets.UTF_8));
+        assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
+        assertFalse(Files.exists(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.589/gafiloader-bootstrap-0.1.589.jar")));
+    }
+
+    @Test
     void refusesToPatchProfilesWithAnUnexpectedEntrypoint() throws Exception {
         Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft"));
         Path profileDirectory = Files.createDirectories(
@@ -359,6 +390,10 @@ class ProfileBootstrapInstallerTest {
     }
 
     private static byte[] createBootstrapJar(String version) throws IOException {
+        return createBootstrapJar(version, null);
+    }
+
+    private static byte[] createBootstrapJar(String version, String invalidClassEntry) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         Manifest manifest = new Manifest();
         Attributes attributes = manifest.getMainAttributes();
@@ -382,12 +417,16 @@ class ProfileBootstrapInstallerTest {
         try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
             for (String name : entries) {
                 jar.putNextEntry(new JarEntry(name));
-                try (var classBytes = ProfileBootstrapInstallerTest.class.getClassLoader()
-                        .getResourceAsStream(name)) {
-                    if (classBytes == null) {
-                        throw new IOException("Test classpath is missing " + name);
+                if (name.equals(invalidClassEntry)) {
+                    jar.write(new byte[] {0, 0, 0, 0, 0, 0, 0, 0});
+                } else {
+                    try (var classBytes = ProfileBootstrapInstallerTest.class.getClassLoader()
+                            .getResourceAsStream(name)) {
+                        if (classBytes == null) {
+                            throw new IOException("Test classpath is missing " + name);
+                        }
+                        jar.write(classBytes.readAllBytes());
                     }
-                    jar.write(classBytes.readAllBytes());
                 }
                 jar.closeEntry();
             }
