@@ -13,17 +13,28 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Stream;
 
 /**
- * Installs a tiny launch-time bootstrap into the dedicated gafiloader-26.2 version profile.
- * It never changes the vanilla or other Fabric profiles.
+ * Creates and registers a dedicated GafiLoader installation based on an installed
+ * Fabric profile for Minecraft 26.2. It never edits the source or vanilla profile.
  */
 public final class ProfileBootstrapInstaller {
     public static final String PROFILE_ID = "gafiloader-26.2";
+    public static final String PROFILE_NAME = "GafiLoader 26.2";
+    public static final String GAME_VERSION = "26.2";
     public static final String FABRIC_MAIN_CLASS = "net.fabricmc.loader.impl.launch.knot.KnotClient";
     public static final String BOOTSTRAP_MAIN_CLASS = "dev.gafipro.gafiloader.LaunchBootstrap";
     private static final String LIBRARY_GROUP = "dev.gafipro";
     private static final String LIBRARY_ARTIFACT = "gafiloader-bootstrap";
+    private static final String FABRIC_LOADER_COORDINATE = "net.fabricmc:fabric-loader:";
+    private static final List<String> LAUNCHER_PROFILE_FILES = List.of(
+            "launcher_profiles.json",
+            "launcher_profiles_microsoft_store.json");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     public Result install(Path minecraftDirectory, InputStream bootstrapJar, String version) throws IOException {
@@ -37,63 +48,67 @@ public final class ProfileBootstrapInstaller {
             throw new IllegalArgumentException("A valid GafiLoader version is required.");
         }
 
-        Path profileDirectory = minecraftDirectory.resolve("versions").resolve(PROFILE_ID);
+        Path minecraft = minecraftDirectory.toAbsolutePath().normalize();
+        Path versionsRoot = minecraft.resolve("versions");
+        Path profileDirectory = versionsRoot.resolve(PROFILE_ID);
         Path profileJson = profileDirectory.resolve(PROFILE_ID + ".json");
-        if (!Files.isRegularFile(profileJson)) {
-            return new Result(false, "Minecraft profile not found; expected " + profileJson
-                    + ". Create/install the gafiloader-26.2 Fabric profile first.", profileJson, null);
-        }
 
-        JsonElement parsed;
-        try {
-            parsed = JsonParser.parseString(Files.readString(profileJson, StandardCharsets.UTF_8));
-        } catch (com.google.gson.JsonParseException exception) {
-            throw new IOException("GafiLoader profile JSON is invalid: " + profileJson, exception);
-        }
-        if (!parsed.isJsonObject()) {
-            throw new IOException("GafiLoader profile JSON must contain a JSON object: " + profileJson);
-        }
-        JsonObject root = parsed.getAsJsonObject();
-        if (root.has("id") && !PROFILE_ID.equals(root.get("id").getAsString())) {
-            return new Result(false, "Refusing to patch a version file whose id is not " + PROFILE_ID + ".",
+        List<Path> launcherFiles = existingLauncherProfileFiles(minecraft);
+        if (launcherFiles.isEmpty()) {
+            return new Result(false, "Minecraft Launcher profile file was not found. Open the official "
+                    + "Minecraft Launcher once, close it completely, then run GafiLoader again. Expected "
+                    + "launcher_profiles.json or launcher_profiles_microsoft_store.json in " + minecraft,
                     profileJson, null);
         }
 
-        String currentMain = root.has("mainClass") && root.get("mainClass").isJsonPrimitive()
-                ? root.get("mainClass").getAsString() : "";
+        // Validate all launcher configuration files before writing anything. These can contain
+        // login/session state; update them atomically and preserve every unrelated root/profile field.
+        List<LauncherProfileUpdate> launcherUpdates = prepareLauncherProfileUpdates(launcherFiles);
+
+        JsonObject profileRoot;
+        boolean createdFromFabric = false;
+        byte[] existingProfileBytes = null;
+        if (Files.isRegularFile(profileJson)) {
+            existingProfileBytes = Files.readAllBytes(profileJson);
+            profileRoot = parseObject(existingProfileBytes, "GafiLoader profile " + profileJson);
+            if (profileRoot.has("id") && (!profileRoot.get("id").isJsonPrimitive()
+                    || !PROFILE_ID.equals(profileRoot.get("id").getAsString()))) {
+                return new Result(false, "Refusing to patch a version file whose id is not "
+                        + PROFILE_ID + "; left it unchanged: " + profileJson, profileJson, null);
+            }
+        } else {
+            FabricSource source = findFabric26Profile(versionsRoot);
+            if (source == null) {
+                return new Result(false, "Could not create the GafiLoader installation because no installed "
+                        + "Fabric profile for Minecraft " + GAME_VERSION + " was found under " + versionsRoot
+                        + ". Install Fabric for Minecraft " + GAME_VERSION + " once, close the Launcher, and "
+                        + "run GafiLoader again. No files were changed.", profileJson, null);
+            }
+            profileRoot = source.profile();
+            profileRoot.addProperty("id", PROFILE_ID);
+            createdFromFabric = true;
+        }
+
+        String currentMain = profileRoot.has("mainClass") && profileRoot.get("mainClass").isJsonPrimitive()
+                ? profileRoot.get("mainClass").getAsString() : "";
         if (!currentMain.equals(FABRIC_MAIN_CLASS) && !currentMain.equals(BOOTSTRAP_MAIN_CLASS)) {
             return new Result(false, "Profile mainClass is not the expected Fabric Loader entrypoint; "
                     + "left it unchanged (" + currentMain + ").", profileJson, null);
         }
+        if (!hasFabricLoaderLibrary(profileRoot)) {
+            return new Result(false, "The source profile does not declare the Fabric Loader library; "
+                    + "refusing to create a non-working GafiLoader installation.", profileJson, null);
+        }
 
-        JsonArray libraries = root.has("libraries") && root.get("libraries").isJsonArray()
-                ? root.getAsJsonArray("libraries") : new JsonArray();
+        JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
+                ? profileRoot.getAsJsonArray("libraries") : new JsonArray();
         String coordinate = LIBRARY_GROUP + ":" + LIBRARY_ARTIFACT + ":" + version;
         String relativeJarPath = LIBRARY_GROUP.replace('.', '/') + "/" + LIBRARY_ARTIFACT + "/"
                 + version + "/" + LIBRARY_ARTIFACT + "-" + version + ".jar";
-        Path bootstrapPath = minecraftDirectory.resolve("libraries").resolve(relativeJarPath).normalize();
-        Path librariesRoot = minecraftDirectory.resolve("libraries").toAbsolutePath().normalize();
+        Path bootstrapPath = minecraft.resolve("libraries").resolve(relativeJarPath).normalize();
+        Path librariesRoot = minecraft.resolve("libraries").toAbsolutePath().normalize();
         if (!bootstrapPath.toAbsolutePath().normalize().startsWith(librariesRoot)) {
             throw new IOException("Refusing to write the bootstrap outside the Minecraft libraries directory.");
-        }
-        Files.createDirectories(bootstrapPath.getParent());
-
-        Path temporaryJar = bootstrapPath.resolveSibling(bootstrapPath.getFileName() + ".tmp");
-        try {
-            Files.copy(bootstrapJar, temporaryJar, StandardCopyOption.REPLACE_EXISTING);
-            try {
-                Files.move(temporaryJar, bootstrapPath, StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-                Files.move(temporaryJar, bootstrapPath, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporaryJar);
-        }
-
-        Path backup = profileJson.resolveSibling(profileJson.getFileName() + ".gafiloader-backup");
-        if (!Files.exists(backup)) {
-            Files.copy(profileJson, backup);
         }
 
         JsonArray updatedLibraries = new JsonArray();
@@ -111,31 +126,181 @@ public final class ProfileBootstrapInstaller {
         }
         JsonObject bootstrapLibrary = new JsonObject();
         bootstrapLibrary.addProperty("name", coordinate);
-        // The artifact is installed locally by GafiLoader. The repository URL is a fallback
-        // for launchers that need to resolve library metadata; it is not used as the bootstrap source.
         bootstrapLibrary.addProperty("url", "https://maven.fabricmc.net/");
         updatedLibraries.add(bootstrapLibrary);
 
-        root.add("libraries", updatedLibraries);
-        root.addProperty("mainClass", BOOTSTRAP_MAIN_CLASS);
+        profileRoot.add("libraries", updatedLibraries);
+        profileRoot.addProperty("id", PROFILE_ID);
+        profileRoot.addProperty("mainClass", BOOTSTRAP_MAIN_CLASS);
 
-        Path temporaryJson = profileJson.resolveSibling(profileJson.getFileName() + ".tmp");
+        // Create the version JSON and bootstrap JAR before registering the installation. A failure
+        // while editing launcher_profiles.json can then be repaired by rerunning setup; all writes
+        // are atomic and the vanilla/source Fabric version is never modified.
+        Files.createDirectories(bootstrapPath.getParent());
+        Path temporaryJar = bootstrapPath.resolveSibling(bootstrapPath.getFileName() + ".tmp");
         try {
-            Files.writeString(temporaryJson, GSON.toJson(root) + System.lineSeparator(),
-                    StandardCharsets.UTF_8);
-            try {
-                Files.move(temporaryJson, profileJson, StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-                Files.move(temporaryJson, profileJson, StandardCopyOption.REPLACE_EXISTING);
-            }
+            Files.copy(bootstrapJar, temporaryJar, StandardCopyOption.REPLACE_EXISTING);
+            atomicMove(temporaryJar, bootstrapPath);
         } finally {
-            Files.deleteIfExists(temporaryJson);
+            Files.deleteIfExists(temporaryJar);
         }
 
-        return new Result(true, "Installed launch-time compatibility bootstrap for " + PROFILE_ID
-                + ". The original profile is backed up at " + backup + ".", profileJson, bootstrapPath);
+        Files.createDirectories(profileDirectory);
+        if (!createdFromFabric && existingProfileBytes != null) {
+            Path backup = profileJson.resolveSibling(profileJson.getFileName() + ".gafiloader-backup");
+            if (!Files.exists(backup)) {
+                Files.copy(profileJson, backup);
+            }
+        }
+        writeJsonAtomically(profileJson, profileRoot);
+
+        for (LauncherProfileUpdate update : launcherUpdates) {
+            writeJsonAtomically(update.path(), update.updatedRoot());
+        }
+
+        String registeredIn = String.join(", ", launcherFiles.stream()
+                .map(path -> path.getFileName().toString()).toList());
+        String message = "Created/updated the " + PROFILE_NAME + " version and registered it as a new "
+                + "Minecraft Launcher installation in " + registeredIn + ". Close and reopen the Launcher "
+                + "if it was already running. The source Fabric profile and vanilla profiles were left unchanged.";
+        return new Result(true, message, profileJson, bootstrapPath);
+    }
+
+    private static List<Path> existingLauncherProfileFiles(Path minecraft) {
+        List<Path> found = new ArrayList<>();
+        for (String name : LAUNCHER_PROFILE_FILES) {
+            Path path = minecraft.resolve(name);
+            if (Files.isRegularFile(path)) found.add(path);
+        }
+        return List.copyOf(found);
+    }
+
+    private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles)
+            throws IOException {
+        List<LauncherProfileUpdate> updates = new ArrayList<>();
+        String now = Instant.now().toString();
+        for (Path path : launcherFiles) {
+            JsonObject root = parseObject(Files.readAllBytes(path), "Minecraft Launcher profile file " + path);
+            JsonElement profilesElement = root.get("profiles");
+            if (profilesElement != null && !profilesElement.isJsonObject()) {
+                throw new IOException("The 'profiles' value is not a JSON object in " + path
+                        + "; refusing to overwrite the launcher's configuration.");
+            }
+            JsonObject profiles = profilesElement == null ? new JsonObject() : profilesElement.getAsJsonObject();
+            JsonElement existing = profiles.get(PROFILE_ID);
+            JsonObject profile;
+            if (existing == null) {
+                profile = new JsonObject();
+                profile.addProperty("created", now);
+                profile.addProperty("lastUsed", now);
+            } else if (existing.isJsonObject()) {
+                profile = existing.getAsJsonObject();
+                if (!profile.has("created")) profile.addProperty("created", now);
+                if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
+            } else {
+                throw new IOException("The launcher installation entry '" + PROFILE_ID
+                        + "' is not a JSON object in " + path + "; refusing to replace it.");
+            }
+            profile.addProperty("name", PROFILE_NAME);
+            profile.addProperty("type", "custom");
+            profile.addProperty("lastVersionId", PROFILE_ID);
+            profiles.add(PROFILE_ID, profile);
+            root.add("profiles", profiles);
+            updates.add(new LauncherProfileUpdate(path, root));
+        }
+        return List.copyOf(updates);
+    }
+
+    private static FabricSource findFabric26Profile(Path versionsRoot) throws IOException {
+        if (!Files.isDirectory(versionsRoot)) return null;
+        List<Path> jsonFiles = new ArrayList<>();
+        try (Stream<Path> directories = Files.list(versionsRoot)) {
+            for (Path directory : directories.filter(Files::isDirectory).toList()) {
+                Path json = directory.resolve(directory.getFileName().toString() + ".json");
+                if (Files.isRegularFile(json)) jsonFiles.add(json);
+            }
+        }
+        jsonFiles.sort(Comparator.comparing(Path::toString));
+
+        List<FabricSource> candidates = new ArrayList<>();
+        for (Path json : jsonFiles) {
+            if (json.toAbsolutePath().normalize().equals(
+                    versionsRoot.resolve(PROFILE_ID).resolve(PROFILE_ID + ".json").toAbsolutePath().normalize())) {
+                continue;
+            }
+            try {
+                JsonObject root = parseObject(Files.readAllBytes(json), "version JSON " + json);
+                if (!FABRIC_MAIN_CLASS.equals(stringValue(root.get("mainClass")))) continue;
+                if (!hasFabricLoaderLibrary(root)) continue;
+                String parent = stringValue(root.get("inheritsFrom"));
+                String id = stringValue(root.get("id"));
+                if (!GAME_VERSION.equals(parent) && !(id != null && id.endsWith("-" + GAME_VERSION))) continue;
+                candidates.add(new FabricSource(json, root));
+            } catch (IOException | RuntimeException ignored) {
+                // A corrupt or unrelated version JSON must not prevent discovery of another valid profile.
+            }
+        }
+        return candidates.stream().max(Comparator.comparing(source -> {
+            try {
+                return Files.getLastModifiedTime(source.path()).toMillis();
+            } catch (IOException ignored) {
+                return 0L;
+            }
+        })).orElse(null);
+    }
+
+    private static boolean hasFabricLoaderLibrary(JsonObject root) {
+        JsonElement librariesElement = root.get("libraries");
+        if (librariesElement == null || !librariesElement.isJsonArray()) return false;
+        for (JsonElement element : librariesElement.getAsJsonArray()) {
+            if (!element.isJsonObject()) continue;
+            JsonElement name = element.getAsJsonObject().get("name");
+            if (name != null && name.isJsonPrimitive()
+                    && name.getAsString().startsWith(FABRIC_LOADER_COORDINATE)) return true;
+        }
+        return false;
+    }
+
+    private static JsonObject parseObject(byte[] bytes, String description) throws IOException {
+        try {
+            JsonElement parsed = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
+            if (!parsed.isJsonObject()) {
+                throw new IOException(description + " must contain a JSON object.");
+            }
+            return parsed.getAsJsonObject();
+        } catch (com.google.gson.JsonParseException exception) {
+            throw new IOException(description + " contains invalid JSON.", exception);
+        }
+    }
+
+    private static String stringValue(JsonElement value) {
+        return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+                ? value.getAsString() : null;
+    }
+
+    private static void writeJsonAtomically(Path path, JsonObject root) throws IOException {
+        Path parent = path.toAbsolutePath().normalize().getParent();
+        if (parent == null) throw new IOException("File path has no parent directory: " + path);
+        Files.createDirectories(parent);
+        Path temporary = Files.createTempFile(parent, path.getFileName().toString(), ".tmp");
+        try {
+            Files.writeString(temporary, GSON.toJson(root) + System.lineSeparator(), StandardCharsets.UTF_8);
+            atomicMove(temporary, path);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void atomicMove(Path temporary, Path destination) throws IOException {
+        try {
+            Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+            Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     public record Result(boolean installed, String message, Path profileJson, Path bootstrapJar) {}
+    private record FabricSource(Path path, JsonObject profile) {}
+    private record LauncherProfileUpdate(Path path, JsonObject updatedRoot) {}
 }
