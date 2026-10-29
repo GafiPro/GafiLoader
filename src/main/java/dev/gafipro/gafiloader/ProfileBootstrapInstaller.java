@@ -64,11 +64,10 @@ public final class ProfileBootstrapInstaller {
                     profileJson, null);
         }
 
-        // Validate all launcher configuration files before writing anything. These can contain
-        // login/session state; update them atomically and preserve every unrelated root/profile field.
-        List<LauncherProfileUpdate> launcherUpdates = prepareLauncherProfileUpdates(launcherFiles);
-
+        // Validate every launcher configuration before writing anything. The selected source profile
+        // is used below to preserve profile-specific settings such as gameDir and Java arguments.
         JsonObject profileRoot;
+        String sourceVersionId = null;
         boolean createdFromFabric = false;
         byte[] existingProfileBytes = null;
         if (Files.isRegularFile(profileJson)) {
@@ -88,6 +87,10 @@ public final class ProfileBootstrapInstaller {
                         + "run GafiLoader again. No files were changed.", profileJson, null);
             }
             profileRoot = source.profile();
+            sourceVersionId = stringValue(profileRoot.get("id"));
+            if (sourceVersionId == null) {
+                sourceVersionId = source.path().getParent().getFileName().toString();
+            }
             profileRoot.addProperty("id", PROFILE_ID);
             createdFromFabric = true;
         }
@@ -102,6 +105,11 @@ public final class ProfileBootstrapInstaller {
             return new Result(false, "The source profile does not declare the Fabric Loader library; "
                     + "refusing to create a non-working GafiLoader installation.", profileJson, null);
         }
+
+        // Register only after the source/version data has been validated. If this is a new installation,
+        // copy launcher-specific settings from the source Fabric installation where available.
+        List<LauncherProfileUpdate> launcherUpdates =
+                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId, createdFromFabric);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
                 ? profileRoot.getAsJsonArray("libraries") : new JsonArray();
@@ -179,8 +187,8 @@ public final class ProfileBootstrapInstaller {
         return List.copyOf(found);
     }
 
-    private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles)
-            throws IOException {
+    private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles,
+            String sourceVersionId, boolean creatingFromFabric) throws IOException {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
@@ -194,17 +202,17 @@ public final class ProfileBootstrapInstaller {
             JsonElement existing = profiles.get(PROFILE_ID);
             JsonObject profile;
             if (existing == null) {
-                profile = new JsonObject();
-                profile.addProperty("created", now);
-                profile.addProperty("lastUsed", now);
+                profile = creatingFromFabric
+                        ? copySourceInstallationSettings(profiles, sourceVersionId) : null;
+                if (profile == null) profile = new JsonObject();
             } else if (existing.isJsonObject()) {
                 profile = existing.getAsJsonObject();
-                if (!profile.has("created")) profile.addProperty("created", now);
-                if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
             } else {
                 throw new IOException("The launcher installation entry '" + PROFILE_ID
                         + "' is not a JSON object in " + path + "; refusing to replace it.");
             }
+            if (!profile.has("created")) profile.addProperty("created", now);
+            if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
             profile.addProperty("name", PROFILE_NAME);
             profile.addProperty("type", "custom");
             profile.addProperty("lastVersionId", PROFILE_ID);
@@ -213,6 +221,31 @@ public final class ProfileBootstrapInstaller {
             updates.add(new LauncherProfileUpdate(path, root));
         }
         return List.copyOf(updates);
+    }
+
+    private static JsonObject copySourceInstallationSettings(JsonObject profiles, String sourceVersionId) {
+        if (sourceVersionId == null || sourceVersionId.isBlank()) return null;
+        String[] settingKeys = {
+                "gameDir", "javaDir", "javaArgs", "resolution", "logConfig", "logConfigIsXML", "icon"
+        };
+        for (var entry : profiles.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (!value.isJsonObject()) continue;
+            JsonObject sourceEntry = value.getAsJsonObject();
+            if (!sourceEntry.has("lastVersionId")
+                    || !sourceEntry.get("lastVersionId").isJsonPrimitive()
+                    || !sourceVersionId.equals(sourceEntry.get("lastVersionId").getAsString())) {
+                continue;
+            }
+            JsonObject copied = new JsonObject();
+            for (String key : settingKeys) {
+                if (sourceEntry.has(key)) {
+                    copied.add(key, sourceEntry.get(key).deepCopy());
+                }
+            }
+            return copied;
+        }
+        return null;
     }
 
     private static FabricSource findFabric26Profile(Path versionsRoot) throws IOException {
