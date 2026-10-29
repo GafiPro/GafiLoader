@@ -107,40 +107,20 @@ public final class Main {
         Path minecraft = appData == null || appData.isBlank()
                 ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
                 : Path.of(appData, ".minecraft");
-        Path defaultMods = minecraft.resolve("mods");
-        Path defaultConfig = minecraft.resolve("config").resolve("fabric_loader_dependencies.json");
 
         System.out.println("GafiLoader — automatic legacy metadata setup");
-        System.out.println("Default Minecraft folder: " + minecraft.toAbsolutePath().normalize());
-        installLaunchBootstrap(minecraft);
-        if (Files.isDirectory(defaultMods)) {
-            try {
-                LegacyDependencyOverrideGenerator.Result result =
-                        new LegacyDependencyOverrideGenerator().generate(defaultMods, defaultConfig);
-                System.out.println("Dependency override config: " + result.configPath());
-                System.out.println("JARs scanned: " + result.jarsScanned());
-                System.out.println("Legacy mod IDs detected: " + result.modIdsOverridden());
-                if (!result.overriddenModIds().isEmpty()) {
-                    System.out.println(String.join(", ", result.overriddenModIds()));
-                }
-                if (result.modIdsOverridden() == 0) {
-                    System.out.println("No mod metadata declaring Minecraft 1.21.11 (or a 1.21.11 artifact version) was detected.");
-                    System.out.println("Your launcher may use a separate game directory, or the API version may be declared differently.");
-                    System.out.println();
-                    runInteractiveWizard();
-                    return;
-                }
-                System.out.println("The installed gafiloader-26.2 profile will refresh these overrides before each launch.");
-                System.out.println("This removes only the metadata gate; API, mapping, mixin, or runtime incompatibilities may still prevent startup.");
-                for (String warning : result.warnings()) System.out.println("Warning: " + warning);
-            } catch (IOException | IllegalArgumentException exception) {
-                System.err.println("GafiLoader: " + exception.getMessage());
-                System.out.println("If this is a custom Minecraft instance, rerun using --prepare-legacy-overrides with its mods and config paths.");
-            }
+        System.out.println("Minecraft folder: " + minecraft.toAbsolutePath().normalize());
+        System.out.println("Installing only the bootstrap for the dedicated " + ProfileBootstrapInstaller.PROFILE_ID + " profile.");
+        System.out.println("Dependency overrides will be generated at launch using that profile's actual --gameDir.");
+        System.out.println("Setup will not pre-write the shared config/fabric_loader_dependencies.json.");
+
+        boolean installed = installLaunchBootstrap(minecraft);
+        System.out.println();
+        if (installed) {
+            System.out.println("Next: open the Minecraft Launcher and launch " + ProfileBootstrapInstaller.PROFILE_ID + ".");
+            System.out.println("If the game still rejects a legacy mod, keep the original mod JARs and send the first dependency error plus the [GafiLoader] lines.");
         } else {
-            System.out.println("Default mods folder does not exist: " + defaultMods);
-            System.out.println("This installation may use a custom game directory.");
-            runInteractiveWizard();
+            System.out.println("The bootstrap was not installed. Check the message above; create/install the dedicated Fabric profile if it does not exist, then run GafiLoader again.");
         }
         System.out.println();
         System.out.println("Press Enter to close.");
@@ -151,7 +131,7 @@ public final class Main {
         }
     }
 
-    private static void installLaunchBootstrap(Path minecraft) {
+    private static boolean installLaunchBootstrap(Path minecraft) {
         try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
             if (bootstrap == null) {
                 System.err.println("GafiLoader: embedded launch bootstrap was not packaged; the profile was not modified.");
@@ -163,8 +143,10 @@ public final class Main {
             ProfileBootstrapInstaller.Result result =
                     new ProfileBootstrapInstaller().install(minecraft, bootstrap, version);
             System.out.println("[GafiLoader] " + result.message());
+            return result.installed();
         } catch (IOException | IllegalArgumentException exception) {
             System.err.println("GafiLoader could not install the launch-time bootstrap: " + exception.getMessage());
+            return false;
         }
     }
 
