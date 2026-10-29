@@ -18,6 +18,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 
 /**
  * Creates and registers a dedicated GafiLoader installation based on an installed
@@ -140,6 +143,7 @@ public final class ProfileBootstrapInstaller {
         Path temporaryJar = bootstrapPath.resolveSibling(bootstrapPath.getFileName() + ".tmp");
         try {
             Files.copy(bootstrapJar, temporaryJar, StandardCopyOption.REPLACE_EXISTING);
+            verifyBootstrapJar(temporaryJar, version);
             atomicMove(temporaryJar, bootstrapPath);
         } finally {
             Files.deleteIfExists(temporaryJar);
@@ -297,6 +301,47 @@ public final class ProfileBootstrapInstaller {
                     StandardCopyOption.ATOMIC_MOVE);
         } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
             Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void verifyBootstrapJar(Path path, String expectedVersion) throws IOException {
+        try (JarFile jar = new JarFile(path.toFile())) {
+            Manifest manifest = jar.getManifest();
+            if (manifest == null) {
+                throw new IOException("Embedded GafiLoader bootstrap has no manifest.");
+            }
+            String mainClass = manifest.getMainAttributes().getValue("Main-Class");
+            if (!BOOTSTRAP_MAIN_CLASS.equals(mainClass)) {
+                throw new IOException("Bootstrap manifest Main-Class was " + mainClass
+                        + "; expected " + BOOTSTRAP_MAIN_CLASS + ".");
+            }
+            String embeddedVersion = manifest.getMainAttributes().getValue("Implementation-Version");
+            if (!expectedVersion.equals(embeddedVersion)) {
+                throw new IOException("Bootstrap version mismatch: embedded=" + embeddedVersion
+                        + ", expected=" + expectedVersion + ".");
+            }
+
+            String[] requiredEntries = {
+                    "dev/gafipro/gafiloader/LaunchBootstrap.class",
+                    "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
+                    "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                    "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
+                    "com/google/gson/Gson.class",
+                    "com/google/gson/GsonBuilder.class",
+                    "com/google/gson/JsonParser.class",
+                    "com/google/gson/JsonObject.class",
+                    "com/google/gson/JsonArray.class",
+                    "com/google/gson/JsonElement.class",
+                    "com/google/gson/JsonPrimitive.class"
+            };
+            for (String entryName : requiredEntries) {
+                JarEntry entry = jar.getJarEntry(entryName);
+                if (entry == null || entry.isDirectory()) {
+                    throw new IOException("Bootstrap JAR is missing required entry: " + entryName);
+                }
+            }
+        } catch (java.util.zip.ZipException exception) {
+            throw new IOException("Embedded GafiLoader bootstrap is not a valid JAR archive: " + path, exception);
         }
     }
 
