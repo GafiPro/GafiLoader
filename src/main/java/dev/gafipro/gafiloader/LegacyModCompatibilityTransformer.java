@@ -35,8 +35,12 @@ import java.util.zip.ZipOutputStream;
  */
 final class LegacyModCompatibilityTransformer {
     private static final String LEGACY_ENTITY_TYPE_OWNER = "net/minecraft/world/entity/EntityType";
+    private static final String LEGACY_ENTITY_TYPE_INTERMEDIARY_OWNER = "net/minecraft/class_1299";
     private static final String ENTITY_TYPES_OWNER = "net/minecraft/world/entity/EntityTypes";
     private static final String ENTITY_TYPE_DESCRIPTOR = "Lnet/minecraft/world/entity/EntityType;";
+    private static final String ENTITY_TYPE_INTERMEDIARY_DESCRIPTOR = "Lnet/minecraft/class_1299;";
+    // In the 1.21.11 production Intermediary namespace, EntityType.PLAYER is field_6097.
+    private static final String INTERMEDIARY_PLAYER_FIELD = "field_6097";
     private static final int MAX_NESTED_ARCHIVE_DEPTH = 12;
     private static final String INTERNAL_DIRECTORY = ".gafiloader";
     private static final String STAGED_MODS_DIRECTORY = "compat-mods";
@@ -258,8 +262,10 @@ final class LegacyModCompatibilityTransformer {
                     return new MethodVisitor(Opcodes.ASM9, delegate) {
                         @Override
                         public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-                            if (isMovedEntityRegistryField(opcode, owner, descriptor)) {
-                                owner = ENTITY_TYPES_OWNER;
+                            FieldReference mapped = rewriteFieldReference(opcode, owner, name, descriptor);
+                            if (mapped != null) {
+                                owner = mapped.owner();
+                                name = mapped.name();
                                 rewrites[0]++;
                             }
                             super.visitFieldInsn(opcode, owner, name, descriptor);
@@ -290,21 +296,42 @@ final class LegacyModCompatibilityTransformer {
         }
     }
 
-    private static boolean isMovedEntityRegistryField(int opcode, String owner, String descriptor) {
-        return (opcode == Opcodes.GETSTATIC || opcode == Opcodes.PUTSTATIC)
-                && LEGACY_ENTITY_TYPE_OWNER.equals(owner)
-                && ENTITY_TYPE_DESCRIPTOR.equals(descriptor);
+    private static FieldReference rewriteFieldReference(int opcode, String owner, String name,
+                                                        String descriptor) {
+        if (opcode != Opcodes.GETSTATIC && opcode != Opcodes.PUTSTATIC) {
+            return null;
+        }
+
+        // Development/source-style names as seen in unremapped Mojang-named JARs.
+        if (LEGACY_ENTITY_TYPE_OWNER.equals(owner)
+                && "PLAYER".equals(name)
+                && ENTITY_TYPE_DESCRIPTOR.equals(descriptor)) {
+            return new FieldReference(ENTITY_TYPES_OWNER, "PLAYER");
+        }
+
+        // Published 1.21.11 Fabric mods are normally remapped to Intermediary. The old
+        // owner/name would otherwise be remapped by Fabric Loader back to EntityType.PLAYER
+        // after this bootstrap has already scanned the archive.
+        if (LEGACY_ENTITY_TYPE_INTERMEDIARY_OWNER.equals(owner)
+                && INTERMEDIARY_PLAYER_FIELD.equals(name)
+                && ENTITY_TYPE_INTERMEDIARY_DESCRIPTOR.equals(descriptor)) {
+            return new FieldReference(ENTITY_TYPES_OWNER, "PLAYER");
+        }
+        return null;
     }
 
     private static Handle rewriteHandle(Handle handle, int[] rewrites) {
-        if ((handle.getTag() == Opcodes.H_GETSTATIC || handle.getTag() == Opcodes.H_PUTSTATIC)
-                && LEGACY_ENTITY_TYPE_OWNER.equals(handle.getOwner())
-                && ENTITY_TYPE_DESCRIPTOR.equals(handle.getDesc())) {
-            rewrites[0]++;
-            return new Handle(handle.getTag(), ENTITY_TYPES_OWNER, handle.getName(),
-                    handle.getDesc(), handle.isInterface());
+        if (handle.getTag() != Opcodes.H_GETSTATIC && handle.getTag() != Opcodes.H_PUTSTATIC) {
+            return handle;
         }
-        return handle;
+        int opcode = handle.getTag() == Opcodes.H_GETSTATIC ? Opcodes.GETSTATIC : Opcodes.PUTSTATIC;
+        FieldReference mapped = rewriteFieldReference(opcode, handle.getOwner(), handle.getName(), handle.getDesc());
+        if (mapped == null) {
+            return handle;
+        }
+        rewrites[0]++;
+        return new Handle(handle.getTag(), mapped.owner(), mapped.name(),
+                handle.getDesc(), handle.isInterface());
     }
 
     private static Object[] rewriteConstants(Object[] constants, int[] rewrites) {
@@ -350,6 +377,8 @@ final class LegacyModCompatibilityTransformer {
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
                   int modifiedJars, List<String> warnings) {}
+
+    private record FieldReference(String owner, String name) {}
 
     private record ArchiveTransform(byte[] bytes, int rewrittenReferences, List<String> warnings) {}
 
