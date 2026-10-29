@@ -121,7 +121,7 @@ public final class ProfileBootstrapInstaller {
         // Register only after the source/version data has been validated. Preserve existing user settings,
         // filling only missing keys from the matching Fabric installation even on subsequent repairs.
         List<LauncherProfileUpdate> launcherUpdates =
-                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId);
+                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId, minecraft);
         assertLauncherProfilesUnchanged(launcherUpdates);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
@@ -208,7 +208,7 @@ public final class ProfileBootstrapInstaller {
     }
 
     private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles,
-            String sourceVersionId) throws IOException {
+            String sourceVersionId, Path minecraftDirectory) throws IOException {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
@@ -240,6 +240,16 @@ public final class ProfileBootstrapInstaller {
                     }
                 }
             }
+            // If neither this installation nor its source profile has a custom gameDir, reuse an
+            // already-existing GafiLoader-specific directory. Keep the launcher data root for
+            // versions/libraries; this setting selects only mods, config, saves and logs.
+            String configuredGameDirectory = stringValue(profile.get("gameDir"));
+            if (configuredGameDirectory == null || configuredGameDirectory.isBlank()) {
+                Path dedicatedGameDirectory = existingDedicatedGameDirectory(minecraftDirectory);
+                if (dedicatedGameDirectory != null) {
+                    profile.addProperty("gameDir", dedicatedGameDirectory.toString());
+                }
+            }
             if (!profile.has("created")) profile.addProperty("created", now);
             if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
             profile.addProperty("name", PROFILE_NAME);
@@ -250,6 +260,11 @@ public final class ProfileBootstrapInstaller {
             updates.add(new LauncherProfileUpdate(path, originalBytes, root));
         }
         return List.copyOf(updates);
+    }
+
+    private static Path existingDedicatedGameDirectory(Path minecraftDirectory) {
+        Path candidate = minecraftDirectory.resolve("GafiLoader 26.2").toAbsolutePath().normalize();
+        return Files.isDirectory(candidate) ? candidate : null;
     }
 
     private static JsonObject copySourceInstallationSettings(JsonObject profiles, String sourceVersionId) {
