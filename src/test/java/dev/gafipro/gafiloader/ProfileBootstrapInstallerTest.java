@@ -181,6 +181,19 @@ class ProfileBootstrapInstallerTest {
         assertEquals("en-us", launcherRoot.getAsJsonObject("settings").get("locale").getAsString());
         assertEquals(27, launcherRoot.get("unknown-root-setting").getAsInt());
 
+        // Simulate a prior installer that registered GafiLoader but omitted custom profile settings.
+        gafiEntry.remove("gameDir");
+        gafiEntry.addProperty("javaArgs", "-Xmx8G");
+        Files.writeString(launcherProfiles, launcherRoot.toString(), StandardCharsets.UTF_8);
+        new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.605")), "0.1.605");
+        JsonObject repairedRoot = JsonParser.parseString(Files.readString(launcherProfiles)).getAsJsonObject();
+        JsonObject repairedEntry = repairedRoot.getAsJsonObject("profiles").getAsJsonObject("gafiloader-26.2");
+        assertEquals("D:/Gafi/Instance", repairedEntry.get("gameDir").getAsString(),
+                "A rerun should fill missing settings from the source installation.");
+        assertEquals("-Xmx8G", repairedEntry.get("javaArgs").getAsString(),
+                "A rerun must preserve settings already customized on the GafiLoader profile.");
+
         assertEquals(sourceOriginal, Files.readString(sourceJson, StandardCharsets.UTF_8),
                 "The installed Fabric source profile must remain byte-for-byte unchanged.");
         assertEquals(vanillaOriginal, Files.readString(vanillaJson, StandardCharsets.UTF_8),
