@@ -195,7 +195,23 @@ public final class ProfileBootstrapInstaller {
                 + "Minecraft Launcher installation in " + registeredIn + ". Close and reopen the Launcher "
                 + "if it was already running. The source Fabric profile and vanilla profiles were left unchanged."
                 + cleanupMessage;
+        String selectedGameDirectory = selectedGameDirectory(launcherUpdates);
+        if (selectedGameDirectory != null) {
+            message += " Game directory selected: " + selectedGameDirectory + ".";
+        }
         return new Result(true, message, profileJson, bootstrapPath);
+    }
+
+    private static String selectedGameDirectory(List<LauncherProfileUpdate> updates) {
+        for (LauncherProfileUpdate update : updates) {
+            JsonElement profilesElement = update.updatedRoot().get("profiles");
+            if (profilesElement == null || !profilesElement.isJsonObject()) continue;
+            JsonElement gafiProfile = profilesElement.getAsJsonObject().get(PROFILE_ID);
+            if (gafiProfile == null || !gafiProfile.isJsonObject()) continue;
+            String gameDirectory = stringValue(gafiProfile.getAsJsonObject().get("gameDir"));
+            if (gameDirectory != null && !gameDirectory.isBlank()) return gameDirectory;
+        }
+        return null;
     }
 
     private static List<Path> existingLauncherProfileFiles(Path minecraft) {
