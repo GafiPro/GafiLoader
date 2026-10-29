@@ -163,6 +163,80 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void handlesFabricApiAggregatorAndNestedLegacyModulesTogether() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("fabric-api-bundle-mods"));
+        byte[] nestedBase = zipBytes("fabric.mod.json", """
+                {
+                  "id": "fabric-api-base",
+                  "version": "1.6.0+1.21.11",
+                  "depends": {
+                    "minecraft": "~1.21.11",
+                    "fabricloader": ">=0.16.0"
+                  }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+        byte[] nestedRendering = zipBytes("fabric.mod.json", """
+                {
+                  "id": "fabric-rendering-v1",
+                  "version": "16.0.0+1.21.11",
+                  "depends": { "minecraft": "1.21.11" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path outer = mods.resolve("fabric-api-0.141.6+1.21.11.jar");
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(outer))) {
+            jar.putNextEntry(new JarEntry("fabric.mod.json"));
+            jar.write("""
+                    {
+                      "id": "fabric-api",
+                      "version": "0.141.6+1.21.11",
+                      "depends": { "fabricloader": ">=0.16.0" },
+                      "jars": [
+                        { "file": "META-INF/jars/fabric-api-base.jar" },
+                        { "file": "META-INF/jars/fabric-rendering-v1.jar" }
+                      ]
+                    }
+                    """.getBytes(StandardCharsets.UTF_8));
+            jar.closeEntry();
+            jar.putNextEntry(new JarEntry("META-INF/jars/fabric-api-base.jar"));
+            jar.write(nestedBase);
+            jar.closeEntry();
+            jar.putNextEntry(new JarEntry("META-INF/jars/fabric-rendering-v1.jar"));
+            jar.write(nestedRendering);
+            jar.closeEntry();
+        }
+
+        Path config = temporaryDirectory.resolve("fabric-api-bundle-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "fabric-api": { "-depends": { "java": "" } },
+                    "unrelated-mod": { "-depends": { "minecraft": "" } }
+                  }
+                }
+                """, StandardCharsets.UTF_8);
+
+        LegacyDependencyOverrideGenerator.Result result =
+                new LegacyDependencyOverrideGenerator().generate(mods, config);
+
+        JsonObject overrides = JsonParser.parseString(Files.readString(config))
+                .getAsJsonObject().getAsJsonObject("overrides");
+        for (String modId : new String[] { "fabric-api", "fabric-api-base", "fabric-rendering-v1" }) {
+            assertEquals("", overrides.getAsJsonObject(modId)
+                    .getAsJsonObject("-depends").get("minecraft").getAsString(), modId);
+        }
+        assertEquals("", overrides.getAsJsonObject("fabric-api")
+                .getAsJsonObject("-depends").get("java").getAsString(),
+                "An existing unrelated rule on the same mod must survive the merge.");
+        assertEquals("", overrides.getAsJsonObject("unrelated-mod")
+                .getAsJsonObject("-depends").get("minecraft").getAsString(),
+                "Rules for mods outside the compatibility target must survive.");
+        assertEquals(3, result.modIdsOverridden());
+    }
+
+    @Test
     void ignoresModsForOtherMinecraftVersions() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("modern-mods"));
         writeJar(mods.resolve("modern.jar"), "fabric.mod.json", """
