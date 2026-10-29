@@ -24,15 +24,17 @@ public final class LaunchBootstrap {
     private LaunchBootstrap() {}
 
     public static void main(String[] args) throws Exception {
+        System.out.println("[GafiLoader] Pre-launch bootstrap active.");
         Path gameDirectory = resolveGameDirectory(args);
         Path modsDirectory = gameDirectory.resolve("mods");
         Path configPath = gameDirectory.resolve("config").resolve("fabric_loader_dependencies.json");
+        System.out.println("[GafiLoader] Game directory: " + gameDirectory);
+        System.out.println("[GafiLoader] Dependency override config: " + configPath);
 
         if (Files.isDirectory(modsDirectory) && containsJar(modsDirectory)) {
             try {
                 LegacyDependencyOverrideGenerator.Result result =
                         new LegacyDependencyOverrideGenerator().generate(modsDirectory, configPath);
-                System.out.println("[GafiLoader] Game directory: " + gameDirectory);
                 System.out.println("[GafiLoader] JARs scanned: " + result.jarsScanned());
                 System.out.println("[GafiLoader] Legacy mod IDs prepared: " + result.modIdsOverridden());
                 if (!result.overriddenModIds().isEmpty()) {
@@ -52,6 +54,7 @@ public final class LaunchBootstrap {
                     + "; starting Fabric without generating dependency overrides.");
         }
 
+        System.out.println("[GafiLoader] Preflight complete; handing off to Fabric Loader.");
         Class<?> fabricMainClass = Class.forName(FABRIC_MAIN_CLASS);
         Method main = fabricMainClass.getMethod("main", String[].class);
         try {
