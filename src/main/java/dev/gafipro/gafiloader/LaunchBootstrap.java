@@ -44,6 +44,7 @@ public final class LaunchBootstrap {
         byte[] originalConfig = Files.isRegularFile(configPath) ? Files.readAllBytes(configPath) : null;
         byte[] generatedConfig = null;
         boolean configWasPrepared = false;
+        String originalFabricModsFolder = System.getProperty("fabric.modsFolder");
 
         if (Files.isDirectory(modsDirectory) && containsJar(modsDirectory)) {
             try {
@@ -63,6 +64,23 @@ public final class LaunchBootstrap {
                 }
                 for (String warning : result.warnings()) {
                     log(logPath, "Warning: " + warning, true);
+                }
+
+                LegacyModCompatibilityTransformer.Result compatibilityResult =
+                        new LegacyModCompatibilityTransformer().prepare(modsDirectory, gameDirectory);
+                for (String warning : compatibilityResult.warnings()) {
+                    log(logPath, "Warning: " + warning, true);
+                }
+                if (compatibilityResult.transformed()) {
+                    System.setProperty("fabric.modsFolder", compatibilityResult.modsDirectory().toString());
+                    log(logPath, "Minecraft 26.2 entity-registry compatibility: rewrote "
+                            + compatibilityResult.rewrittenReferences() + " static EntityType registry reference(s) "
+                            + "across " + compatibilityResult.modifiedJars() + " mod archive(s).", false);
+                    log(logPath, "Fabric will load staged mod copies from " + compatibilityResult.modsDirectory()
+                            + "; original mod JARs were left unchanged.", false);
+                } else {
+                    log(logPath, "No static EntityType registry references requiring the 26.2 EntityTypes "
+                            + "owner rewrite were found.", false);
                 }
             } catch (IOException | IllegalArgumentException exception) {
                 log(logPath, "Preflight failed: " + exception.getMessage(), true);
@@ -121,6 +139,15 @@ public final class LaunchBootstrap {
             } catch (IllegalStateException ignored) {
                 // JVM shutdown is already underway; the shutdown hook handles restoration.
             }
+            restoreSystemProperty("fabric.modsFolder", originalFabricModsFolder);
+        }
+    }
+
+    private static void restoreSystemProperty(String name, String originalValue) {
+        if (originalValue == null) {
+            System.clearProperty(name);
+        } else {
+            System.setProperty(name, originalValue);
         }
     }
 
