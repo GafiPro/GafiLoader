@@ -272,7 +272,9 @@ class ProfileBootstrapInstallerTest {
                 """;
         Files.writeString(profile, original, StandardCharsets.UTF_8);
         Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
-        String launcherOriginal = "{\\"profiles\\":{},\\"settings\\":{}}";
+        String launcherOriginal = """
+                {"profiles":{},"settings":{}}
+                """.strip();
         Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
 
         byte[] invalidClassJar = createBootstrapJar(
