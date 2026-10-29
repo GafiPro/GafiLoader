@@ -77,13 +77,26 @@ public final class LegacyDependencyOverrideGenerator {
                 ? root.getAsJsonObject("overrides") : new JsonObject();
 
         for (Map.Entry<String, JsonObject> item : legacyMods.entrySet()) {
-            JsonObject perMod = overrides.has(item.getKey()) && overrides.get(item.getKey()).isJsonObject()
-                    ? overrides.getAsJsonObject(item.getKey()) : new JsonObject();
-            JsonObject removeMinecraft = perMod.has("-depends") && perMod.get("-depends").isJsonObject()
-                    ? perMod.getAsJsonObject("-depends") : new JsonObject();
+            String modId = item.getKey();
+            JsonElement existingPerMod = overrides.get(modId);
+            if (existingPerMod != null && !existingPerMod.isJsonObject()) {
+                throw new IllegalArgumentException("Existing override for mod '" + modId
+                        + "' must be a JSON object; refusing to replace it.");
+            }
+
+            JsonObject perMod = existingPerMod == null
+                    ? new JsonObject() : existingPerMod.getAsJsonObject();
+            JsonElement existingRemoveDepends = perMod.get("-depends");
+            if (existingRemoveDepends != null && !existingRemoveDepends.isJsonObject()) {
+                throw new IllegalArgumentException("Existing override for mod '" + modId
+                        + "' has a '-depends' value that must be a JSON object; refusing to replace it.");
+            }
+
+            JsonObject removeMinecraft = existingRemoveDepends == null
+                    ? new JsonObject() : existingRemoveDepends.getAsJsonObject();
             removeMinecraft.addProperty("minecraft", "");
             perMod.add("-depends", removeMinecraft);
-            overrides.add(item.getKey(), perMod);
+            overrides.add(modId, perMod);
         }
 
         root.addProperty("version", 1);

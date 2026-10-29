@@ -17,6 +17,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LegacyDependencyOverrideGeneratorTest {
     @TempDir
@@ -124,6 +125,41 @@ class LegacyDependencyOverrideGeneratorTest {
         JsonObject root = JsonParser.parseString(Files.readString(config)).getAsJsonObject();
         assertTrue(root.getAsJsonObject("overrides").has("fabric-api"));
         assertEquals(1, result.modIdsOverridden());
+    }
+
+    @Test
+    void refusesToReplaceMalformedExistingOverrideForLegacyMod() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("malformed-override-mods"));
+        writeJar(mods.resolve("fabric-api.jar"), "fabric.mod.json", """
+                {
+                  "id": "fabric-api",
+                  "depends": { "minecraft": "1.21.11" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+
+        Path config = temporaryDirectory.resolve("malformed-override-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        String originalConfig = """
+                {
+                  "version": 1,
+                  "overrides": {
+                    "fabric-api": {
+                      "-depends": "not-an-object"
+                    }
+                  }
+                }
+                """;
+        Files.writeString(config, originalConfig, StandardCharsets.UTF_8);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> new LegacyDependencyOverrideGenerator().generate(mods, config));
+
+        assertTrue(exception.getMessage().contains("fabric-api"));
+        assertTrue(exception.getMessage().contains("must be a JSON object"));
+        assertEquals(originalConfig, Files.readString(config, StandardCharsets.UTF_8),
+                "Malformed config must remain untouched when generation is rejected.");
+        assertTrue(!Files.exists(config.resolveSibling("fabric_loader_dependencies.json.bak")),
+                "A backup must not be created from a config that was never safely merged.");
     }
 
     @Test
