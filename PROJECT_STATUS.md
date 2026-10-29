@@ -1,7 +1,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-10-28
+> Última atualização: 2026-10-29
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -125,3 +125,17 @@ Em cada sessão de trabalho:
 - Validation: no local Gradle execution was possible in this remote-only environment. Unit tests/build and Windows installer packaging are pending CI until this branch is integrated into main. Do not report them as passed yet.
 - Important limit: these changes improve the real launch preflight and config safety, but they do not automatically remap legacy mod bytecode or recreate removed Minecraft/Fabric APIs. Opening the menu with actual 1.21.11 mods still requires runtime verification; no successful end-to-end launch is established yet.
 - Next steps: (1) integrate this branch and verify Windows/Linux CI; (2) download and hash the newly built Windows installer; (3) test the profile with the user's real latest.log and config; (4) if the game still fails, use the new [GafiLoader] lines to determine whether the failure is the Minecraft gate or a later bytecode/API/Mixin incompatibility.
+
+
+## Update 2026-10-29 — CI concluída e instalador 0.1.604 produzido
+
+- A branch de correções foi integrada em main no commit `4547a867dc33d8759acd0e650bffd2452333094b`; a execução CI associada [40896292875](https://github.com/GafiPro/GafiLoader/actions/runs/40896292875) terminou com conclusão `success`.
+- Resultado verificado nos jobs da execução 604: Ubuntu — sucesso (`clean test build`); Windows — sucesso (`clean test installDist`, app-image com runtime Java incluído, verificação WiX, criação do instalador e upload dos artefactos).
+- Alterações de código/testes da ronda: `Main.runDefaultSetup()` deixou de gerar permanentemente overrides na configuração partilhada durante a instalação; `LaunchBootstrap` agora regista entrada/caminhos reais e prepara o override antes do Fabric, tentando restaurar a configuração anterior no fim da sessão ou no shutdown do JVM, desde que o ficheiro ainda corresponda aos bytes gerados; se detectar alterações externas, preserva-as. Existe uma limitação documentada para encerramentos forçados/perda de energia.
+- Testes novos nesta ronda: restauração byte a byte da configuração original, remoção de configuração criada só para a sessão, proteção contra alterações externas e fixture combinada para `fabric-api 0.141.6+1.21.11` com módulos aninhados `fabric-api-base` e `fabric-rendering-v1`, preservando regras de Java/outros mods.
+- README atualizado para explicar a configuração temporária e o comportamento de recuperação.
+- Artefacto Windows: `GafiLoader-Installer-Windows-x64`, ID `12907740534`, execução `40896292875`; expira em 2026-11-01 14:56:42 UTC. SHA-256 do ZIP de artefacto (confirmado contra o digest publicado pela Actions): `048353554582befd48a9d5aa5a45c6d294f0e3e874820ea5290e5c0c6dddd0dc`.
+- EXE extraído: `GafiLoader-0.1.604.exe`, 51,024,896 bytes, SHA-256 `d304ef55e369327cb5d736a451edadb6d0e073739024f2e8857fd51c322df380`.
+- Comandos Gradle locais não executados: a validação ocorreu na CI do GitHub Actions. Ainda não foi executado um arranque end-to-end de Minecraft 26.2 com a instalação real do utilizador.
+- P0 continua aberto até existir evidência do arranque real. Este conjunto de alterações melhora o diagnóstico e o isolamento temporal do override, mas não remapeia automaticamente todos os mods antigos nem recria APIs removidas; portanto, não se deve prometer que qualquer conjunto de mods 1.21.11 abre sem erros.
+- Próximo passo: o utilizador testa `GafiLoader-0.1.604.exe` com o perfil `gafiloader-26.2`. Se falhar, obter as linhas `[GafiLoader]` e o primeiro erro de dependência do `logs/latest.log`, comparando-os com o caminho de config agora impresso.
