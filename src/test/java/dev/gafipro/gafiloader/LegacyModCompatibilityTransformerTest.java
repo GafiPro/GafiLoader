@@ -36,7 +36,7 @@ class LegacyModCompatibilityTransformerTest {
     void rewritesEntityRegistryReferenceInsideNestedFabricApiJarWithoutChangingOriginals() throws Exception {
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game"));
         Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
-        byte[] legacyMixin = classWithEntityTypeFieldReference("PLAYER");
+        byte[] legacyMixin = classWithIntermediaryEntityTypePlayerReference();
         byte[] nestedRenderingJar = jar(Map.of(
                 "net/fabricmc/fabric/mixin/client/rendering/EntityRenderersMixin.class", legacyMixin,
                 "META-INF/TEST.SF", "old-signature".getBytes(StandardCharsets.UTF_8)));
@@ -77,16 +77,19 @@ class LegacyModCompatibilityTransformerTest {
         byte[] stagedMixin = readEntry(stagedNestedJar,
                 "net/fabricmc/fabric/mixin/client/rendering/EntityRenderersMixin.class");
         assertEquals("net/minecraft/world/entity/EntityTypes", firstFieldOwner(stagedMixin));
+        assertEquals("PLAYER", firstFieldName(stagedMixin));
+        assertEquals("Lnet/minecraft/class_1299;", firstFieldDescriptor(stagedMixin),
+                "Keep the legacy descriptor for Fabric Loader to remap; only the new owner/name are injected.");
         assertFalse(hasEntry(stagedNestedJar, "META-INF/TEST.SF"),
                 "Signatures on a modified nested archive must be removed.");
     }
 
     @Test
-    void rewritesAnyEntityTypeRegistryConstantRatherThanOnlyPlayer() throws Exception {
+    void rewritesNamedPlayerFieldReference() throws Exception {
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-zombie"));
         Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
         byte[] originalJar = jar(Map.of(
-                "net/example/EntityHelper.class", classWithEntityTypeFieldReference("ZOMBIE")));
+                "net/example/EntityHelper.class", classWithEntityTypeFieldReference("PLAYER")));
         Path source = modsDirectory.resolve("entity-helper.jar");
         Files.write(source, originalJar);
 
@@ -133,6 +136,22 @@ class LegacyModCompatibilityTransformerTest {
         return writer.toByteArray();
     }
 
+    private static byte[] classWithIntermediaryEntityTypePlayerReference() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/example/IntermediaryGenerated", null,
+                "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "entityType", "()Lnet/minecraft/class_1299;", null, null);
+        method.visitCode();
+        method.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraft/class_1299",
+                "field_6097", "Lnet/minecraft/class_1299;");
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitMaxs(1, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] classWithNoFieldReferences() {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/example/NoReferences", null,
@@ -157,6 +176,40 @@ class LegacyModCompatibilityTransformerTest {
             }
         }, 0);
         return owner.get();
+    }
+
+    private static String firstFieldName(byte[] classBytes) {
+        AtomicReference<String> name = new AtomicReference<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String methodName, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                        if (name.get() == null) name.set(fieldName);
+                    }
+                };
+            }
+        }, 0);
+        return name.get();
+    }
+
+    private static String firstFieldDescriptor(byte[] classBytes) {
+        AtomicReference<String> descriptor = new AtomicReference<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String methodName, String methodDescriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                        if (descriptor.get() == null) descriptor.set(fieldDescriptor);
+                    }
+                };
+            }
+        }, 0);
+        return descriptor.get();
     }
 
     private static byte[] jar(Map<String, byte[]> entries) throws IOException {
