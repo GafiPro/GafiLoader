@@ -135,7 +135,7 @@ public final class Main {
         try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
             if (bootstrap == null) {
                 System.err.println("GafiLoader: embedded launch bootstrap was not packaged; the profile was not modified.");
-                return;
+                return false;
             }
             String version = Main.class.getPackage().getImplementationVersion();
             if (version == null || version.isBlank()) version = "0.1.0-SNAPSHOT";
