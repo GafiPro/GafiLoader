@@ -64,10 +64,15 @@ public final class ProfileBootstrapInstaller {
                     profileJson, null);
         }
 
-        // Validate every launcher configuration before writing anything. The selected source profile
-        // is used below to preserve profile-specific settings such as gameDir and Java arguments.
+        // Locate the source Fabric installation even if a previous run already created the GafiLoader
+        // version JSON. This lets updates repair a missing launcher entry or fill missing profile settings.
+        FabricSource source = findFabric26Profile(versionsRoot);
+        String sourceVersionId = source == null ? null : stringValue(source.profile().get("id"));
+        if (source != null && sourceVersionId == null) {
+            sourceVersionId = source.path().getParent().getFileName().toString();
+        }
+
         JsonObject profileRoot;
-        String sourceVersionId = null;
         boolean createdFromFabric = false;
         byte[] existingProfileBytes = null;
         if (Files.isRegularFile(profileJson)) {
@@ -79,7 +84,6 @@ public final class ProfileBootstrapInstaller {
                         + PROFILE_ID + "; left it unchanged: " + profileJson, profileJson, null);
             }
         } else {
-            FabricSource source = findFabric26Profile(versionsRoot);
             if (source == null) {
                 return new Result(false, "Could not create the GafiLoader installation because no installed "
                         + "Fabric profile for Minecraft " + GAME_VERSION + " was found under " + versionsRoot
@@ -87,10 +91,6 @@ public final class ProfileBootstrapInstaller {
                         + "run GafiLoader again. No files were changed.", profileJson, null);
             }
             profileRoot = source.profile();
-            sourceVersionId = stringValue(profileRoot.get("id"));
-            if (sourceVersionId == null) {
-                sourceVersionId = source.path().getParent().getFileName().toString();
-            }
             profileRoot.addProperty("id", PROFILE_ID);
             createdFromFabric = true;
         }
@@ -106,10 +106,10 @@ public final class ProfileBootstrapInstaller {
                     + "refusing to create a non-working GafiLoader installation.", profileJson, null);
         }
 
-        // Register only after the source/version data has been validated. If this is a new installation,
-        // copy launcher-specific settings from the source Fabric installation where available.
+        // Register only after the source/version data has been validated. Preserve existing user settings,
+        // filling only missing keys from the matching Fabric installation even on subsequent repairs.
         List<LauncherProfileUpdate> launcherUpdates =
-                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId, createdFromFabric);
+                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
                 ? profileRoot.getAsJsonArray("libraries") : new JsonArray();
@@ -188,7 +188,7 @@ public final class ProfileBootstrapInstaller {
     }
 
     private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles,
-            String sourceVersionId, boolean creatingFromFabric) throws IOException {
+            String sourceVersionId) throws IOException {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
@@ -202,14 +202,22 @@ public final class ProfileBootstrapInstaller {
             JsonElement existing = profiles.get(PROFILE_ID);
             JsonObject profile;
             if (existing == null) {
-                profile = creatingFromFabric
-                        ? copySourceInstallationSettings(profiles, sourceVersionId) : null;
+                profile = copySourceInstallationSettings(profiles, sourceVersionId);
                 if (profile == null) profile = new JsonObject();
             } else if (existing.isJsonObject()) {
                 profile = existing.getAsJsonObject();
             } else {
                 throw new IOException("The launcher installation entry '" + PROFILE_ID
                         + "' is not a JSON object in " + path + "; refusing to replace it.");
+            }
+            // Merge only absent values: preserve any GafiLoader-specific choices made by the user.
+            JsonObject sourceSettings = copySourceInstallationSettings(profiles, sourceVersionId);
+            if (sourceSettings != null) {
+                for (var setting : sourceSettings.entrySet()) {
+                    if (!profile.has(setting.getKey())) {
+                        profile.add(setting.getKey(), setting.getValue().deepCopy());
+                    }
+                }
             }
             if (!profile.has("created")) profile.addProperty("created", now);
             if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
