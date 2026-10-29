@@ -108,16 +108,19 @@ public final class Main {
     }
 
     private static void runDefaultSetup() {
-        String appData = System.getenv("APPDATA");
-        Path minecraft = appData == null || appData.isBlank()
-                ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
-                : Path.of(appData, ".minecraft");
-        minecraft = minecraft.toAbsolutePath().normalize();
+        String explicitMinecraft = System.getProperty("gafiloader.minecraftDir");
+        if (explicitMinecraft == null || explicitMinecraft.isBlank()) {
+            explicitMinecraft = System.getenv("GAFILOADER_MINECRAFT_DIR");
+        }
+        MinecraftDirectoryResolver.Resolution resolution = MinecraftDirectoryResolver.resolve(
+                explicitMinecraft, System.getenv("APPDATA"), System.getProperty("user.home"));
+        Path minecraft = resolution.path();
         Path setupLog = minecraft.resolve("logs").resolve("gafiloader-setup.log");
         initializeSetupLog(setupLog, minecraft);
 
         System.out.println("GafiLoader — create a dedicated Minecraft installation");
         System.out.println("Minecraft folder: " + minecraft);
+        System.out.println("Minecraft folder detection: " + resolution.source());
         System.out.println("Setup diagnostic log: " + setupLog);
         System.out.println("IMPORTANT: fully close Minecraft Launcher before continuing, then reopen it after setup.");
         System.out.println("GafiLoader will create a separate " + ProfileBootstrapInstaller.PROFILE_NAME
@@ -148,6 +151,12 @@ public final class Main {
 
     private static boolean installLaunchBootstrap(Path minecraft, Path setupLog) {
         appendSetupLog(setupLog, "Starting setup. minecraftDirectory=" + minecraft);
+        appendSetupLog(setupLog, "Minecraft directory detection=" + MinecraftDirectoryResolver
+                .resolve(System.getProperty("gafiloader.minecraftDir") != null
+                        && !System.getProperty("gafiloader.minecraftDir").isBlank()
+                        ? System.getProperty("gafiloader.minecraftDir")
+                        : System.getenv("GAFILOADER_MINECRAFT_DIR"),
+                        System.getenv("APPDATA"), System.getProperty("user.home")).source());
         try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
             if (bootstrap == null) {
                 String message = "Embedded launch bootstrap was not packaged; the profile was not modified.";
@@ -202,10 +211,12 @@ public final class Main {
 
     private static void runInteractiveWizard() {
         java.util.Scanner input = new java.util.Scanner(System.in);
-        String appData = System.getenv("APPDATA");
-        Path minecraft = appData == null || appData.isBlank()
-                ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
-                : Path.of(appData, ".minecraft");
+        String explicitMinecraft = System.getProperty("gafiloader.minecraftDir");
+        if (explicitMinecraft == null || explicitMinecraft.isBlank()) {
+            explicitMinecraft = System.getenv("GAFILOADER_MINECRAFT_DIR");
+        }
+        Path minecraft = MinecraftDirectoryResolver.resolve(
+                explicitMinecraft, System.getenv("APPDATA"), System.getProperty("user.home")).path();
         Path defaultMods = minecraft.resolve("mods");
         Path defaultConfig = minecraft.resolve("config").resolve("fabric_loader_dependencies.json");
 
