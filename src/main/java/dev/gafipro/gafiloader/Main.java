@@ -108,19 +108,23 @@ public final class Main {
                 ? Path.of(System.getProperty("user.home"), "AppData", "Roaming", ".minecraft")
                 : Path.of(appData, ".minecraft");
 
-        System.out.println("GafiLoader — automatic legacy metadata setup");
+        System.out.println("GafiLoader — create a dedicated Minecraft installation");
         System.out.println("Minecraft folder: " + minecraft.toAbsolutePath().normalize());
-        System.out.println("Installing only the bootstrap for the dedicated " + ProfileBootstrapInstaller.PROFILE_ID + " profile.");
-        System.out.println("Dependency overrides will be generated at launch using that profile's actual --gameDir.");
-        System.out.println("Setup will not pre-write the shared config/fabric_loader_dependencies.json.");
+        System.out.println("IMPORTANT: fully close Minecraft Launcher before continuing, then reopen it after setup.");
+        System.out.println("GafiLoader will create a separate " + ProfileBootstrapInstaller.PROFILE_NAME
+                + " launcher entry from an installed Fabric " + ProfileBootstrapInstaller.GAME_VERSION + " profile.");
+        System.out.println("The source Fabric version and vanilla profiles will remain unchanged.");
+        System.out.println("Dependency overrides are generated at launch using the new installation's actual --gameDir.");
 
         boolean installed = installLaunchBootstrap(minecraft);
         System.out.println();
         if (installed) {
-            System.out.println("Next: open the Minecraft Launcher and launch " + ProfileBootstrapInstaller.PROFILE_ID + ".");
-            System.out.println("If the game still rejects a legacy mod, keep the original mod JARs and send the first dependency error plus the [GafiLoader] lines.");
+            System.out.println("Success: the " + ProfileBootstrapInstaller.PROFILE_NAME
+                    + " installation has been registered. Reopen Minecraft Launcher and select it under Installations.");
+            System.out.println("If setup says no Fabric 26.2 profile exists, install Fabric for Minecraft 26.2 once and rerun GafiLoader.");
+            System.out.println("Compatibility with every legacy mod is not guaranteed; keep the original mod JARs.");
         } else {
-            System.out.println("The bootstrap was not installed. Check the message above; create/install the dedicated Fabric profile if it does not exist, then run GafiLoader again.");
+            System.out.println("The GafiLoader installation was not created. Read the message above; no vanilla profile or mod JAR was intentionally changed.");
         }
         System.out.println();
         System.out.println("Press Enter to close.");
