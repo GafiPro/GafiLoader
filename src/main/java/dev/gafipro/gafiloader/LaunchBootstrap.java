@@ -4,6 +4,12 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
@@ -24,12 +30,16 @@ public final class LaunchBootstrap {
     private LaunchBootstrap() {}
 
     public static void main(String[] args) throws Exception {
-        System.out.println("[GafiLoader] Pre-launch bootstrap active.");
         Path gameDirectory = resolveGameDirectory(args);
-        Path modsDirectory = gameDirectory.resolve("mods");
+        Path modsDirectory = resolveModsDirectory(gameDirectory);
         Path configPath = gameDirectory.resolve("config").resolve("fabric_loader_dependencies.json");
-        System.out.println("[GafiLoader] Game directory: " + gameDirectory);
-        System.out.println("[GafiLoader] Dependency override config: " + configPath);
+        Path logPath = gameDirectory.resolve("logs").resolve("gafiloader-preflight.log");
+        initializeLog(logPath);
+        log(logPath, "Pre-launch bootstrap active.", false);
+        log(logPath, "Game directory: " + gameDirectory, false);
+        log(logPath, "Mods directory: " + modsDirectory, false);
+        log(logPath, "Dependency override config: " + configPath, false);
+        log(logPath, "Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")", false);
 
         byte[] originalConfig = Files.isRegularFile(configPath) ? Files.readAllBytes(configPath) : null;
         byte[] generatedConfig = null;
@@ -41,29 +51,43 @@ public final class LaunchBootstrap {
                         new LegacyDependencyOverrideGenerator().generate(modsDirectory, configPath);
                 generatedConfig = Files.readAllBytes(configPath);
                 configWasPrepared = true;
-                System.out.println("[GafiLoader] JARs scanned: " + result.jarsScanned());
-                System.out.println("[GafiLoader] Legacy mod IDs prepared: " + result.modIdsOverridden());
+                verifyGeneratedOverrides(configPath, result.overriddenModIds());
+                log(logPath, "JARs scanned: " + result.jarsScanned(), false);
+                log(logPath, "Legacy mod IDs prepared: " + result.modIdsOverridden(), false);
                 if (!result.overriddenModIds().isEmpty()) {
-                    System.out.println("[GafiLoader] Version gate removed for: "
-                            + String.join(", ", result.overriddenModIds()));
+                    log(logPath, "Version gate removed for: "
+                            + String.join(", ", result.overriddenModIds()), false);
                 } else {
-                    System.out.println("[GafiLoader] No metadata targeting Minecraft 1.21.11 was detected.");
+                    log(logPath, "No metadata explicitly targeting Minecraft 1.21.11 was detected. "
+                            + "If a 1.21.11 mod is rejected, confirm this is the intended mods directory.", true);
                 }
                 for (String warning : result.warnings()) {
-                    System.err.println("[GafiLoader] Warning: " + warning);
+                    log(logPath, "Warning: " + warning, true);
                 }
             } catch (IOException | IllegalArgumentException exception) {
+                log(logPath, "Preflight failed: " + exception.getMessage(), true);
+                if (generatedConfig != null) {
+                    restoreDependencyConfigSafely(configPath, originalConfig, generatedConfig);
+                }
                 throw new IOException("GafiLoader could not prepare Fabric dependency overrides at "
-                        + configPath + ". Minecraft was not handed to Fabric so the original "
-                        + "incompatible-mod screen would not hide this setup error.", exception);
+                        + configPath + ". See " + logPath + ". Minecraft was not handed to Fabric.", exception);
             }
         } else {
-            System.out.println("[GafiLoader] No mod JARs found under " + modsDirectory
-                    + "; starting Fabric without generating dependency overrides.");
+            log(logPath, "No mod JARs found under " + modsDirectory
+                    + "; starting Fabric without generating dependency overrides.", false);
         }
 
         if (!configWasPrepared) {
-            launchFabric(args);
+            try {
+                log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
+                launchFabric(args);
+            } catch (Exception exception) {
+                log(logPath, "Fabric launch failed: " + exception, true);
+                throw exception;
+            } catch (Error error) {
+                log(logPath, "Fabric launch failed: " + error, true);
+                throw error;
+            }
             return;
         }
 
@@ -80,7 +104,14 @@ public final class LaunchBootstrap {
         }, "GafiLoader-dependency-config-restore");
         Runtime.getRuntime().addShutdownHook(shutdownHook);
         try {
+            log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
             launchFabric(args);
+        } catch (Exception exception) {
+            log(logPath, "Fabric launch failed: " + exception, true);
+            throw exception;
+        } catch (Error error) {
+            log(logPath, "Fabric launch failed: " + error, true);
+            throw error;
         } finally {
             if (restored.compareAndSet(false, true)) {
                 restoreDependencyConfigSafely(configPath, prior, prepared);
@@ -179,6 +210,77 @@ public final class LaunchBootstrap {
                 ? Path.of(System.getProperty("user.home"), ".minecraft")
                 : Path.of(appData, ".minecraft");
         return defaultDirectory.toAbsolutePath().normalize();
+    }
+
+    /**
+     * Honors Fabric's configured mods folder, resolving relative paths against --gameDir.
+     */
+    static Path resolveModsDirectory(Path gameDirectory) {
+        String configured = System.getProperty("fabric.modsFolder");
+        if (configured != null && !configured.isBlank()) {
+            Path custom = Path.of(unquote(configured));
+            return (custom.isAbsolute() ? custom : gameDirectory.resolve(custom))
+                    .toAbsolutePath().normalize();
+        }
+        return gameDirectory.resolve("mods").toAbsolutePath().normalize();
+    }
+
+    /**
+     * Validates the exact dependency override JSON that Fabric will read.
+     */
+    static void verifyGeneratedOverrides(Path configPath, List<String> expectedModIds) throws IOException {
+        final JsonElement parsed;
+        try {
+            parsed = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8));
+        } catch (RuntimeException exception) {
+            throw new IOException("Generated dependency override config is not valid JSON: " + configPath, exception);
+        }
+        if (!parsed.isJsonObject()) {
+            throw new IOException("Generated dependency override config must be a JSON object: " + configPath);
+        }
+        JsonObject root = parsed.getAsJsonObject();
+        if (!root.has("version") || !root.get("version").isJsonPrimitive()
+                || !root.get("version").getAsString().equals("1")) {
+            throw new IOException("Generated dependency override config must use spec version 1: " + configPath);
+        }
+        if (!root.has("overrides") || !root.get("overrides").isJsonObject()) {
+            throw new IOException("Generated dependency override config is missing its 'overrides' object: " + configPath);
+        }
+        JsonObject overrides = root.getAsJsonObject("overrides");
+        for (String modId : expectedModIds) {
+            if (!overrides.has(modId) || !overrides.get(modId).isJsonObject()) {
+                throw new IOException("Generated dependency override is missing mod ID '" + modId + "'.");
+            }
+            JsonObject modOverrides = overrides.getAsJsonObject(modId);
+            if (!modOverrides.has("-depends") || !modOverrides.get("-depends").isJsonObject()
+                    || !modOverrides.getAsJsonObject("-depends").has("minecraft")) {
+                throw new IOException("Generated dependency override for '" + modId
+                        + "' does not remove its minecraft dependency.");
+            }
+        }
+    }
+
+    private static void initializeLog(Path logPath) {
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath, "GafiLoader launch preflight — " + Instant.now()
+                            + System.lineSeparator(),
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException exception) {
+            System.err.println("[GafiLoader] Could not initialize preflight log: " + exception.getMessage());
+        }
+    }
+
+    private static void log(Path logPath, String message, boolean warning) {
+        String prefix = warning ? "[GafiLoader] Warning: " : "[GafiLoader] ";
+        (warning ? System.err : System.out).println(prefix + message);
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath, Instant.now() + " " + prefix + message + System.lineSeparator(),
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException exception) {
+            System.err.println("[GafiLoader] Could not append preflight log: " + exception.getMessage());
+        }
     }
 
     private static String unquote(String value) {

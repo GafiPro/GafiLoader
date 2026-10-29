@@ -7,13 +7,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.jar.Attributes;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ProfileBootstrapInstallerTest {
     @TempDir
@@ -51,7 +58,7 @@ class ProfileBootstrapInstallerTest {
                 }
                 """;
         Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
-        byte[] jarBytes = "test-bootstrap-jar".getBytes(StandardCharsets.UTF_8);
+        byte[] jarBytes = createBootstrapJar("0.1.586");
 
         ProfileBootstrapInstaller installer = new ProfileBootstrapInstaller();
         ProfileBootstrapInstaller.Result result = installer.install(
@@ -81,7 +88,11 @@ class ProfileBootstrapInstallerTest {
         assertEquals("dev.gafipro:gafiloader-bootstrap:0.1.586",
                 libraries.get(1).getAsJsonObject().get("name").getAsString());
 
-        installer.install(minecraft, new ByteArrayInputStream(jarBytes), "0.1.587");
+        byte[] updatedBootstrapBytes = createBootstrapJar("0.1.587");
+        installer.install(minecraft, new ByteArrayInputStream(updatedBootstrapBytes), "0.1.587");
+        Path updatedBootstrapPath = minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.587/gafiloader-bootstrap-0.1.587.jar");
+        assertTrue(java.util.Arrays.equals(updatedBootstrapBytes, Files.readAllBytes(updatedBootstrapPath)));
         JsonObject updated = JsonParser.parseString(Files.readString(profile)).getAsJsonObject();
         JsonArray updatedLibraries = updated.getAsJsonArray("libraries");
         long bootstrapCount = 0;
@@ -125,14 +136,22 @@ class ProfileBootstrapInstallerTest {
         String launcherOriginal = """
                 {
                   "profiles": {
-                    "latest-release": {"name": "Latest Release", "type": "latest-release", "lastVersionId": "26.2"}
+                    "latest-release": {"name": "Latest Release", "type": "latest-release", "lastVersionId": "26.2"},
+                    "fabric-source": {
+                      "name": "Fabric 26.2", "type": "custom",
+                      "lastVersionId": "fabric-loader-0.20.1-26.2",
+                      "gameDir": "D:/Gafi/Instance",
+                      "javaArgs": "-Xmx4G",
+                      "javaDir": "C:/Java/Custom",
+                      "resolution": {"width": 1920, "height": 1080}
+                    }
                   },
                   "settings": {"locale": "en-us"},
                   "unknown-root-setting": 27
                 }
                 """;
         Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
-        byte[] bootstrap = "new-profile-bootstrap".getBytes(StandardCharsets.UTF_8);
+        byte[] bootstrap = createBootstrapJar("0.1.604");
 
         ProfileBootstrapInstaller.Result result = new ProfileBootstrapInstaller().install(
                 minecraft, new ByteArrayInputStream(bootstrap), "0.1.604");
@@ -155,8 +174,25 @@ class ProfileBootstrapInstallerTest {
         JsonObject gafiEntry = entries.getAsJsonObject("gafiloader-26.2");
         assertEquals("GafiLoader 26.2", gafiEntry.get("name").getAsString());
         assertEquals("gafiloader-26.2", gafiEntry.get("lastVersionId").getAsString());
+        assertEquals("D:/Gafi/Instance", gafiEntry.get("gameDir").getAsString());
+        assertEquals("-Xmx4G", gafiEntry.get("javaArgs").getAsString());
+        assertEquals("C:/Java/Custom", gafiEntry.get("javaDir").getAsString());
+        assertEquals(1920, gafiEntry.getAsJsonObject("resolution").get("width").getAsInt());
         assertEquals("en-us", launcherRoot.getAsJsonObject("settings").get("locale").getAsString());
         assertEquals(27, launcherRoot.get("unknown-root-setting").getAsInt());
+
+        // Simulate a prior installer that registered GafiLoader but omitted custom profile settings.
+        gafiEntry.remove("gameDir");
+        gafiEntry.addProperty("javaArgs", "-Xmx8G");
+        Files.writeString(launcherProfiles, launcherRoot.toString(), StandardCharsets.UTF_8);
+        new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.605")), "0.1.605");
+        JsonObject repairedRoot = JsonParser.parseString(Files.readString(launcherProfiles)).getAsJsonObject();
+        JsonObject repairedEntry = repairedRoot.getAsJsonObject("profiles").getAsJsonObject("gafiloader-26.2");
+        assertEquals("D:/Gafi/Instance", repairedEntry.get("gameDir").getAsString(),
+                "A rerun should fill missing settings from the source installation.");
+        assertEquals("-Xmx8G", repairedEntry.get("javaArgs").getAsString(),
+                "A rerun must preserve settings already customized on the GafiLoader profile.");
 
         assertEquals(sourceOriginal, Files.readString(sourceJson, StandardCharsets.UTF_8),
                 "The installed Fabric source profile must remain byte-for-byte unchanged.");
@@ -182,12 +218,41 @@ class ProfileBootstrapInstallerTest {
         Files.writeString(launcherProfiles, "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
 
         ProfileBootstrapInstaller.Result result = new ProfileBootstrapInstaller().install(
-                minecraft, new ByteArrayInputStream(new byte[] {9, 8, 7}), "0.1.604");
+                minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.604")), "0.1.604");
 
         assertTrue(result.installed(), result.message());
         JsonObject launcherRoot = JsonParser.parseString(Files.readString(launcherProfiles)).getAsJsonObject();
         assertEquals("gafiloader-26.2", launcherRoot.getAsJsonObject("profiles")
                 .getAsJsonObject("gafiloader-26.2").get("lastVersionId").getAsString());
+    }
+
+    @Test
+    void refusesAnInvalidBootstrapJarBeforePatchingTheProfile() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("invalid-bootstrap-minecraft"));
+        Path profileDirectory = Files.createDirectories(minecraft.resolve("versions/gafiloader-26.2"));
+        Path profile = profileDirectory.resolve("gafiloader-26.2.json");
+        String original = """
+                {
+                  "id": "gafiloader-26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """;
+        Files.writeString(profile, original, StandardCharsets.UTF_8);
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        String launcherOriginal = """
+                {"profiles": {}, "settings": {"locale":"en-us"}}
+                """;
+        Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class, () -> new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream("not a jar".getBytes(StandardCharsets.UTF_8)), "0.1.588"));
+
+        assertEquals(original, Files.readString(profile, StandardCharsets.UTF_8));
+        assertEquals(launcherOriginal, Files.readString(launcherProfiles, StandardCharsets.UTF_8));
+        assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
+        assertFalse(Files.exists(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.588/gafiloader-bootstrap-0.1.588.jar")));
     }
 
     @Test
@@ -228,4 +293,36 @@ class ProfileBootstrapInstallerTest {
                 .getAsJsonObject();
         assertFalse(launcherRoot.getAsJsonObject("profiles").has("gafiloader-26.2"));
     }
+    private static byte[] createBootstrapJar(String version) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        Manifest manifest = new Manifest();
+        Attributes attributes = manifest.getMainAttributes();
+        attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        attributes.putValue("Main-Class", ProfileBootstrapInstaller.BOOTSTRAP_MAIN_CLASS);
+        attributes.putValue("Implementation-Version", version);
+
+        String[] entries = {
+                "dev/gafipro/gafiloader/LaunchBootstrap.class",
+                "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
+                "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
+                "com/google/gson/Gson.class",
+                "com/google/gson/GsonBuilder.class",
+                "com/google/gson/JsonParser.class",
+                "com/google/gson/JsonObject.class",
+                "com/google/gson/JsonArray.class",
+                "com/google/gson/JsonElement.class",
+                "com/google/gson/JsonPrimitive.class"
+        };
+        try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
+            for (String name : entries) {
+                jar.putNextEntry(new JarEntry(name));
+                jar.write(new byte[] {0});
+                jar.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+
 }

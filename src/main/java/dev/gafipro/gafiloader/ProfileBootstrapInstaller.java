@@ -18,6 +18,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 
 /**
  * Creates and registers a dedicated GafiLoader installation based on an installed
@@ -61,9 +64,13 @@ public final class ProfileBootstrapInstaller {
                     profileJson, null);
         }
 
-        // Validate all launcher configuration files before writing anything. These can contain
-        // login/session state; update them atomically and preserve every unrelated root/profile field.
-        List<LauncherProfileUpdate> launcherUpdates = prepareLauncherProfileUpdates(launcherFiles);
+        // Locate the source Fabric installation even if a previous run already created the GafiLoader
+        // version JSON. This lets updates repair a missing launcher entry or fill missing profile settings.
+        FabricSource source = findFabric26Profile(versionsRoot);
+        String sourceVersionId = source == null ? null : stringValue(source.profile().get("id"));
+        if (source != null && sourceVersionId == null) {
+            sourceVersionId = source.path().getParent().getFileName().toString();
+        }
 
         JsonObject profileRoot;
         boolean createdFromFabric = false;
@@ -77,7 +84,6 @@ public final class ProfileBootstrapInstaller {
                         + PROFILE_ID + "; left it unchanged: " + profileJson, profileJson, null);
             }
         } else {
-            FabricSource source = findFabric26Profile(versionsRoot);
             if (source == null) {
                 return new Result(false, "Could not create the GafiLoader installation because no installed "
                         + "Fabric profile for Minecraft " + GAME_VERSION + " was found under " + versionsRoot
@@ -99,6 +105,11 @@ public final class ProfileBootstrapInstaller {
             return new Result(false, "The source profile does not declare the Fabric Loader library; "
                     + "refusing to create a non-working GafiLoader installation.", profileJson, null);
         }
+
+        // Register only after the source/version data has been validated. Preserve existing user settings,
+        // filling only missing keys from the matching Fabric installation even on subsequent repairs.
+        List<LauncherProfileUpdate> launcherUpdates =
+                prepareLauncherProfileUpdates(launcherFiles, sourceVersionId);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
                 ? profileRoot.getAsJsonArray("libraries") : new JsonArray();
@@ -140,6 +151,7 @@ public final class ProfileBootstrapInstaller {
         Path temporaryJar = bootstrapPath.resolveSibling(bootstrapPath.getFileName() + ".tmp");
         try {
             Files.copy(bootstrapJar, temporaryJar, StandardCopyOption.REPLACE_EXISTING);
+            verifyBootstrapJar(temporaryJar, version);
             atomicMove(temporaryJar, bootstrapPath);
         } finally {
             Files.deleteIfExists(temporaryJar);
@@ -175,8 +187,8 @@ public final class ProfileBootstrapInstaller {
         return List.copyOf(found);
     }
 
-    private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles)
-            throws IOException {
+    private static List<LauncherProfileUpdate> prepareLauncherProfileUpdates(List<Path> launcherFiles,
+            String sourceVersionId) throws IOException {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
@@ -190,17 +202,25 @@ public final class ProfileBootstrapInstaller {
             JsonElement existing = profiles.get(PROFILE_ID);
             JsonObject profile;
             if (existing == null) {
-                profile = new JsonObject();
-                profile.addProperty("created", now);
-                profile.addProperty("lastUsed", now);
+                profile = copySourceInstallationSettings(profiles, sourceVersionId);
+                if (profile == null) profile = new JsonObject();
             } else if (existing.isJsonObject()) {
                 profile = existing.getAsJsonObject();
-                if (!profile.has("created")) profile.addProperty("created", now);
-                if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
             } else {
                 throw new IOException("The launcher installation entry '" + PROFILE_ID
                         + "' is not a JSON object in " + path + "; refusing to replace it.");
             }
+            // Merge only absent values: preserve any GafiLoader-specific choices made by the user.
+            JsonObject sourceSettings = copySourceInstallationSettings(profiles, sourceVersionId);
+            if (sourceSettings != null) {
+                for (var setting : sourceSettings.entrySet()) {
+                    if (!profile.has(setting.getKey())) {
+                        profile.add(setting.getKey(), setting.getValue().deepCopy());
+                    }
+                }
+            }
+            if (!profile.has("created")) profile.addProperty("created", now);
+            if (!profile.has("lastUsed")) profile.addProperty("lastUsed", now);
             profile.addProperty("name", PROFILE_NAME);
             profile.addProperty("type", "custom");
             profile.addProperty("lastVersionId", PROFILE_ID);
@@ -209,6 +229,31 @@ public final class ProfileBootstrapInstaller {
             updates.add(new LauncherProfileUpdate(path, root));
         }
         return List.copyOf(updates);
+    }
+
+    private static JsonObject copySourceInstallationSettings(JsonObject profiles, String sourceVersionId) {
+        if (sourceVersionId == null || sourceVersionId.isBlank()) return null;
+        String[] settingKeys = {
+                "gameDir", "javaDir", "javaArgs", "resolution", "logConfig", "logConfigIsXML", "icon"
+        };
+        for (var entry : profiles.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (!value.isJsonObject()) continue;
+            JsonObject sourceEntry = value.getAsJsonObject();
+            if (!sourceEntry.has("lastVersionId")
+                    || !sourceEntry.get("lastVersionId").isJsonPrimitive()
+                    || !sourceVersionId.equals(sourceEntry.get("lastVersionId").getAsString())) {
+                continue;
+            }
+            JsonObject copied = new JsonObject();
+            for (String key : settingKeys) {
+                if (sourceEntry.has(key)) {
+                    copied.add(key, sourceEntry.get(key).deepCopy());
+                }
+            }
+            return copied;
+        }
+        return null;
     }
 
     private static FabricSource findFabric26Profile(Path versionsRoot) throws IOException {
@@ -297,6 +342,47 @@ public final class ProfileBootstrapInstaller {
                     StandardCopyOption.ATOMIC_MOVE);
         } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
             Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void verifyBootstrapJar(Path path, String expectedVersion) throws IOException {
+        try (JarFile jar = new JarFile(path.toFile())) {
+            Manifest manifest = jar.getManifest();
+            if (manifest == null) {
+                throw new IOException("Embedded GafiLoader bootstrap has no manifest.");
+            }
+            String mainClass = manifest.getMainAttributes().getValue("Main-Class");
+            if (!BOOTSTRAP_MAIN_CLASS.equals(mainClass)) {
+                throw new IOException("Bootstrap manifest Main-Class was " + mainClass
+                        + "; expected " + BOOTSTRAP_MAIN_CLASS + ".");
+            }
+            String embeddedVersion = manifest.getMainAttributes().getValue("Implementation-Version");
+            if (!expectedVersion.equals(embeddedVersion)) {
+                throw new IOException("Bootstrap version mismatch: embedded=" + embeddedVersion
+                        + ", expected=" + expectedVersion + ".");
+            }
+
+            String[] requiredEntries = {
+                    "dev/gafipro/gafiloader/LaunchBootstrap.class",
+                    "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
+                    "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                    "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
+                    "com/google/gson/Gson.class",
+                    "com/google/gson/GsonBuilder.class",
+                    "com/google/gson/JsonParser.class",
+                    "com/google/gson/JsonObject.class",
+                    "com/google/gson/JsonArray.class",
+                    "com/google/gson/JsonElement.class",
+                    "com/google/gson/JsonPrimitive.class"
+            };
+            for (String entryName : requiredEntries) {
+                JarEntry entry = jar.getJarEntry(entryName);
+                if (entry == null || entry.isDirectory()) {
+                    throw new IOException("Bootstrap JAR is missing required entry: " + entryName);
+                }
+            }
+        } catch (java.util.zip.ZipException exception) {
+            throw new IOException("Embedded GafiLoader bootstrap is not a valid JAR archive: " + path, exception);
         }
     }
 
