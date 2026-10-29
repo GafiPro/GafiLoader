@@ -200,6 +200,8 @@ class ProfileBootstrapInstallerTest {
                 {"id":"gafiloader-26.2","mainClass":"example.CustomEntrypoint","libraries":[]}
                 """;
         Files.writeString(profile, original, StandardCharsets.UTF_8);
+        Files.writeString(minecraft.resolve("launcher_profiles.json"),
+                "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
 
         ProfileBootstrapInstaller.Result result = new ProfileBootstrapInstaller().install(
                 minecraft, new ByteArrayInputStream(new byte[] {1, 2, 3}), "0.1.586");
