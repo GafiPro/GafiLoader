@@ -136,7 +136,15 @@ class ProfileBootstrapInstallerTest {
         String launcherOriginal = """
                 {
                   "profiles": {
-                    "latest-release": {"name": "Latest Release", "type": "latest-release", "lastVersionId": "26.2"}
+                    "latest-release": {"name": "Latest Release", "type": "latest-release", "lastVersionId": "26.2"},
+                    "fabric-source": {
+                      "name": "Fabric 26.2", "type": "custom",
+                      "lastVersionId": "fabric-loader-0.20.1-26.2",
+                      "gameDir": "D:/Gafi/Instance",
+                      "javaArgs": "-Xmx4G",
+                      "javaDir": "C:/Java/Custom",
+                      "resolution": {"width": 1920, "height": 1080}
+                    }
                   },
                   "settings": {"locale": "en-us"},
                   "unknown-root-setting": 27
@@ -166,6 +174,10 @@ class ProfileBootstrapInstallerTest {
         JsonObject gafiEntry = entries.getAsJsonObject("gafiloader-26.2");
         assertEquals("GafiLoader 26.2", gafiEntry.get("name").getAsString());
         assertEquals("gafiloader-26.2", gafiEntry.get("lastVersionId").getAsString());
+        assertEquals("D:/Gafi/Instance", gafiEntry.get("gameDir").getAsString());
+        assertEquals("-Xmx4G", gafiEntry.get("javaArgs").getAsString());
+        assertEquals("C:/Java/Custom", gafiEntry.get("javaDir").getAsString());
+        assertEquals(1920, gafiEntry.getAsJsonObject("resolution").get("width").getAsInt());
         assertEquals("en-us", launcherRoot.getAsJsonObject("settings").get("locale").getAsString());
         assertEquals(27, launcherRoot.get("unknown-root-setting").getAsInt());
 
