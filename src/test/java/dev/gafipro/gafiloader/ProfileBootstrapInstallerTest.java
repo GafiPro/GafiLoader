@@ -35,6 +35,7 @@ class ProfileBootstrapInstallerTest {
         String original = """
                 {
                   "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
                   "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
                   "libraries": [
                     {"name": "net.fabricmc:fabric-loader:0.20.1", "url": "https://maven.fabricmc.net/"}
@@ -234,6 +235,7 @@ class ProfileBootstrapInstallerTest {
         String original = """
                 {
                   "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
                   "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
                   "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
                 }
@@ -253,6 +255,39 @@ class ProfileBootstrapInstallerTest {
         assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
         assertFalse(Files.exists(minecraft.resolve(
                 "libraries/dev/gafipro/gafiloader-bootstrap/0.1.588/gafiloader-bootstrap-0.1.588.jar")));
+    }
+
+    @Test
+    void refusesBootstrapJarWithInvalidClassBytesBeforeChangingLauncherProfiles() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("invalid-class-minecraft"));
+        Path profileDirectory = Files.createDirectories(minecraft.resolve("versions/gafiloader-26.2"));
+        Path profile = profileDirectory.resolve("gafiloader-26.2.json");
+        String original = """
+                {
+                  "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """;
+        Files.writeString(profile, original, StandardCharsets.UTF_8);
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        String launcherOriginal = """
+                {"profiles":{},"settings":{}}
+                """.strip();
+        Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
+
+        byte[] invalidClassJar = createBootstrapJar(
+                "0.1.589", "dev/gafipro/gafiloader/LaunchBootstrap.class");
+        IOException failure = assertThrows(IOException.class, () -> new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(invalidClassJar), "0.1.589"));
+        assertTrue(failure.getMessage().contains("valid Java class file"));
+
+        assertEquals(original, Files.readString(profile, StandardCharsets.UTF_8));
+        assertEquals(launcherOriginal, Files.readString(launcherProfiles, StandardCharsets.UTF_8));
+        assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
+        assertFalse(Files.exists(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.589/gafiloader-bootstrap-0.1.589.jar")));
     }
 
     @Test
@@ -293,7 +328,74 @@ class ProfileBootstrapInstallerTest {
                 .getAsJsonObject();
         assertFalse(launcherRoot.getAsJsonObject("profiles").has("gafiloader-26.2"));
     }
+    @Test
+    void removesOnlyUnreferencedOldBootstrapFoldersAndKeepsReferencedOrUnrelatedFiles() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft-cleanup"));
+        Path versionsRoot = Files.createDirectories(minecraft.resolve("versions"));
+        Path sourceDirectory = Files.createDirectories(versionsRoot.resolve("fabric-loader-0.20.1-26.2"));
+        Files.writeString(sourceDirectory.resolve("fabric-loader-0.20.1-26.2.json"), """
+                {
+                  "id": "fabric-loader-0.20.1-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """, StandardCharsets.UTF_8);
+
+        Path gafiDirectory = Files.createDirectories(versionsRoot.resolve("gafiloader-26.2"));
+        Path gafiProfile = gafiDirectory.resolve("gafiloader-26.2.json");
+        Files.writeString(gafiProfile, """
+                {
+                  "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [
+                    {"name": "net.fabricmc:fabric-loader:0.20.1"},
+                    {"name": "dev.gafipro:gafiloader-bootstrap:0.1.590"}
+                  ]
+                }
+                """, StandardCharsets.UTF_8);
+        Files.writeString(gafiProfile.resolveSibling("gafiloader-26.2.json.gafiloader-backup"), """
+                {
+                  "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
+                  "libraries": [{"name": "dev.gafipro:gafiloader-bootstrap:0.1.590"}]
+                }
+                """, StandardCharsets.UTF_8);
+
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        Files.writeString(launcherProfiles, """
+                {"profiles":{"fabric-source":{"lastVersionId":"fabric-loader-0.20.1-26.2"}},
+                 "settings":{"locale":"en-us"}}
+                """, StandardCharsets.UTF_8);
+
+        Path bootstrapRoot = Files.createDirectories(
+                minecraft.resolve("libraries/dev/gafipro/gafiloader-bootstrap"));
+        Path referencedOld = Files.createDirectories(bootstrapRoot.resolve("0.1.590"));
+        Files.write(referencedOld.resolve("gafiloader-bootstrap-0.1.590.jar"), new byte[] {1, 2, 3});
+        Path orphanedOld = Files.createDirectories(bootstrapRoot.resolve("0.1.591"));
+        Files.write(orphanedOld.resolve("gafiloader-bootstrap-0.1.591.jar"), new byte[] {4, 5, 6});
+        Path unrelated = Files.createDirectories(minecraft.resolve("libraries/dev/gafipro/other-library/0.1.591"));
+        Files.write(unrelated.resolve("keep.txt"), "keep".getBytes(StandardCharsets.UTF_8));
+
+        ProfileBootstrapInstaller.Result result = new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.617")), "0.1.617");
+
+        assertTrue(result.installed(), result.message());
+        assertFalse(Files.exists(orphanedOld), "Unreferenced stale bootstrap directories should be removed.");
+        assertTrue(Files.isRegularFile(referencedOld.resolve("gafiloader-bootstrap-0.1.590.jar")),
+                "An old library still referenced by a profile backup must be kept.");
+        assertTrue(Files.isRegularFile(unrelated.resolve("keep.txt")),
+                "The cleanup must not touch libraries outside GafiLoader's own artifact directory.");
+        assertTrue(Files.isRegularFile(bootstrapRoot.resolve("0.1.617/gafiloader-bootstrap-0.1.617.jar")));
+        assertTrue(result.message().contains("Removed 1 unreferenced old GafiLoader bootstrap folder(s)."));
+    }
+
     private static byte[] createBootstrapJar(String version) throws IOException {
+        return createBootstrapJar(version, null);
+    }
+
+    private static byte[] createBootstrapJar(String version, String invalidClassEntry) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         Manifest manifest = new Manifest();
         Attributes attributes = manifest.getMainAttributes();
@@ -317,7 +419,17 @@ class ProfileBootstrapInstallerTest {
         try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
             for (String name : entries) {
                 jar.putNextEntry(new JarEntry(name));
-                jar.write(new byte[] {0});
+                if (name.equals(invalidClassEntry)) {
+                    jar.write(new byte[] {0, 0, 0, 0, 0, 0, 0, 0});
+                } else {
+                    try (var classBytes = ProfileBootstrapInstallerTest.class.getClassLoader()
+                            .getResourceAsStream(name)) {
+                        if (classBytes == null) {
+                            throw new IOException("Test classpath is missing " + name);
+                        }
+                        jar.write(classBytes.readAllBytes());
+                    }
+                }
                 jar.closeEntry();
             }
         }

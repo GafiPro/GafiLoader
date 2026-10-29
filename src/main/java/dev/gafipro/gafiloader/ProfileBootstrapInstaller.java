@@ -105,11 +105,24 @@ public final class ProfileBootstrapInstaller {
             return new Result(false, "The source profile does not declare the Fabric Loader library; "
                     + "refusing to create a non-working GafiLoader installation.", profileJson, null);
         }
+        String parentVersion = stringValue(profileRoot.get("inheritsFrom"));
+        if (parentVersion == null && source != null) {
+            parentVersion = stringValue(source.profile().get("inheritsFrom"));
+            if (GAME_VERSION.equals(parentVersion)) {
+                profileRoot.addProperty("inheritsFrom", GAME_VERSION);
+            }
+        }
+        if (!GAME_VERSION.equals(parentVersion)) {
+            return new Result(false, "The GafiLoader profile must inherit from Minecraft " + GAME_VERSION
+                    + "; found inheritsFrom=" + parentVersion + ". Install/repair the Fabric " + GAME_VERSION
+                    + " profile first. No launcher profile was registered.", profileJson, null);
+        }
 
         // Register only after the source/version data has been validated. Preserve existing user settings,
         // filling only missing keys from the matching Fabric installation even on subsequent repairs.
         List<LauncherProfileUpdate> launcherUpdates =
                 prepareLauncherProfileUpdates(launcherFiles, sourceVersionId);
+        assertLauncherProfilesUnchanged(launcherUpdates);
 
         JsonArray libraries = profileRoot.has("libraries") && profileRoot.get("libraries").isJsonArray()
                 ? profileRoot.getAsJsonArray("libraries") : new JsonArray();
@@ -157,6 +170,7 @@ public final class ProfileBootstrapInstaller {
             Files.deleteIfExists(temporaryJar);
         }
 
+        assertLauncherProfilesUnchanged(launcherUpdates);
         Files.createDirectories(profileDirectory);
         if (!createdFromFabric && existingProfileBytes != null) {
             Path backup = profileJson.resolveSibling(profileJson.getFileName() + ".gafiloader-backup");
@@ -170,11 +184,17 @@ public final class ProfileBootstrapInstaller {
             writeJsonAtomically(update.path(), update.updatedRoot());
         }
 
+        CleanupResult cleanup = cleanupOrphanedBootstrapArtifacts(minecraft, version);
+        String cleanupMessage = cleanup.warning() == null
+                ? " Removed " + cleanup.removedDirectories() + " unreferenced old GafiLoader bootstrap folder(s)."
+                : " Warning: old GafiLoader bootstrap cleanup was skipped/partial: " + cleanup.warning();
+
         String registeredIn = String.join(", ", launcherFiles.stream()
                 .map(path -> path.getFileName().toString()).toList());
         String message = "Created/updated the " + PROFILE_NAME + " version and registered it as a new "
                 + "Minecraft Launcher installation in " + registeredIn + ". Close and reopen the Launcher "
-                + "if it was already running. The source Fabric profile and vanilla profiles were left unchanged.";
+                + "if it was already running. The source Fabric profile and vanilla profiles were left unchanged."
+                + cleanupMessage;
         return new Result(true, message, profileJson, bootstrapPath);
     }
 
@@ -192,7 +212,8 @@ public final class ProfileBootstrapInstaller {
         List<LauncherProfileUpdate> updates = new ArrayList<>();
         String now = Instant.now().toString();
         for (Path path : launcherFiles) {
-            JsonObject root = parseObject(Files.readAllBytes(path), "Minecraft Launcher profile file " + path);
+            byte[] originalBytes = Files.readAllBytes(path);
+            JsonObject root = parseObject(originalBytes, "Minecraft Launcher profile file " + path);
             JsonElement profilesElement = root.get("profiles");
             if (profilesElement != null && !profilesElement.isJsonObject()) {
                 throw new IOException("The 'profiles' value is not a JSON object in " + path
@@ -226,7 +247,7 @@ public final class ProfileBootstrapInstaller {
             profile.addProperty("lastVersionId", PROFILE_ID);
             profiles.add(PROFILE_ID, profile);
             root.add("profiles", profiles);
-            updates.add(new LauncherProfileUpdate(path, root));
+            updates.add(new LauncherProfileUpdate(path, originalBytes, root));
         }
         return List.copyOf(updates);
     }
@@ -279,7 +300,8 @@ public final class ProfileBootstrapInstaller {
                 if (!hasFabricLoaderLibrary(root)) continue;
                 String parent = stringValue(root.get("inheritsFrom"));
                 String id = stringValue(root.get("id"));
-                if (!GAME_VERSION.equals(parent) && !(id != null && id.endsWith("-" + GAME_VERSION))) continue;
+                if (parent != null && !GAME_VERSION.equals(parent)) continue;
+                if (parent == null && !(id != null && id.endsWith("-" + GAME_VERSION))) continue;
                 candidates.add(new FabricSource(json, root));
             } catch (IOException | RuntimeException ignored) {
                 // A corrupt or unrelated version JSON must not prevent discovery of another valid profile.
@@ -304,6 +326,103 @@ public final class ProfileBootstrapInstaller {
                     && name.getAsString().startsWith(FABRIC_LOADER_COORDINATE)) return true;
         }
         return false;
+    }
+
+    private static void assertLauncherProfilesUnchanged(List<LauncherProfileUpdate> updates) throws IOException {
+        for (LauncherProfileUpdate update : updates) {
+            if (!Files.isRegularFile(update.path())
+                    || !java.util.Arrays.equals(update.originalBytes(), Files.readAllBytes(update.path()))) {
+                throw new IOException("Minecraft Launcher profile changed while GafiLoader was preparing the installation: "
+                        + update.path() + ". Close Minecraft Launcher completely and rerun GafiLoader; "
+                        + "the launcher profile JSON was not overwritten.");
+            }
+        }
+    }
+
+    /**
+     * Removes only unreferenced, version-shaped folders under GafiLoader's own bootstrap artifact
+     * path. It never traverses symlinks and never deletes a library still referenced by any version
+     * JSON or by the saved GafiLoader version backup.
+     */
+    private static CleanupResult cleanupOrphanedBootstrapArtifacts(Path minecraft, String currentVersion) {
+        Path libraryRoot = minecraft.resolve("libraries/dev/gafipro/gafiloader-bootstrap").normalize();
+        if (!Files.isDirectory(libraryRoot) || Files.isSymbolicLink(libraryRoot)) {
+            return new CleanupResult(0, null);
+        }
+
+        try {
+            java.util.Set<String> referencedVersions = collectReferencedBootstrapVersions(minecraft);
+            referencedVersions.add(currentVersion);
+            int removed = 0;
+            try (Stream<Path> children = Files.list(libraryRoot)) {
+                for (Path directory : children.toList()) {
+                    if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory)) continue;
+                    String version = directory.getFileName().toString();
+                    if (!version.matches("[0-9]+(?:\\.[A-Za-z0-9_-]+){2,}")
+                            || referencedVersions.contains(version)) continue;
+
+                    String expectedJar = "gafiloader-bootstrap-" + version + ".jar";
+                    String expectedTemp = expectedJar + ".tmp";
+                    List<Path> contents;
+                    try (Stream<Path> entries = Files.list(directory)) {
+                        contents = entries.toList();
+                    }
+                    if (contents.isEmpty() || contents.stream().anyMatch(path ->
+                            Files.isSymbolicLink(path)
+                                    || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                                    || !(path.getFileName().toString().equals(expectedJar)
+                                    || path.getFileName().toString().equals(expectedTemp)))) {
+                        continue;
+                    }
+                    for (Path content : contents) Files.deleteIfExists(content);
+                    Files.deleteIfExists(directory);
+                    removed++;
+                }
+            }
+            return new CleanupResult(removed, null);
+        } catch (IOException exception) {
+            return new CleanupResult(0, exception.getMessage());
+        }
+    }
+
+    private static java.util.Set<String> collectReferencedBootstrapVersions(Path minecraft) throws IOException {
+        java.util.Set<String> referenced = new java.util.HashSet<>();
+        Path versionsRoot = minecraft.resolve("versions");
+        if (!Files.isDirectory(versionsRoot)) return referenced;
+        String coordinatePrefix = LIBRARY_GROUP + ":" + LIBRARY_ARTIFACT + ":";
+        try (Stream<Path> directories = Files.list(versionsRoot)) {
+            for (Path directory : directories.toList()) {
+                if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory)) continue;
+                try (Stream<Path> entries = Files.list(directory)) {
+                    for (Path file : entries.toList()) {
+                        String name = file.getFileName().toString();
+                        if (Files.isSymbolicLink(file)
+                                || !(name.endsWith(".json") || name.endsWith(".json.gafiloader-backup"))
+                                || !Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+                        JsonObject root;
+                        try {
+                            root = parseObject(Files.readAllBytes(file), "version JSON " + file);
+                        } catch (IOException exception) {
+                            // If a profile/backup cannot be inspected, avoid deleting a library that
+                            // the unreadable file may still reference.
+                            throw new IOException("could not safely inspect " + file + ": " + exception.getMessage(),
+                                    exception);
+                        }
+                        JsonElement librariesElement = root.get("libraries");
+                        if (librariesElement == null || !librariesElement.isJsonArray()) continue;
+                        for (JsonElement library : librariesElement.getAsJsonArray()) {
+                            if (!library.isJsonObject()) continue;
+                            String libraryName = stringValue(library.getAsJsonObject().get("name"));
+                            if (libraryName != null && libraryName.startsWith(coordinatePrefix)) {
+                                String referencedVersion = libraryName.substring(coordinatePrefix.length());
+                                if (!referencedVersion.isBlank()) referenced.add(referencedVersion);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return referenced;
     }
 
     private static JsonObject parseObject(byte[] bytes, String description) throws IOException {
@@ -380,6 +499,17 @@ public final class ProfileBootstrapInstaller {
                 if (entry == null || entry.isDirectory()) {
                     throw new IOException("Bootstrap JAR is missing required entry: " + entryName);
                 }
+                byte[] classFile;
+                try (InputStream stream = jar.getInputStream(entry)) {
+                    classFile = stream.readAllBytes();
+                }
+                if (classFile.length < 8
+                        || (classFile[0] & 0xFF) != 0xCA
+                        || (classFile[1] & 0xFF) != 0xFE
+                        || (classFile[2] & 0xFF) != 0xBA
+                        || (classFile[3] & 0xFF) != 0xBE) {
+                    throw new IOException("Bootstrap JAR entry is not a valid Java class file: " + entryName);
+                }
             }
         } catch (java.util.zip.ZipException exception) {
             throw new IOException("Embedded GafiLoader bootstrap is not a valid JAR archive: " + path, exception);
@@ -388,5 +518,6 @@ public final class ProfileBootstrapInstaller {
 
     public record Result(boolean installed, String message, Path profileJson, Path bootstrapJar) {}
     private record FabricSource(Path path, JsonObject profile) {}
-    private record LauncherProfileUpdate(Path path, JsonObject updatedRoot) {}
+    private record LauncherProfileUpdate(Path path, byte[] originalBytes, JsonObject updatedRoot) {}
+    private record CleanupResult(int removedDirectories, String warning) {}
 }
