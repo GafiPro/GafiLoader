@@ -203,7 +203,7 @@ class ProfileBootstrapInstallerTest {
     }
 
     @Test
-    void selectsAnExistingGafiLoaderGameDirectoryWhenSourceProfileHasNoGameDir() throws Exception {
+    void selectsExistingGafiLoaderGameDirectoryOverInheritedSourceGameDir() throws Exception {
         Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft-custom-gamedir"));
         Path dedicatedGameDirectory = Files.createDirectories(minecraft.resolve("GafiLoader 26.2"));
         Files.createDirectories(dedicatedGameDirectory.resolve("mods"));
@@ -226,7 +226,8 @@ class ProfileBootstrapInstallerTest {
                     "fabric-source": {
                       "name": "Fabric 26.2",
                       "type": "custom",
-                      "lastVersionId": "fabric-loader-0.20.1-26.2"
+                      "lastVersionId": "fabric-loader-0.20.1-26.2",
+                      "gameDir": "D:/Fabric Instance"
                     }
                   },
                   "settings": {}
