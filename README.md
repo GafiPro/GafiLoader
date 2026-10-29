@@ -33,6 +33,8 @@ Fabric Loader reads `config/fabric_loader_dependencies.json` during mod resoluti
 
 The override removes only the declared `minecraft` dependency for metadata that advertises 1.21.11; it leaves Fabric Loader, other required mods, and conflict rules alone. Existing overrides are merged and the previous config is backed up as `fabric_loader_dependencies.json.bak`. This follows the [official Fabric dependency override format](https://docs.fabricmc.net/players/troubleshooting/dependency-overrides/).
 
+The GafiLoader setup application does **not** pre-write this shared config. The launch bootstrap snapshots the existing file, writes overrides before Fabric's mod resolution, then restores the original bytes when the game exits or the JVM shuts down, but only if the file still exactly matches the version GafiLoader generated. If another process or the user changes the file during the session, GafiLoader leaves that changed file untouched and logs a warning. A force-terminated process or power loss can prevent shutdown cleanup, so this remains a safety measure rather than a guarantee against every abrupt termination.
+
 **Important limitation:** this makes Fabric get past the early “wrong Minecraft version” gate for detected 1.21.11 mods. It does not make old bytecode, removed classes/methods, Fabric API behavior, mappings, Mixins, or access wideners compatible with 26.2. A later crash is a separate compatibility problem. If the bootstrap cannot write the override config, it stops before launching Fabric and reports the config path rather than silently continuing into the same incompatibility screen.
 
 ## Legacy bytecode remapping preparation
