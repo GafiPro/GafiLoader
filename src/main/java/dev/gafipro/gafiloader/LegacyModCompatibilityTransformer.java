@@ -239,7 +239,7 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenReferences += nested.rewrittenReferences();
                             rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
                         }
-                    } else if (looksLikeClassTweaker(data)) {
+                    } else if (isClassTweakerResource(entryName, data)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
                         LegacyClassTweakerRemapper.Result remapped = classTweakerRemapper.remap(sourceText);
                         if (remapped.remapped()) {
@@ -270,11 +270,31 @@ final class LegacyModCompatibilityTransformer {
                 rewrittenClassTweakerFiles, List.copyOf(warnings));
     }
 
+    /**
+     * Detects ClassTweaker resources by their conventional names as well as by their header.
+     * The filename check is intentional: older Windows-authored resources may begin with a
+     * UTF-8 BOM, which must not cause the bootstrap to silently skip a declared tweaker file.
+     */
+    private static boolean isClassTweakerResource(String entryName, byte[] contents) {
+        String lowerName = entryName.toLowerCase(Locale.ROOT);
+        return lowerName.endsWith(".classtweaker")
+                || lowerName.endsWith(".accesswidener")
+                || looksLikeClassTweaker(contents);
+    }
+
     private static boolean looksLikeClassTweaker(byte[] contents) {
         if (contents.length == 0 || contents.length > 4 * 1024 * 1024) return false;
-        String prefix = new String(contents, 0, Math.min(contents.length, 128), StandardCharsets.UTF_8)
-                .replace("\\uFEFF", "").stripLeading();
-        return prefix.startsWith("classTweaker ") || prefix.startsWith("accessWidener ");
+        String text = new String(contents, 0, Math.min(contents.length, 512), StandardCharsets.UTF_8);
+        if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
+            text = text.substring(1);
+        }
+        int lineEnd = text.indexOf(10);
+        String firstLine = (lineEnd >= 0 ? text.substring(0, lineEnd) : text).strip();
+        String[] header = firstLine.split("\\s+");
+        return header.length == 3
+                && ("classTweaker".equals(header[0]) || "accessWidener".equals(header[0]))
+                && header[1].matches("v[0-9]+")
+                && !header[2].isBlank();
     }
 
     private static ClassTransform transformClass(byte[] originalBytes) {
