@@ -118,6 +118,9 @@ public final class Main {
         Path minecraft = resolution.path();
         Path setupLog = minecraft.resolve("logs").resolve("gafiloader-setup.log");
         initializeSetupLog(setupLog, minecraft);
+        appendSetupLog(setupLog, "APPDATA=" + environmentValue(System.getenv("APPDATA")));
+        appendSetupLog(setupLog, "LOCALAPPDATA=" + environmentValue(System.getenv("LOCALAPPDATA")));
+        appendSetupLog(setupLog, "Minecraft directory detection=" + resolution.source());
 
         System.out.println("GafiLoader — create a dedicated Minecraft installation");
         System.out.println("Minecraft folder: " + minecraft);
@@ -157,7 +160,8 @@ public final class Main {
                         && !System.getProperty("gafiloader.minecraftDir").isBlank()
                         ? System.getProperty("gafiloader.minecraftDir")
                         : System.getenv("GAFILOADER_MINECRAFT_DIR"),
-                        System.getenv("APPDATA"), System.getProperty("user.home")).source());
+                        System.getenv("APPDATA"), System.getenv("LOCALAPPDATA"),
+                        System.getProperty("user.home")).source());
         try (InputStream bootstrap = Main.class.getResourceAsStream("/bootstrap/gafiloader-bootstrap.jar")) {
             if (bootstrap == null) {
                 String message = "Embedded launch bootstrap was not packaged; the profile was not modified.";
@@ -184,6 +188,10 @@ public final class Main {
             appendSetupLog(setupLog, "ERROR: " + details);
             return false;
         }
+    }
+
+    private static String environmentValue(String value) {
+        return value == null || value.isBlank() ? "<not set>" : value;
     }
 
     private static void initializeSetupLog(Path logPath, Path minecraftDirectory) {
