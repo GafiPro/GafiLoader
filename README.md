@@ -29,6 +29,9 @@ If no Fabric profile for Minecraft 26.2 exists yet, GafiLoader stops with an exp
 
 ## Automatic pre-launch version-gate override
 
+The bootstrap deliberately does **not** embed ASM. Minecraft 26.2 already supplies ASM on the game classpath; bundling another copy causes Fabric Loader's classpath validation to abort with a duplicate-ASM error. The compatibility transformer uses the ASM version supplied by the launched game.
+
+
 Fabric Loader reads `config/fabric_loader_dependencies.json` during mod resolution. The GafiLoader bootstrap now creates/merges the override file **before it calls Fabric Loader**, which avoids the previous ordering problem where running the utility separately was required.
 
 1. Install the application using `GafiLoader-Installer-Windows-x64.exe` (the installer does not itself register a Minecraft profile). Fully close Minecraft Launcher, then launch **GafiLoader** from the Windows Start Menu. The application creates `.minecraft/versions/gafiloader-26.2/gafiloader-26.2.json` from an existing Fabric 26.2 version, installs a small bootstrap JAR in `.minecraft/libraries/`, sets the bootstrap as the entrypoint, and registers a **new launcher installation** named `GafiLoader 26.2`. Wait for the console to report success before closing it. If that dedicated version already exists, setup updates it without duplicating the launcher entry. When modifying an existing GafiLoader version JSON, the prior version JSON is backed up as `gafiloader-26.2.json.gafiloader-backup`.
