@@ -14,8 +14,8 @@ import java.util.stream.Stream;
 
 /**
  * Resolves the Minecraft data root before the installer touches launcher files.
- * The normal APPDATA location is preferred, but an explicit override and a small
- * set of well-known fallback locations are supported.
+ * An explicit override wins; otherwise recognized launcher roots are ranked by
+ * their installed Fabric 26.2 profile, including the Microsoft Store package path.
  */
 final class MinecraftDirectoryResolver {
     private static final String[] LAUNCHER_PROFILE_FILES = {
@@ -53,7 +53,12 @@ final class MinecraftDirectoryResolver {
         List<Path> candidates = new ArrayList<>();
         if (appDataCandidate != null) candidates.add(appDataCandidate);
         if (microsoftStoreCandidate != null) candidates.add(microsoftStoreCandidate);
-        if (home != null) candidates.add(home.resolve(".minecraft").normalize());
+        if (home != null) {
+            // Retain the independent home-derived fallbacks as well: APPDATA can be
+            // redirected or point at an empty profile directory on managed Windows setups.
+            candidates.add(home.resolve("AppData").resolve("Roaming").resolve(".minecraft").normalize());
+            candidates.add(home.resolve(".minecraft").normalize());
+        }
         if (candidates.isEmpty()) {
             candidates.add(Path.of(System.getProperty("user.home", "."))
                     .resolve(".minecraft").toAbsolutePath().normalize());
