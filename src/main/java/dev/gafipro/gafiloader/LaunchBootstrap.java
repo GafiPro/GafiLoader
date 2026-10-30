@@ -1,6 +1,8 @@
 package dev.gafipro.gafiloader;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -100,10 +102,10 @@ public final class LaunchBootstrap {
                 log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
                 launchFabric(args);
             } catch (Exception exception) {
-                log(logPath, "Fabric launch failed: " + exception, true);
+                logFailure(logPath, "Fabric launch failed: " + exception, exception);
                 throw exception;
             } catch (Error error) {
-                log(logPath, "Fabric launch failed: " + error, true);
+                logFailure(logPath, "Fabric launch failed: " + error, error);
                 throw error;
             }
             return;
@@ -125,10 +127,10 @@ public final class LaunchBootstrap {
             log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
             launchFabric(args);
         } catch (Exception exception) {
-            log(logPath, "Fabric launch failed: " + exception, true);
+            logFailure(logPath, "Fabric launch failed: " + exception, exception);
             throw exception;
         } catch (Error error) {
-            log(logPath, "Fabric launch failed: " + error, true);
+            logFailure(logPath, "Fabric launch failed: " + error, error);
             throw error;
         } finally {
             if (restored.compareAndSet(false, true)) {
@@ -419,6 +421,32 @@ public final class LaunchBootstrap {
                     StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException exception) {
             System.err.println("[GafiLoader] Could not append preflight log: " + exception.getMessage());
+        }
+    }
+
+    /**
+     * Writes the complete launch failure, including nested causes, to the persistent preflight log.
+     * Fabric can fail before Minecraft initializes Log4j, so latest.log may not exist yet.
+     */
+    static void logFailure(Path logPath, String message, Throwable failure) {
+        StringWriter trace = new StringWriter();
+        try (PrintWriter writer = new PrintWriter(trace)) {
+            failure.printStackTrace(writer);
+        }
+
+        String prefix = "[GafiLoader] " + message;
+        String details = trace.toString();
+        System.err.println(prefix);
+        System.err.print(details);
+
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath,
+                    Instant.now() + " " + prefix + System.lineSeparator() + details,
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException exception) {
+            System.err.println("[GafiLoader] Could not append failure stack trace to preflight log: "
+                    + exception.getMessage());
         }
     }
 
