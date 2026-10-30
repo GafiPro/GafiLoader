@@ -52,8 +52,8 @@ jar {
 /*
  * This deliberately small JAR is inserted into the dedicated Minecraft profile classpath.
  * It contains the pre-launch bootstrap, metadata override generator, targeted compatibility
- * transformer, and Gson. ASM is deliberately resolved from Minecraft 26.2's own runtime
- * classpath; bundling another copy makes Fabric Loader abort with duplicate ASM classes.
+ * transformer, Gson, and Mapping-IO. ASM is deliberately resolved from Minecraft 26.2's
+ * own runtime classpath; bundling another copy makes Fabric Loader abort with duplicate ASM classes.
  */
 def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
     dependsOn tasks.named('compileJava')
@@ -65,11 +65,16 @@ def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
         include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class'
         include 'dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class'
         include 'dev/gafipro/gafiloader/LegacyModCompatibilityTransformer*.class'
+        include 'dev/gafipro/gafiloader/LegacyMappingRepository*.class'
+        include 'dev/gafipro/gafiloader/LegacyClassTweakerMappings*.class'
+        include 'dev/gafipro/gafiloader/LegacyClassTweakerRemapper*.class'
+        include 'dev/gafipro/gafiloader/MojangMappings*.class'
     }
     from(configurations.runtimeClasspath.filter {
-        it.name.startsWith('gson-')
+        it.name.startsWith('gson-') || it.name.startsWith('mapping-io-')
     }.collect { zipTree(it) }) {
         include 'com/google/gson/**'
+        include 'net/fabricmc/mappingio/**'
     }
     manifest {
         attributes(
