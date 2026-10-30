@@ -285,7 +285,7 @@ final class LegacyModCompatibilityTransformer {
     private static boolean looksLikeClassTweaker(byte[] contents) {
         if (contents.length == 0 || contents.length > 4 * 1024 * 1024) return false;
         String text = new String(contents, 0, Math.min(contents.length, 512), StandardCharsets.UTF_8);
-        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') {
+        if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
             text = text.substring(1);
         }
         int lineEnd = text.indexOf('\\n');
