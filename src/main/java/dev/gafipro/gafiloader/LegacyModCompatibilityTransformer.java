@@ -58,7 +58,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
