@@ -19,6 +19,21 @@ class LaunchBootstrapTest {
     @TempDir
     Path temporaryDirectory;
 
+
+    @Test
+    void persistsTheFullFabricFailureStackTraceIncludingNestedInitializerCause() throws IOException {
+        Path log = temporaryDirectory.resolve("logs/gafiloader-preflight.log");
+        Throwable failure = new ExceptionInInitializerError(
+                new IllegalStateException("underlying class initialization failure"));
+
+        LaunchBootstrap.logFailure(log, "Fabric launch failed", failure);
+
+        String contents = Files.readString(log, StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assertions.assertTrue(contents.contains("ExceptionInInitializerError"));
+        org.junit.jupiter.api.Assertions.assertTrue(contents.contains("Caused by: java.lang.IllegalStateException"));
+        org.junit.jupiter.api.Assertions.assertTrue(contents.contains("underlying class initialization failure"));
+    }
+
     @Test
     void restoresThePreLaunchConfigWhenTheGeneratedFileIsUnchanged() throws IOException {
         Path config = temporaryDirectory.resolve("config/fabric_loader_dependencies.json");
