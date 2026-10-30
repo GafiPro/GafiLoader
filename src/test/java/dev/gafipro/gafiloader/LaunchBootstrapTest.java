@@ -23,7 +23,7 @@ class LaunchBootstrapTest {
     @Test
     void persistsTheFullFabricFailureStackTraceIncludingNestedInitializerCause() throws IOException {
         Path log = temporaryDirectory.resolve("logs/gafiloader-preflight.log");
-        Exception failure = new ExceptionInInitializerError(
+        Throwable failure = new ExceptionInInitializerError(
                 new IllegalStateException("underlying class initialization failure"));
 
         LaunchBootstrap.logFailure(log, "Fabric launch failed", failure);
