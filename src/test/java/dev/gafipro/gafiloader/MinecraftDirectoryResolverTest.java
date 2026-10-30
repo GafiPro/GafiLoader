@@ -59,6 +59,76 @@ class MinecraftDirectoryResolverTest {
     }
 
     @Test
+    void choosesMicrosoftStorePackageRootWhenItContainsFabricAndRoamingRootIsStale() throws Exception {
+        Path appData = Files.createDirectories(temporaryDirectory.resolve("roaming"));
+        Path localAppData = Files.createDirectories(temporaryDirectory.resolve("local"));
+        Path home = Files.createDirectories(temporaryDirectory.resolve("home"));
+
+        Path staleRoamingRoot = Files.createDirectories(appData.resolve(".minecraft"));
+        Files.writeString(staleRoamingRoot.resolve("launcher_profiles.json"),
+                "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
+
+        Path storeRoot = microsoftStoreMinecraftDirectory(localAppData);
+        Files.createDirectories(storeRoot);
+        Files.writeString(storeRoot.resolve("launcher_profiles_microsoft_store.json"),
+                "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
+        writeFabric262Profile(storeRoot);
+
+        MinecraftDirectoryResolver.Resolution result = MinecraftDirectoryResolver.resolve(
+                null, appData.toString(), localAppData.toString(), home.toString());
+
+        assertEquals(storeRoot.toAbsolutePath().normalize(), result.path());
+        assertTrue(result.source().contains("Microsoft Store"));
+    }
+
+    @Test
+    void prefersMicrosoftStorePackageRootWhenBothLauncherRootsContainFabric() throws Exception {
+        Path appData = Files.createDirectories(temporaryDirectory.resolve("roaming-both"));
+        Path localAppData = Files.createDirectories(temporaryDirectory.resolve("local-both"));
+        Path home = Files.createDirectories(temporaryDirectory.resolve("home-both"));
+
+        Path roamingRoot = Files.createDirectories(appData.resolve(".minecraft"));
+        Files.writeString(roamingRoot.resolve("launcher_profiles.json"),
+                "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
+        writeFabric262Profile(roamingRoot);
+
+        Path storeRoot = microsoftStoreMinecraftDirectory(localAppData);
+        Files.createDirectories(storeRoot);
+        Files.writeString(storeRoot.resolve("launcher_profiles_microsoft_store.json"),
+                "{\"profiles\":{},\"settings\":{}}", StandardCharsets.UTF_8);
+        writeFabric262Profile(storeRoot);
+
+        MinecraftDirectoryResolver.Resolution result = MinecraftDirectoryResolver.resolve(
+                null, appData.toString(), localAppData.toString(), home.toString());
+
+        assertEquals(storeRoot.toAbsolutePath().normalize(), result.path());
+        assertTrue(result.source().contains("Microsoft Store"));
+    }
+
+    private static Path microsoftStoreMinecraftDirectory(Path localAppData) {
+        return localAppData.resolve("Packages")
+                .resolve("Microsoft.4297127D64EC6_8wekyb3d8bbwe")
+                .resolve("LocalCache").resolve("Local").resolve("minecraft");
+    }
+
+    private static void writeFabric262Profile(Path minecraftRoot) throws Exception {
+        String profileId = "fabric-loader-0.20.1-26.2";
+        Path versionDirectory = Files.createDirectories(
+                minecraftRoot.resolve("versions").resolve(profileId));
+        String json = """
+                {
+                  "id": "fabric-loader-0.20.1-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [
+                    {"name": "net.fabricmc:fabric-loader:0.20.1"}
+                  ]
+                }
+                """;
+        Files.writeString(versionDirectory.resolve(profileId + ".json"), json, StandardCharsets.UTF_8);
+    }
+
+    @Test
     void ignoresMalformedLauncherProfileFilesWhenChoosingFallback() throws Exception {
         Path appData = Files.createDirectories(temporaryDirectory.resolve("bad-roaming"));
         Path home = Files.createDirectories(temporaryDirectory.resolve("home"));
