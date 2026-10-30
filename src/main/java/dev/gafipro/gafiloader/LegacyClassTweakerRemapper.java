@@ -29,6 +29,7 @@ final class LegacyClassTweakerRemapper {
 
     Result remap(String text) throws IOException {
         if (text == null || text.isEmpty()) return new Result(text, false);
+        if (text.charAt(0) == '\uFEFF') text = text.substring(1);
         String[] lines = text.split("\\R", -1);
         if (lines.length == 0) return new Result(text, false);
 
