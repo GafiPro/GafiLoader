@@ -288,7 +288,7 @@ final class LegacyModCompatibilityTransformer {
         if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
             text = text.substring(1);
         }
-        int lineEnd = text.indexOf('\\n');
+        int lineEnd = text.indexOf(10);
         String firstLine = (lineEnd >= 0 ? text.substring(0, lineEnd) : text).strip();
         String[] header = firstLine.split("\\s+");
         return header.length == 3
