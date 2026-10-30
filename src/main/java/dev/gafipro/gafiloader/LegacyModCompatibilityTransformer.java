@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -34,6 +35,16 @@ import java.util.zip.ZipOutputStream;
  * is EntityType, recursively including nested mod JARs. Source mod JARs are never modified.</p>
  */
 final class LegacyModCompatibilityTransformer {
+    private final LegacyClassTweakerMappings suppliedClassTweakerMappings;
+
+    LegacyModCompatibilityTransformer() {
+        this(null);
+    }
+
+    LegacyModCompatibilityTransformer(LegacyClassTweakerMappings suppliedClassTweakerMappings) {
+        this.suppliedClassTweakerMappings = suppliedClassTweakerMappings;
+    }
+
     private static final String LEGACY_ENTITY_TYPE_OWNER = "net/minecraft/world/entity/EntityType";
     private static final String LEGACY_ENTITY_TYPE_INTERMEDIARY_OWNER = "net/minecraft/class_1299";
     private static final String ENTITY_TYPES_OWNER = "net/minecraft/world/entity/EntityTypes";
@@ -47,7 +58,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
@@ -58,10 +69,13 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Refusing to create compatibility files outside the active game directory.");
         }
         if (source.startsWith(staging)) {
-            return new Result(false, source, 0, 0,
+            return new Result(false, source, 0, 0, 0,
                     List.of("The configured mods directory points inside GafiLoader's own compatibility cache; "
-                            + "the automatic entity-registry rewrite was skipped."));
+                            + "automatic compatibility rewrites were skipped."));
         }
+
+        LegacyClassTweakerRemapper classTweakerRemapper =
+                new LegacyClassTweakerRemapper(game, suppliedClassTweakerMappings);
 
         List<Path> jarPaths;
         try (var files = Files.walk(source)) {
@@ -72,12 +86,13 @@ final class LegacyModCompatibilityTransformer {
                     .toList();
         }
         if (jarPaths.isEmpty()) {
-            return new Result(false, source, 0, 0, List.of());
+            return new Result(false, source, 0, 0, 0, List.of());
         }
 
         Map<Path, byte[]> changedArchives = new LinkedHashMap<>();
         List<String> warnings = new ArrayList<>();
         int rewrittenReferences = 0;
+        int rewrittenClassTweakerFiles = 0;
         for (Path jarPath : jarPaths) {
             byte[] originalBytes;
             try {
@@ -87,16 +102,17 @@ final class LegacyModCompatibilityTransformer {
                 continue;
             }
 
-            ArchiveTransform transformed = transformArchive(originalBytes, 0);
+            ArchiveTransform transformed = transformArchive(originalBytes, 0, classTweakerRemapper);
             warnings.addAll(transformed.warnings());
-            if (transformed.rewrittenReferences() > 0) {
+            if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0) {
                 changedArchives.put(source.relativize(jarPath), transformed.bytes());
                 rewrittenReferences += transformed.rewrittenReferences();
+                rewrittenClassTweakerFiles += transformed.rewrittenClassTweakerFiles();
             }
         }
 
         if (changedArchives.isEmpty()) {
-            return new Result(false, source, 0, 0, List.copyOf(warnings));
+            return new Result(false, source, 0, 0, 0, List.copyOf(warnings));
         }
 
         if (Files.isSymbolicLink(internalRoot)) {
@@ -158,7 +174,8 @@ final class LegacyModCompatibilityTransformer {
                     + ". Original mod files were left unchanged.", exception);
         }
 
-        return new Result(true, staging, rewrittenReferences, changedArchives.size(), List.copyOf(warnings));
+        return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
+                changedArchives.size(), List.copyOf(warnings));
     }
 
     private static void clearOwnedDirectory(Path directory) throws IOException {
@@ -179,15 +196,18 @@ final class LegacyModCompatibilityTransformer {
         }
     }
 
-    private static ArchiveTransform transformArchive(byte[] originalBytes, int depth) {
+    private static ArchiveTransform transformArchive(byte[] originalBytes, int depth,
+                                                        LegacyClassTweakerRemapper classTweakerRemapper)
+            throws IOException {
         if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
-            return new ArchiveTransform(originalBytes, 0,
+            return new ArchiveTransform(originalBytes, 0, 0,
                     List.of("Nested JAR depth limit reached; deeper archive was left unchanged."));
         }
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
+        int rewrittenClassTweakerFiles = 0;
         List<String> warnings = new ArrayList<>();
 
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(originalBytes));
@@ -196,8 +216,6 @@ final class LegacyModCompatibilityTransformer {
             while ((entry = input.getNextEntry()) != null) {
                 String entryName = entry.getName();
                 if (isSignatureFile(entryName)) {
-                    // If this archive is unchanged, the original byte array is returned unchanged.
-                    // If it changes, its old signatures must not be retained.
                     input.closeEntry();
                     continue;
                 }
@@ -213,12 +231,21 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenReferences += classTransform.rewrittenReferences();
                         }
                     } else if (lowerName.endsWith(".jar")) {
-                        ArchiveTransform nested = transformArchive(data, depth + 1);
+                        ArchiveTransform nested = transformArchive(data, depth + 1, classTweakerRemapper);
                         warnings.addAll(nested.warnings());
-                        if (nested.rewrittenReferences() > 0) {
+                        if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
+                            rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
+                        }
+                    } else if (looksLikeClassTweaker(data)) {
+                        String sourceText = new String(data, StandardCharsets.UTF_8);
+                        LegacyClassTweakerRemapper.Result remapped = classTweakerRemapper.remap(sourceText);
+                        if (remapped.remapped()) {
+                            data = remapped.contents().getBytes(StandardCharsets.UTF_8);
+                            archiveChanged = true;
+                            rewrittenClassTweakerFiles++;
                         }
                     }
                 }
@@ -234,15 +261,20 @@ final class LegacyModCompatibilityTransformer {
                 zipOutput.closeEntry();
                 input.closeEntry();
             }
-        } catch (IOException | RuntimeException exception) {
-            warnings.add("Could not inspect a JAR for compatibility rewrites: " + exception.getMessage());
-            return new ArchiveTransform(originalBytes, 0, List.copyOf(warnings));
         }
 
         if (!archiveChanged) {
-            return new ArchiveTransform(originalBytes, 0, List.copyOf(warnings));
+            return new ArchiveTransform(originalBytes, 0, 0, List.copyOf(warnings));
         }
-        return new ArchiveTransform(output.toByteArray(), rewrittenReferences, List.copyOf(warnings));
+        return new ArchiveTransform(output.toByteArray(), rewrittenReferences,
+                rewrittenClassTweakerFiles, List.copyOf(warnings));
+    }
+
+    private static boolean looksLikeClassTweaker(byte[] contents) {
+        if (contents.length == 0 || contents.length > 4 * 1024 * 1024) return false;
+        String prefix = new String(contents, 0, Math.min(contents.length, 128), StandardCharsets.UTF_8)
+                .replace("\\uFEFF", "").stripLeading();
+        return prefix.startsWith("classTweaker ") || prefix.startsWith("accessWidener ");
     }
 
     private static ClassTransform transformClass(byte[] originalBytes) {
@@ -376,11 +408,12 @@ final class LegacyModCompatibilityTransformer {
     }
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
-                  int modifiedJars, List<String> warnings) {}
+                  int rewrittenClassTweakerFiles, int modifiedJars, List<String> warnings) {}
 
     private record FieldReference(String owner, String name) {}
 
-    private record ArchiveTransform(byte[] bytes, int rewrittenReferences, List<String> warnings) {}
+    private record ArchiveTransform(byte[] bytes, int rewrittenReferences,
+                                    int rewrittenClassTweakerFiles, List<String> warnings) {}
 
     private record ClassTransform(byte[] bytes, int rewrittenReferences) {}
 }

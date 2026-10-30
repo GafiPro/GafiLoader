@@ -78,6 +78,12 @@ public final class LaunchBootstrap {
                     log(logPath, "Minecraft 26.2 entity-registry compatibility: rewrote "
                             + compatibilityResult.rewrittenReferences() + " static EntityType registry reference(s) "
                             + "across " + compatibilityResult.modifiedJars() + " mod archive(s).", false);
+                    if (compatibilityResult.rewrittenClassTweakerFiles() > 0) {
+                        log(logPath, "ClassTweaker compatibility: remapped "
+                                + compatibilityResult.rewrittenClassTweakerFiles()
+                                + " legacy Intermediary file(s) to the official namespace using verified 1.21.11 mappings.",
+                                false);
+                    }
                     log(logPath, "Fabric will load staged mod copies from " + compatibilityResult.modsDirectory()
                             + "; original mod JARs were left unchanged.", false);
                 } else {
@@ -89,8 +95,8 @@ public final class LaunchBootstrap {
                 if (generatedConfig != null) {
                     restoreDependencyConfigSafely(configPath, originalConfig, generatedConfig);
                 }
-                throw new IOException("GafiLoader could not prepare Fabric dependency overrides at "
-                        + configPath + ". See " + logPath + ". Minecraft was not handed to Fabric.", exception);
+                throw new IOException("GafiLoader could not prepare legacy mod compatibility for Fabric. "
+                        + "See " + logPath + ". Minecraft was not handed to Fabric.", exception);
             }
         } else {
             log(logPath, "No mod JARs found under " + modsDirectory
