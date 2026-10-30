@@ -27,42 +27,88 @@ final class MinecraftDirectoryResolver {
     private MinecraftDirectoryResolver() {}
 
     static Resolution resolve(String explicitOverride, String appData, String userHome) {
+        return resolve(explicitOverride, appData, null, userHome);
+    }
+
+    static Resolution resolve(String explicitOverride, String appData, String localAppData, String userHome) {
         if (explicitOverride != null && !explicitOverride.isBlank()) {
             return new Resolution(Path.of(explicitOverride).toAbsolutePath().normalize(),
                     "explicit override (GAFILOADER_MINECRAFT_DIR or -Dgafiloader.minecraftDir)");
         }
 
-        List<Path> candidates = new ArrayList<>();
+        Path home = userHome == null || userHome.isBlank()
+                ? null : Path.of(userHome).toAbsolutePath().normalize();
         Path appDataCandidate = appData == null || appData.isBlank()
-                ? null : Path.of(appData).resolve(".minecraft").toAbsolutePath().normalize();
-        if (appDataCandidate != null) candidates.add(appDataCandidate);
+                ? home == null ? null : home.resolve("AppData").resolve("Roaming").resolve(".minecraft").normalize()
+                : Path.of(appData).resolve(".minecraft").toAbsolutePath().normalize();
+        Path localAppDataRoot = localAppData == null || localAppData.isBlank()
+                ? home == null ? null : home.resolve("AppData").resolve("Local")
+                : Path.of(localAppData).toAbsolutePath().normalize();
+        Path microsoftStoreCandidate = localAppDataRoot == null ? null
+                : localAppDataRoot.resolve("Packages")
+                        .resolve("Microsoft.4297127D64EC6_8wekyb3d8bbwe")
+                        .resolve("LocalCache").resolve("Local").resolve("minecraft")
+                        .toAbsolutePath().normalize();
 
-        if (userHome != null && !userHome.isBlank()) {
-            Path home = Path.of(userHome).toAbsolutePath().normalize();
-            candidates.add(home.resolve("AppData").resolve("Roaming").resolve(".minecraft").normalize());
-            candidates.add(home.resolve(".minecraft").normalize());
-        }
+        List<Path> candidates = new ArrayList<>();
+        if (appDataCandidate != null) candidates.add(appDataCandidate);
+        if (microsoftStoreCandidate != null) candidates.add(microsoftStoreCandidate);
+        if (home != null) candidates.add(home.resolve(".minecraft").normalize());
         if (candidates.isEmpty()) {
             candidates.add(Path.of(System.getProperty("user.home", "."))
                     .resolve(".minecraft").toAbsolutePath().normalize());
         }
 
         List<Path> unique = new ArrayList<>(new LinkedHashSet<>(candidates));
-        // APPDATA is the authoritative Windows default when the launcher files are present.
-        if (appDataCandidate != null && hasLauncherProfiles(appDataCandidate)) {
-            return new Resolution(appDataCandidate, "APPDATA/.minecraft (recognized launcher profile)");
+        List<Path> launcherRoots = unique.stream()
+                .filter(MinecraftDirectoryResolver::hasLauncherProfiles).toList();
+
+        // A machine can retain an old Roaming .minecraft folder while the Microsoft Store
+        // launcher uses its package-local data root. Prefer the only recognized root that
+        // actually contains the Fabric 26.2 source installation, rather than blindly choosing
+        // APPDATA just because a stale launcher_profiles.json happens to exist there.
+        List<Path> rootsWithFabric = launcherRoots.stream()
+                .filter(MinecraftDirectoryResolver::hasFabric262Profile).toList();
+        if (rootsWithFabric.size() == 1) {
+            Path selected = rootsWithFabric.get(0);
+            String source = selected.equals(microsoftStoreCandidate)
+                    ? "Microsoft Store package data (LocalAppData/Packages) with Fabric 26.2 profile"
+                    : selected.equals(appDataCandidate)
+                    ? "APPDATA/.minecraft with Fabric 26.2 profile"
+                    : "fallback Minecraft directory with Fabric 26.2 profile";
+            return new Resolution(selected, source);
         }
 
-        List<Path> launcherRoots = unique.stream().filter(MinecraftDirectoryResolver::hasLauncherProfiles).toList();
-        if (launcherRoots.size() == 1) {
-            return new Resolution(launcherRoots.get(0), "fallback location with a recognized launcher profile");
+        // If both launcher data roots contain Fabric, the package-local root is the active
+        // candidate for the Microsoft Store launcher. Otherwise retain the normal APPDATA
+        // preference for the traditional desktop launcher.
+        if (rootsWithFabric.size() > 1 && microsoftStoreCandidate != null
+                && rootsWithFabric.contains(microsoftStoreCandidate)) {
+            return new Resolution(microsoftStoreCandidate,
+                    "Microsoft Store package data (LocalAppData/Packages; multiple Fabric roots found)");
         }
+        if (rootsWithFabric.size() > 1 && appDataCandidate != null
+                && rootsWithFabric.contains(appDataCandidate)) {
+            return new Resolution(appDataCandidate,
+                    "APPDATA/.minecraft (multiple Fabric roots found; desktop default)");
+        }
+        if (!rootsWithFabric.isEmpty()) {
+            return new Resolution(rootsWithFabric.get(0),
+                    "recognized launcher root containing Fabric 26.2");
+        }
+
+        if (launcherRoots.size() == 1) {
+            Path selected = launcherRoots.get(0);
+            String source = selected.equals(microsoftStoreCandidate)
+                    ? "Microsoft Store package data (LocalAppData/Packages; recognized launcher profile)"
+                    : "fallback location with a recognized launcher profile";
+            return new Resolution(selected, source);
+        }
+
         if (launcherRoots.size() > 1) {
-            List<Path> rootsWithFabric = launcherRoots.stream()
-                    .filter(MinecraftDirectoryResolver::hasFabric262Profile).toList();
-            if (rootsWithFabric.size() == 1) {
-                return new Resolution(rootsWithFabric.get(0),
-                        "unique fallback location with both launcher data and a Fabric 26.2 profile");
+            if (microsoftStoreCandidate != null && launcherRoots.contains(microsoftStoreCandidate)) {
+                return new Resolution(microsoftStoreCandidate,
+                        "Microsoft Store package data (LocalAppData/Packages; multiple launcher roots found)");
             }
             Path selected = appDataCandidate != null && launcherRoots.contains(appDataCandidate)
                     ? appDataCandidate : launcherRoots.get(0);
