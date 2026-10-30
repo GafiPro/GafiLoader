@@ -31,6 +31,12 @@ class BootstrapJarPackagingTest {
         assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyModCompatibilityTransformer.class"));
         assertTrue(entries.contains("com/google/gson/Gson.class"),
                 "The bootstrap keeps its pinned Gson dependency.");
+        assertTrue(entries.contains("net/fabricmc/mappingio/MappingReader.class"),
+                "The bootstrap includes Mapping-IO for parsing official and Intermediary mappings.");
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyClassTweakerRemapper.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyClassTweakerMappings.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyMappingRepository.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/MojangMappings.class"));
         assertFalse(entries.contains("org/objectweb/asm/ClassReader.class"),
                 "ASM must come from the Minecraft 26.2 runtime classpath, not the bootstrap JAR.");
         assertFalse(entries.stream().anyMatch(name -> name.startsWith("org/objectweb/asm/")),
