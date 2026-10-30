@@ -1,7 +1,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-10-29
+> Última atualização: 2026-10-30
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -14,6 +14,17 @@
 - Não declarar compatibilidade completa só porque a build passa ou porque se ultrapassa a verificação de versão.
 - A experiência final deve ser simples no Windows: instalador e perfil `gafiloader-26.2`, sem exigir JDK de desenvolvimento ao utilizador final.
 - Atualizações não podem duplicar instalações/perfis nem apagar mundos, saves ou mods.
+
+## Estado atual — 2026-10-30
+
+- Código atual em `main`: `6d68dc35cd9b62f076974ce4514854419544972a` (PR #19 integrado). A correção de preparação de cópias está em `72b3637c3c7a7dc925d0c81a8932bf8a45454cf1`.
+- O crash mais recente fornecido pelo utilizador já ocorre durante o primeiro reload de recursos, dentro de `EntityRenderers`/Mixin `fabric-rendering-v1`; nesse arranque, o jogo passou a resolução de mods e falhou ao ligar a referência `EntityType.PLAYER`. Não confundir este erro de linkage com o gate de versão dos metadados.
+- A documentação oficial Yarn 1.21.11+build.6 confirma o símbolo de produção: `EntityType.PLAYER` = `net/minecraft/class_1299.field_6097`, descritor `Lnet/minecraft/class_1299;` ([referência](https://maven.fabricmc.net/docs/yarn-1.21.11%2Bbuild.6/net/minecraft/entity/EntityType.html)).
+- `LegacyModCompatibilityTransformer` reconhece agora tanto a referência nomeada `EntityType.PLAYER` como a referência Intermediary `class_1299.field_6097`; troca o owner para `net/minecraft/world/entity/EntityTypes`, preserva o descritor antigo para o remapper normal do Fabric o normalizar, percorre JARs aninhados e usa cópias em `.gafiloader/compat-mods`. Os JARs de origem ficam byte a byte intactos.
+- O teste `rewritesEntityRegistryReferenceInsideNestedFabricApiJarWithoutChangingOriginals` cria um JAR aninhado representativo de `fabric-rendering-v1`, usa exatamente owner/nome/descritor Intermediary, verifica o owner e nome de saída, confirma que o descritor é preservado, que as assinaturas da cópia alterada são removidas e que os JARs originais não mudam. Existe também teste para a referência nomeada.
+- Validação CI da branch que contém o código integrado: workflow run [40963584988](https://github.com/GafiPro/GafiLoader/actions/runs/40963584988) — Ubuntu `clean test build`: sucesso; Windows `clean test installDist`, app-image e instalador: sucesso. Não foi executado Gradle localmente nem um arranque real de Minecraft nesta sessão.
+- Artefacto Windows obtido da execução: `GafiLoader-Installer-Windows-x64`, ID `12936438296`, ZIP SHA-256 `34eae6910418022be36a4e65a6aa378192a1b664dbfdbc9b5318eb53780faec8`, expiração em 2026-11-01 22:10:08 UTC. O EXE extraído, `GafiLoader-0.1.631.exe`, tem 51,442,688 bytes; `sha256sum` executado no ficheiro local confirmou `7164fe1cbe545fa66823ef28129dd526d81bfb2dccf1f0a996a36eabfb001577`. O artefacto foi construído na cabeça da PR `136822ce14fa5e1f00870554540b6ec8105b9dbf`, cujo conteúdo de código foi integrado no commit indicado acima.
+- **Estado de runtime: por validar.** A CI demonstra compilação/testes automatizados e empacotamento, não que o novo EXE elimina o crash no computador do utilizador. O gate de versão tem testes de unidade, mas o arranque end-to-end com a instalação real continua sem confirmação.
 
 ## Estado conhecido em 2026-10-27
 
@@ -205,3 +216,14 @@ Em cada sessão de trabalho:
 - Commits de código/testes/documentação na branch até ao início desta atualização: `c217dbe1fdca7d906ed4725e36a96a06f88a5fad`, `34d084fb9e7b3396c588ced3a1619a168bb2ce44`, `893d06039db7e8e91bbb6f1fd8a21af62deb5b56`, `1599daa3f981fce707e67c39ea82aeceaf6b6006`, `574a88f7546c1f42e611736fb06482b0e1c137e0`, `a2349cf3e0ee25f514e845c2124d79d58afc4622`, `d134846af1db4f6f4162f7a6f6b60cd3d44e248a`, `77d9d5663755235b72a8ad708f6beb535e0b44cb`, `36c8729650ad0aec00ccd85b8a903ddb386b9b31`.
 - Validação observada para o commit `36c8729650ad0aec00ccd85b8a903ddb386b9b31`: GitHub Actions run [40949042024](https://github.com/GafiPro/GafiLoader/actions/runs/40949042024). Linux `clean test build` — sucesso; Windows `clean test installDist` — sucesso. Empacotamento da app image/instalador estava ainda em execução quando este registo foi acrescentado; confirmar o resultado final no workflow antes de considerar esta ronda validada.
 - Limite: mesmo com CI verde, não há teste end-to-end com o Minecraft Launcher real do utilizador. Ainda não confirmar que o perfil aparece na UI nem que os mods de 1.21.11 arrancam sem incompatibilidades. Após a CI final, obter o novo artefacto Windows e testar na instalação real. Se o perfil continuar ausente, ler `logs/gafiloader-setup.log`; se aparecer mas falhar, ler `logs/gafiloader-preflight.log` e o primeiro erro relevante de `logs/latest.log`.
+
+## Update 2026-10-30 — Confirmar correção do linkage de EntityType.PLAYER
+
+- Estado inicial: reaberto o projeto a partir do repositório real, lendo este registo, README, `build.gradle`, `settings.gradle`, workflow, bootstrap, gerador de overrides, detector de versão e testes do transformador. Verificados os commits recentes; não havia atualização de status depois da integração da PR #19.
+- Evidência do crash: `NoSuchFieldError: EntityType.PLAYER` durante o primeiro reload de recursos em `EntityRenderers`, via `fabric-rendering-v1`. O stack trace demonstra que este arranque passou a fase de resolução de mods; o erro atual é de linkage binário, não a mensagem inicial de incompatibilidade de versão.
+- Verificação externa do símbolo: a documentação Yarn oficial de 1.21.11+build.6 confirma `field_6097` como o campo `PLAYER` de `class_1299`. Isso sustenta a regra específica, em vez de inferir o nome a partir do teste.
+- Código integrado em `main`: commit `6d68dc35cd9b62f076974ce4514854419544972a`; PR [#19](https://github.com/GafiPro/GafiLoader/pull/19). O transformador trata o símbolo nomeado e o símbolo Intermediary publicado, incluindo referências em JARs aninhados. O teste de regressão verifica a transformação e preservação byte a byte dos JARs originais.
+- Validação real observada: workflow [40963584988](https://github.com/GafiPro/GafiLoader/actions/runs/40963584988) concluído com sucesso nos jobs Ubuntu e Windows. O Windows também empacotou a aplicação com runtime e o instalador. Não se executou `./gradlew` nesta sessão remota e não se executou Minecraft real.
+- Artefacto verificado localmente: `GafiLoader-0.1.631.exe`, 51,442,688 bytes, SHA-256 `7164fe1cbe545fa66823ef28129dd526d81bfb2dccf1f0a996a36eabfb001577`. O ZIP da Actions corresponde ao digest publicado `34eae6910418022be36a4e65a6aa378192a1b664dbfdbc9b5318eb53780faec8`; expira em 2026-11-01 22:10:08 UTC.
+- Limitação principal: não existe ainda um novo `latest.log` nem `gafiloader-preflight.log` gerado pelo EXE 0.1.631 no computador do utilizador. Portanto, não afirmar que o crash está resolvido em runtime.
+- Próximos passos prioritários: (1) testar o EXE 0.1.631 no perfil `gafiloader-26.2`; (2) confirmar no `logs/gafiloader-preflight.log` que o transformador reescreveu a referência e que Fabric usa `.gafiloader/compat-mods`; (3) se houver novo crash, analisar o primeiro erro relevante do `logs/latest.log` e o preflight completo antes de introduzir outra regra; (4) manter a compatibilidade geral de Fabric API 1.21.11 marcada como experimental até haver arranque real e testes de uso.
