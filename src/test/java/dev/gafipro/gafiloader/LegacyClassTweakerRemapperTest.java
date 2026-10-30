@@ -52,7 +52,7 @@ class LegacyClassTweakerRemapperTest {
     @Test
     void remapsClassTweakerInsideNestedFabricApiJarAndPreservesOriginalArchives() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
-        String classTweaker = "\\uFEFF" + """
+        String classTweaker = String.valueOf((char) 0xFEFF) + """
                 classTweaker v1 intermediary
                 accessible class net/minecraft/class_1299
                 mutable field net/minecraft/class_1299 field_6097 I
