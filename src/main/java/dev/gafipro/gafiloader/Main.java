@@ -113,7 +113,8 @@ public final class Main {
             explicitMinecraft = System.getenv("GAFILOADER_MINECRAFT_DIR");
         }
         MinecraftDirectoryResolver.Resolution resolution = MinecraftDirectoryResolver.resolve(
-                explicitMinecraft, System.getenv("APPDATA"), System.getProperty("user.home"));
+                explicitMinecraft, System.getenv("APPDATA"), System.getenv("LOCALAPPDATA"),
+                System.getProperty("user.home"));
         Path minecraft = resolution.path();
         Path setupLog = minecraft.resolve("logs").resolve("gafiloader-setup.log");
         initializeSetupLog(setupLog, minecraft);
@@ -216,7 +217,8 @@ public final class Main {
             explicitMinecraft = System.getenv("GAFILOADER_MINECRAFT_DIR");
         }
         Path minecraft = MinecraftDirectoryResolver.resolve(
-                explicitMinecraft, System.getenv("APPDATA"), System.getProperty("user.home")).path();
+                explicitMinecraft, System.getenv("APPDATA"), System.getenv("LOCALAPPDATA"),
+                System.getProperty("user.home")).path();
         Path defaultMods = minecraft.resolve("mods");
         Path defaultConfig = minecraft.resolve("config").resolve("fabric_loader_dependencies.json");
 
