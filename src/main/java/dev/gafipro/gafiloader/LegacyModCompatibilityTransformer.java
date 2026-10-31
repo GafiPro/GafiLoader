@@ -14,6 +14,7 @@ import org.objectweb.asm.Opcodes;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -52,6 +53,12 @@ final class LegacyModCompatibilityTransformer {
     // In the 1.21.11 production Intermediary namespace, EntityType.PLAYER is field_6097.
     private static final String INTERMEDIARY_PLAYER_FIELD = "field_6097";
     private static final int MAX_NESTED_ARCHIVE_DEPTH = 12;
+    private static final long MAX_TOP_LEVEL_ARCHIVE_BYTES = 512L * 1024 * 1024;
+    private static final long MAX_NESTED_ARCHIVE_BYTES = 128L * 1024 * 1024;
+    private static final long MAX_CLASS_ENTRY_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_RESOURCE_ENTRY_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_METADATA_BYTES = 4L * 1024 * 1024;
+    private static final long MAX_EXPANDED_ARCHIVE_BYTES = 512L * 1024 * 1024;
     private static final String INTERNAL_DIRECTORY = ".gafiloader";
     private static final String STAGED_MODS_DIRECTORY = "compat-mods";
 
@@ -90,7 +97,7 @@ final class LegacyModCompatibilityTransformer {
         // outside the generic bytecode remapping pass.
         boolean hasLegacyMod = false;
         for (Path jarPath : jarPaths) {
-            if (containsLegacyModMetadata(Files.readAllBytes(jarPath), 0)) {
+            if (containsLegacyModMetadata(readFileBounded(jarPath, MAX_TOP_LEVEL_ARCHIVE_BYTES), 0)) {
                 hasLegacyMod = true;
                 break;
             }
@@ -119,7 +126,7 @@ final class LegacyModCompatibilityTransformer {
         for (Path jarPath : jarPaths) {
             byte[] originalBytes;
             try {
-                originalBytes = Files.readAllBytes(jarPath);
+                originalBytes = readFileBounded(jarPath, MAX_TOP_LEVEL_ARCHIVE_BYTES);
             } catch (IOException exception) {
                 warnings.add("Could not read mod archive " + jarPath + ": " + exception.getMessage());
                 continue;
@@ -208,7 +215,8 @@ final class LegacyModCompatibilityTransformer {
                     .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
                     .sorted(Comparator.comparing(Path::toString)).toList()) {
-                auditArchiveForIntermediaryClassTweakers(Files.readAllBytes(stagedJar), 0,
+                auditArchiveForIntermediaryClassTweakers(
+                        readFileBounded(stagedJar, MAX_TOP_LEVEL_ARCHIVE_BYTES), 0,
                         staging.relativize(stagedJar).toString(), remainingIntermediaryTweakers);
             }
         }
@@ -239,14 +247,19 @@ final class LegacyModCompatibilityTransformer {
                     input.closeEntry();
                     continue;
                 }
-                byte[] contents = input.readAllBytes();
                 String entryName = entry.getName();
                 String lowerName = entryName.toLowerCase(Locale.ROOT);
                 if (lowerName.endsWith(".jar")) {
+                    byte[] contents = readBounded(input, MAX_NESTED_ARCHIVE_BYTES,
+                            archivePath + "!/" + entryName);
                     auditArchiveForIntermediaryClassTweakers(contents, depth + 1,
                             archivePath + "!/" + entryName, findings);
-                } else if (hasIntermediaryClassTweakerHeader(contents)) {
-                    findings.add(archivePath + "!/" + entryName);
+                } else {
+                    byte[] contents = readBounded(input, MAX_RESOURCE_ENTRY_BYTES,
+                            archivePath + "!/" + entryName);
+                    if (hasIntermediaryClassTweakerHeader(contents)) {
+                        findings.add(archivePath + "!/" + entryName);
+                    }
                 }
                 input.closeEntry();
             }
@@ -311,6 +324,7 @@ final class LegacyModCompatibilityTransformer {
         int remappedClasses = 0;
         int adaptedModelLoadingClasses = 0;
         List<String> warnings = new ArrayList<>();
+        long expandedBytes = 0;
 
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(originalBytes));
              ZipOutputStream zipOutput = new ZipOutputStream(output)) {
@@ -322,7 +336,17 @@ final class LegacyModCompatibilityTransformer {
                     continue;
                 }
 
-                byte[] data = entry.isDirectory() ? new byte[0] : input.readAllBytes();
+                long entryLimit = lowerNameForEntry(entry.getName()).endsWith(".jar")
+                        ? MAX_NESTED_ARCHIVE_BYTES
+                        : lowerNameForEntry(entry.getName()).endsWith(".class")
+                                ? MAX_CLASS_ENTRY_BYTES : MAX_RESOURCE_ENTRY_BYTES;
+                byte[] data = entry.isDirectory() ? new byte[0]
+                        : readBounded(input, entryLimit, entry.getName());
+                expandedBytes += data.length;
+                if (expandedBytes > MAX_EXPANDED_ARCHIVE_BYTES) {
+                    throw new IOException("Expanded archive content exceeds the "
+                            + MAX_EXPANDED_ARCHIVE_BYTES + "-byte safety limit.");
+                }
                 if (!entry.isDirectory()) {
                     String lowerName = entryName.toLowerCase(Locale.ROOT);
                     if (lowerName.endsWith(".class")) {
@@ -419,7 +443,8 @@ final class LegacyModCompatibilityTransformer {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
-                    return metadataDeclaresLegacyMinecraft(input.readAllBytes());
+                    return metadataDeclaresLegacyMinecraft(
+                            readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json"));
                 }
                 input.closeEntry();
             }
@@ -436,13 +461,15 @@ final class LegacyModCompatibilityTransformer {
                     input.closeEntry();
                     continue;
                 }
-                byte[] contents = input.readAllBytes();
                 String name = entry.getName();
-                if ("fabric.mod.json".equals(name) && metadataDeclaresLegacyMinecraft(contents)) {
+                if ("fabric.mod.json".equals(name)
+                        && metadataDeclaresLegacyMinecraft(
+                                readBounded(input, MAX_METADATA_BYTES, name))) {
                     return true;
                 }
                 if (name.toLowerCase(Locale.ROOT).endsWith(".jar")
-                        && containsLegacyModMetadata(contents, depth + 1)) {
+                        && containsLegacyModMetadata(
+                                readBounded(input, MAX_NESTED_ARCHIVE_BYTES, name), depth + 1)) {
                     return true;
                 }
                 input.closeEntry();
@@ -458,7 +485,8 @@ final class LegacyModCompatibilityTransformer {
                 if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
                     try {
                         JsonElement parsed = JsonParser.parseString(
-                                new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                                new String(readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json"),
+                                        StandardCharsets.UTF_8));
                         return parsed.isJsonObject()
                                 && parsed.getAsJsonObject().has("id")
                                 && parsed.getAsJsonObject().get("id").isJsonPrimitive()
@@ -495,7 +523,7 @@ final class LegacyModCompatibilityTransformer {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
-                    byte[] metadataBytes = input.readAllBytes();
+                    byte[] metadataBytes = readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json");
                     try {
                         JsonElement parsed = JsonParser.parseString(
                                 new String(metadataBytes, StandardCharsets.UTF_8));
@@ -679,6 +707,38 @@ final class LegacyModCompatibilityTransformer {
             }
         }
         return constant;
+    }
+
+    private static String lowerNameForEntry(String entryName) {
+        return entryName.toLowerCase(Locale.ROOT);
+    }
+
+    private static byte[] readFileBounded(Path path, long maximumBytes) throws IOException {
+        long size = Files.size(path);
+        if (size > maximumBytes) {
+            throw new IOException("Archive exceeds the " + maximumBytes
+                    + "-byte safety limit: " + path);
+        }
+        try (InputStream input = Files.newInputStream(path)) {
+            return readBounded(input, maximumBytes, path.toString());
+        }
+    }
+
+    private static byte[] readBounded(InputStream input, long maximumBytes, String source)
+            throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maximumBytes) {
+                throw new IOException("Archive entry exceeds the " + maximumBytes
+                        + "-byte safety limit: " + source);
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
     }
 
     private static boolean isSignatureFile(String entryName) {
