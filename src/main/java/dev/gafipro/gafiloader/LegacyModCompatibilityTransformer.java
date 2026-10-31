@@ -1,5 +1,8 @@
 package dev.gafipro.gafiloader;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -174,8 +177,76 @@ final class LegacyModCompatibilityTransformer {
                     + ". Original mod files were left unchanged.", exception);
         }
 
+        List<String> remainingIntermediaryTweakers = new ArrayList<>();
+        try (var stagedFiles = Files.walk(staging)) {
+            for (Path stagedJar : stagedFiles
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .sorted(Comparator.comparing(Path::toString)).toList()) {
+                auditArchiveForIntermediaryClassTweakers(Files.readAllBytes(stagedJar), 0,
+                        staging.relativize(stagedJar).toString(), remainingIntermediaryTweakers);
+            }
+        }
+        if (!remainingIntermediaryTweakers.isEmpty()) {
+            try {
+                clearOwnedDirectory(staging);
+            } catch (IOException cleanupException) {
+                warnings.add("Could not remove an incomplete staged mod directory: "
+                        + cleanupException.getMessage());
+            }
+            throw new IOException("ClassTweaker compatibility verification failed. The following resource(s) "
+                    + "still declare the Intermediary namespace after remapping: "
+                    + String.join(", ", remainingIntermediaryTweakers)
+                    + ". Fabric was not started with unremapped legacy files.");
+        }
+
         return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
                 changedArchives.size(), List.copyOf(warnings));
+    }
+
+    private static void auditArchiveForIntermediaryClassTweakers(byte[] archive, int depth,
+            String archivePath, List<String> findings) throws IOException {
+        if (depth > MAX_NESTED_ARCHIVE_DEPTH) return;
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    input.closeEntry();
+                    continue;
+                }
+                byte[] contents = input.readAllBytes();
+                String entryName = entry.getName();
+                String lowerName = entryName.toLowerCase(Locale.ROOT);
+                if (lowerName.endsWith(".jar")) {
+                    auditArchiveForIntermediaryClassTweakers(contents, depth + 1,
+                            archivePath + "!/" + entryName, findings);
+                } else if (hasIntermediaryClassTweakerHeader(contents)) {
+                    findings.add(archivePath + "!/" + entryName);
+                }
+                input.closeEntry();
+            }
+        }
+    }
+
+    private static boolean hasIntermediaryClassTweakerHeader(byte[] contents) {
+        if (contents.length == 0) return false;
+        String text = new String(contents, 0, Math.min(contents.length, 512), StandardCharsets.UTF_8);
+        int start = 0;
+        while (start < text.length()) {
+            char character = text.charAt(start);
+            if (character == '\\uFEFF' || Character.isWhitespace(character)) {
+                start++;
+            } else {
+                break;
+            }
+        }
+        int lineEnd = text.indexOf(10, start);
+        String firstLine = (lineEnd >= 0 ? text.substring(start, lineEnd) : text.substring(start)).strip();
+        String[] header = firstLine.split("\\s+");
+        return header.length == 3
+                && ("classTweaker".equals(header[0]) || "accessWidener".equals(header[0]))
+                && header[1].matches("v[0-9]+")
+                && "intermediary".equals(header[2]);
     }
 
     private static void clearOwnedDirectory(Path directory) throws IOException {
@@ -204,6 +275,7 @@ final class LegacyModCompatibilityTransformer {
                     List.of("Nested JAR depth limit reached; deeper archive was left unchanged."));
         }
 
+        String declaredClassTweakerResource = declaredClassTweakerResource(originalBytes);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
@@ -239,7 +311,7 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenReferences += nested.rewrittenReferences();
                             rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
                         }
-                    } else if (isClassTweakerResource(entryName, data)) {
+                    } else if (isClassTweakerResource(entryName, data, declaredClassTweakerResource)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
                         LegacyClassTweakerRemapper.Result remapped = classTweakerRemapper.remap(sourceText);
                         if (remapped.remapped()) {
@@ -271,13 +343,60 @@ final class LegacyModCompatibilityTransformer {
     }
 
     /**
-     * Detects ClassTweaker resources by their conventional names as well as by their header.
-     * The filename check is intentional: older Windows-authored resources may begin with a
-     * UTF-8 BOM, which must not cause the bootstrap to silently skip a declared tweaker file.
+     * Reads the resource path declared by the mod itself. Fabric API modules use the
+     * legacy "accessWidener" metadata key even when the resource contains ClassTweaker
+     * syntax, and custom resource names are valid. Looking at metadata avoids relying
+     * solely on file extensions or a clean first byte.
      */
-    private static boolean isClassTweakerResource(String entryName, byte[] contents) {
+    private static String declaredClassTweakerResource(byte[] archive) throws IOException {
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
+                    byte[] metadataBytes = input.readAllBytes();
+                    try {
+                        JsonElement parsed = JsonParser.parseString(
+                                new String(metadataBytes, StandardCharsets.UTF_8));
+                        if (!parsed.isJsonObject()) return null;
+                        JsonObject metadata = parsed.getAsJsonObject();
+                        JsonElement resource = metadata.get("accessWidener");
+                        if (resource == null || !resource.isJsonPrimitive()
+                                || !resource.getAsJsonPrimitive().isString()) {
+                            resource = metadata.get("classTweaker");
+                        }
+                        if (resource == null || !resource.isJsonPrimitive()
+                                || !resource.getAsJsonPrimitive().isString()) {
+                            return null;
+                        }
+                        return normalizeResourcePath(resource.getAsString());
+                    } catch (RuntimeException ignored) {
+                        return null;
+                    }
+                }
+                input.closeEntry();
+            }
+        }
+        return null;
+    }
+
+    private static String normalizeResourcePath(String resourcePath) {
+        if (resourcePath == null) return null;
+        String normalized = resourcePath.trim().replace('\\\\', '/');
+        while (normalized.startsWith("./")) normalized = normalized.substring(2);
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    /**
+     * Detects ClassTweaker resources by the metadata-declared path, conventional names,
+     * and their header. Metadata is checked first so a custom-named ClassTweaker is not
+     * silently skipped by the compatibility pass.
+     */
+    private static boolean isClassTweakerResource(String entryName, byte[] contents,
+                                                   String declaredResource) {
         String lowerName = entryName.toLowerCase(Locale.ROOT);
-        return lowerName.endsWith(".classtweaker")
+        String normalizedEntryName = normalizeResourcePath(entryName);
+        return (declaredResource != null && declaredResource.equals(normalizedEntryName))
+                || lowerName.endsWith(".classtweaker")
                 || lowerName.endsWith(".accesswidener")
                 || looksLikeClassTweaker(contents);
     }
@@ -285,11 +404,17 @@ final class LegacyModCompatibilityTransformer {
     private static boolean looksLikeClassTweaker(byte[] contents) {
         if (contents.length == 0 || contents.length > 4 * 1024 * 1024) return false;
         String text = new String(contents, 0, Math.min(contents.length, 512), StandardCharsets.UTF_8);
-        if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
-            text = text.substring(1);
+        int start = 0;
+        while (start < text.length()) {
+            char character = text.charAt(start);
+            if (character == '\\uFEFF' || Character.isWhitespace(character)) {
+                start++;
+            } else {
+                break;
+            }
         }
-        int lineEnd = text.indexOf(10);
-        String firstLine = (lineEnd >= 0 ? text.substring(0, lineEnd) : text).strip();
+        int lineEnd = text.indexOf(10, start);
+        String firstLine = (lineEnd >= 0 ? text.substring(start, lineEnd) : text.substring(start)).strip();
         String[] header = firstLine.split("\\s+");
         return header.length == 3
                 && ("classTweaker".equals(header[0]) || "accessWidener".equals(header[0]))
