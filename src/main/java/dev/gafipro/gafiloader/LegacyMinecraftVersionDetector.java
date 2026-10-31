@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
 final class LegacyMinecraftVersionDetector {
     private static final Pattern TARGET_LEGACY_VERSION =
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
+    private static final Pattern UNBOUNDED_LEGACY_LOWER_BOUND =
+            Pattern.compile("^\\s*(?:>=|>)\\s*1\\.21\\.11\\s*$");
 
     private LegacyMinecraftVersionDetector() {}
 
@@ -47,7 +49,13 @@ final class LegacyMinecraftVersionDetector {
     private static boolean containsLegacyVersion(JsonElement value) {
         if (value == null || !value.isJsonPrimitive()) return false;
         JsonPrimitive primitive = value.getAsJsonPrimitive();
-        return primitive.isString()
-                && TARGET_LEGACY_VERSION.matcher(primitive.getAsString()).find();
+        if (!primitive.isString()) return false;
+        String constraint = primitive.getAsString().trim();
+        if (UNBOUNDED_LEGACY_LOWER_BOUND.matcher(constraint).matches()) {
+            // A lower bound with no upper limit also admits 26.2, so it does not
+            // identify a mod that needs the 1.21.11 compatibility path.
+            return false;
+        }
+        return TARGET_LEGACY_VERSION.matcher(constraint).find();
     }
 }
