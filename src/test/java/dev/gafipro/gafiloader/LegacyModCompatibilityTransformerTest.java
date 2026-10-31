@@ -173,6 +173,62 @@ class LegacyModCompatibilityTransformerTest {
     }
 
     @Test
+    void stagesTargetAwareRemappedRefmapWithoutChangingTheOriginalModJar() throws Exception {
+        LegacyClassTweakerMappings mappings = createBytecodeMappings();
+        Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-refmap"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+
+        String mixinClass = "net/fabricmc/fabric/mixin/registry/LegacyRegistryMixin";
+        String targetOwner = "net/minecraft/class_7924";
+        byte[] originalJar = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11"}
+                        """.getBytes(StandardCharsets.UTF_8),
+                mixinClass + ".class", classWithMixinTarget(mixinClass, targetOwner),
+                "fabric-registry.refmap.json", """
+                        {
+                          "mappings": {
+                            "net.fabricmc.fabric.mixin.registry.LegacyRegistryMixin": {
+                              "method_2345(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;": "Lnet/minecraft/class_7924;method_2345(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;"
+                            }
+                          }
+                        }
+                        """.getBytes(StandardCharsets.UTF_8)
+        ));
+        Path source = modsDirectory.resolve("fabric-api.jar");
+        Files.write(source, originalJar);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
+
+        assertTrue(result.transformed());
+        assertEquals(1, result.rewrittenMixinRefmaps());
+        assertArrayEquals(originalJar, Files.readAllBytes(source),
+                "The source Fabric API JAR must remain byte-for-byte unchanged.");
+
+        byte[] stagedRefmap = readEntry(Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
+                "fabric-registry.refmap.json");
+        com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(
+                new String(stagedRefmap, StandardCharsets.UTF_8)).getAsJsonObject();
+        String mappedKey = "lookup(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
+        String mappedValue = "Lnet/minecraft/core/Registry;lookup(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
+        assertEquals(mappedValue, root.getAsJsonObject("mappings")
+                .getAsJsonObject(mixinClass.replace('/', '.')).get(mappedKey).getAsString());
+    }
+
+    private static byte[] classWithMixinTarget(String className, String targetOwner) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                className, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/Mixin;", true);
+        mixin.visit("value", org.objectweb.asm.Type.getObjectType(targetOwner));
+        mixin.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    @Test
     void rewritesNamedPlayerFieldReference() throws Exception {
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-zombie"));
         Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
