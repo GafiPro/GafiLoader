@@ -182,6 +182,64 @@ final class LegacyClassTweakerMappings {
         return mapMember(owner, name, descriptor, method).name();
     }
 
+    /**
+     * Maps a member ID declared by a mixin class against the Minecraft class named by
+     * its @Mixin annotation. Mixin @Shadow declarations have the mixin class as their
+     * bytecode owner, so ordinary owner-based mapping cannot resolve them.
+     */
+    String mapMixinMemberName(String targetOwner, String name, String descriptor, boolean method)
+            throws IOException {
+        if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) {
+            throw new IOException("Cannot map legacy mixin member " + name
+                    + " because its @Mixin target is not an Intermediary Minecraft class: " + targetOwner);
+        }
+        String prefix = method ? "method_" : "field_";
+        if (name == null || !name.startsWith(prefix)) return name;
+        return mapMember(targetOwner, name, descriptor, method).name();
+    }
+
+    /**
+     * Maps a Mixin selector member where the descriptor is optional. Descriptor-less
+     * selectors are accepted only when the mapping is unique for the owner/name pair.
+     */
+    String mapMixinSelectorName(String targetOwner, String name, String descriptor, boolean method)
+            throws IOException {
+        if (descriptor != null && !descriptor.isBlank()) {
+            return mapMixinMemberName(targetOwner, name, descriptor, method);
+        }
+        String prefix = method ? "method_" : "field_";
+        if (name == null || !name.startsWith(prefix)) return name;
+
+        MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
+        Set<MemberName> candidates = new HashSet<>();
+        members.forEach((key, value) -> {
+            if (key.owner().equals(targetOwner) && key.kind() == kind && key.name().equals(name)) {
+                candidates.add(new MemberName(value.name(), value.descriptor()));
+            }
+        });
+        if (candidates.size() == 1) return candidates.iterator().next().name();
+        if (candidates.size() > 1) {
+            throw new IOException("Ambiguous descriptor-less 1.21.11 mixin selector "
+                    + targetOwner + "#" + name + "; refusing to guess.");
+        }
+
+        // A selector can target an inherited member that is not declared by the
+        // annotated class. Use the global member ID only when every occurrence agrees.
+        Set<String> inheritedNames = new HashSet<>();
+        membersBySignature.forEach((signature, names) -> {
+            if (signature.kind() == kind && signature.name().equals(name)) {
+                for (MemberName candidate : names) inheritedNames.add(candidate.name());
+            }
+        });
+        if (inheritedNames.size() == 1) return inheritedNames.iterator().next();
+        if (inheritedNames.size() > 1) {
+            throw new IOException("Ambiguous inherited 1.21.11 mixin selector "
+                    + targetOwner + "#" + name + "; refusing to guess.");
+        }
+        throw new IOException("No 1.21.11 mapping exists for mixin selector "
+                + targetOwner + "#" + name + ".");
+    }
+
     String mapDescriptor(String descriptor) throws IOException {
         if (descriptor == null || descriptor.isBlank()) return descriptor;
         try {
