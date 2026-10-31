@@ -89,7 +89,7 @@ final class LegacyModCompatibilityTransformer {
                     .toList();
         }
         if (jarPaths.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, 0, List.of());
+            return new Result(false, source, 0, 0, 0, 0, 0, 0, List.of());
         }
 
         // Load the full 1.21.11 namespace bridge when any top-level or nested mod
