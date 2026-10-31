@@ -37,7 +37,10 @@ public final class LaunchBootstrap {
         Path configPath = gameDirectory.resolve("config").resolve("fabric_loader_dependencies.json");
         Path logPath = gameDirectory.resolve("logs").resolve("gafiloader-preflight.log");
         initializeLog(logPath);
+        String bootstrapVersion = LaunchBootstrap.class.getPackage().getImplementationVersion();
         log(logPath, "Pre-launch bootstrap active.", false);
+        log(logPath, "GafiLoader bootstrap version: "
+                + (bootstrapVersion == null || bootstrapVersion.isBlank() ? "unknown" : bootstrapVersion), false);
         log(logPath, "Game directory: " + gameDirectory, false);
         log(logPath, "Mods directory: " + modsDirectory, false);
         log(logPath, "Dependency override config: " + configPath, false);
@@ -75,20 +78,27 @@ public final class LaunchBootstrap {
                 }
                 if (compatibilityResult.transformed()) {
                     System.setProperty("fabric.modsFolder", compatibilityResult.modsDirectory().toString());
+                    String configuredModsFolder = System.getProperty("fabric.modsFolder");
+                    if (configuredModsFolder == null
+                            || !Path.of(configuredModsFolder).toAbsolutePath().normalize()
+                                    .equals(compatibilityResult.modsDirectory().toAbsolutePath().normalize())) {
+                        throw new IOException("Fabric's mods-folder property did not retain the verified staged "
+                                + "directory. Expected " + compatibilityResult.modsDirectory()
+                                + " but found " + configuredModsFolder + ".");
+                    }
                     log(logPath, "Minecraft 26.2 entity-registry compatibility: rewrote "
                             + compatibilityResult.rewrittenReferences() + " static EntityType registry reference(s) "
                             + "across " + compatibilityResult.modifiedJars() + " mod archive(s).", false);
-                    if (compatibilityResult.rewrittenClassTweakerFiles() > 0) {
-                        log(logPath, "ClassTweaker compatibility: remapped "
-                                + compatibilityResult.rewrittenClassTweakerFiles()
-                                + " legacy Intermediary file(s) to the official namespace using verified 1.21.11 mappings.",
-                                false);
-                    }
+                    log(logPath, "ClassTweaker compatibility: remapped "
+                            + compatibilityResult.rewrittenClassTweakerFiles()
+                            + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",
+                            false);
+                    log(logPath, "Fabric mods folder: " + configuredModsFolder, false);
                     log(logPath, "Fabric will load staged mod copies from " + compatibilityResult.modsDirectory()
                             + "; original mod JARs were left unchanged.", false);
                 } else {
-                    log(logPath, "No static EntityType registry references requiring the 26.2 EntityTypes "
-                            + "owner rewrite were found.", false);
+                    log(logPath, "No mod archive needed compatibility rewriting; the original mods directory "
+                            + "will remain active.", false);
                 }
             } catch (IOException | IllegalArgumentException exception) {
                 log(logPath, "Preflight failed: " + exception.getMessage(), true);
