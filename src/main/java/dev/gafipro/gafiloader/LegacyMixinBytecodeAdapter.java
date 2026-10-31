@@ -103,6 +103,7 @@ final class LegacyMixinBytecodeAdapter {
 
             JsonObject selectors = mixinEntry.getValue().getAsJsonObject();
             Map<String, JsonElement> remapped = new LinkedHashMap<>();
+            int localChanges = 0;
             for (Map.Entry<String, JsonElement> selector : selectors.entrySet()) {
                 String newKey = remapRefmapSelector(selector.getKey(), targets, mappings);
                 JsonElement newValue = selector.getValue().deepCopy();
@@ -111,10 +112,10 @@ final class LegacyMixinBytecodeAdapter {
                     String mappedValue = remapRefmapSelector(oldValue, targets, mappings);
                     if (!oldValue.equals(mappedValue)) {
                         newValue = new com.google.gson.JsonPrimitive(mappedValue);
-                        changes[0]++;
+                        localChanges++;
                     }
                 }
-                if (!newKey.equals(selector.getKey())) changes[0]++;
+                if (!newKey.equals(selector.getKey())) localChanges++;
                 JsonElement previous = remapped.putIfAbsent(newKey, newValue);
                 if (previous != null && !previous.equals(newValue)) {
                     throw new IOException("Mixin refmap selector collision for " + mixinEntry.getKey()
@@ -122,9 +123,10 @@ final class LegacyMixinBytecodeAdapter {
                 }
             }
 
-            if (changes[0] > 0) {
+            if (localChanges > 0) {
                 selectors.entrySet().clear();
                 remapped.forEach(selectors::add);
+                changes[0] += localChanges;
             }
         }
     }
@@ -737,8 +739,12 @@ final class LegacyMixinBytecodeAdapter {
                 return "L" + mappings.mapClass(explicitOwner) + ";";
             }
             if (looksLikeMemberId(member)) {
-                return mapSelectorNameOnly(member, selectorOwner(explicitOwner, targetOwners),
+                String mappedName = mapSelectorNameOnly(member, selectorOwner(explicitOwner, targetOwners),
                         mappings, member.startsWith("method_"));
+                if (hasExplicitOwner) {
+                    return "L" + mappings.mapClass(explicitOwner) + ";" + mappedName;
+                }
+                return mappedName;
             }
             if (hasExplicitOwner && allowClassOnly) {
                 return "L" + mappings.mapClass(explicitOwner) + ";" + member;
