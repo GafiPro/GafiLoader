@@ -102,6 +102,11 @@ public final class LaunchBootstrap {
                             + compatibilityResult.rewrittenClassTweakerFiles()
                             + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",
                             false);
+                    if (compatibilityResult.rewrittenMixinRefmaps() > 0) {
+                        log(logPath, "Mixin compatibility: remapped "
+                                + compatibilityResult.rewrittenMixinRefmaps()
+                                + " legacy refmap file(s) to match the staged Mixin selectors.", false);
+                    }
                     log(logPath, "Fabric mods folder: " + configuredModsFolder, false);
                     log(logPath, "Fabric will load staged mod copies from " + compatibilityResult.modsDirectory()
                             + "; original mod JARs were left unchanged.", false);
