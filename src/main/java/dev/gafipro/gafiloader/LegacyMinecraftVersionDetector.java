@@ -17,6 +17,8 @@ final class LegacyMinecraftVersionDetector {
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
     private static final Pattern UNBOUNDED_LEGACY_LOWER_BOUND =
             Pattern.compile("^\\s*(?:>=|>)\\s*1\\.21\\.11\\s*$");
+    private static final Pattern LEGACY_ARTIFACT_SUFFIX =
+            Pattern.compile("(?:^|\\+)1\\.21\\.11$");
 
     private LegacyMinecraftVersionDetector() {}
 
@@ -44,6 +46,35 @@ final class LegacyMinecraftVersionDetector {
         // Fabric API artifacts encode their target game version in values such as
         // 0.141.6+1.21.11, so retain this fallback when no Minecraft dependency exists.
         return containsLegacyVersion(metadata.get("version"));
+    }
+
+    /**
+     * Identifies binaries compiled for the 1.21.11 Intermediary namespace.
+     * This is deliberately separate from {@link #matches(JsonObject)}, which decides
+     * whether Fabric's declared Minecraft dependency needs an override.
+     */
+    static boolean targetsLegacyBytecode(JsonObject metadata) {
+        if (metadata == null) return false;
+        JsonElement depends = metadata.get("depends");
+        if (depends != null && depends.isJsonObject()) {
+            JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
+            if (containsLegacyVersionToken(minecraft)) return true;
+            if (minecraft != null && minecraft.isJsonArray()) {
+                for (JsonElement range : minecraft.getAsJsonArray()) {
+                    if (containsLegacyVersionToken(range)) return true;
+                }
+            }
+        }
+        JsonElement version = metadata.get("version");
+        return version != null && version.isJsonPrimitive()
+                && version.getAsJsonPrimitive().isString()
+                && LEGACY_ARTIFACT_SUFFIX.matcher(version.getAsString().trim()).find();
+    }
+
+    private static boolean containsLegacyVersionToken(JsonElement value) {
+        if (value == null || !value.isJsonPrimitive()
+                || !value.getAsJsonPrimitive().isString()) return false;
+        return TARGET_LEGACY_VERSION.matcher(value.getAsString()).find();
     }
 
     private static boolean containsLegacyVersion(JsonElement value) {
