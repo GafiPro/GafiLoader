@@ -102,6 +102,9 @@ final class LegacyModCompatibilityTransformer {
             activeMappings = LegacyClassTweakerMappings.load(
                     files.intermediaryJar(), files.mojangMappings());
         }
+        if (hasLegacyMod && activeMappings != null) {
+            LegacyBytecodeRemapper.verifyRuntimeSupport();
+        }
         LegacyClassTweakerRemapper classTweakerRemapper =
                 new LegacyClassTweakerRemapper(game, activeMappings);
         LegacyBytecodeRemapper bytecodeRemapper = activeMappings == null
