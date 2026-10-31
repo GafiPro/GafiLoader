@@ -15,7 +15,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 
@@ -81,8 +83,14 @@ final class LegacyMixinBytecodeAdapter {
                 @Override
                 public String mapMethodName(String owner, String name, String descriptor) {
                     try {
-                        if (owner.equals(currentClass) && metadata.shadowMethods().contains(memberKey(name, descriptor))) {
-                            return mapMixinDeclarationName(metadata, name, descriptor, true, mappings);
+                        if (owner.equals(currentClass)) {
+                            String key = memberKey(name, descriptor);
+                            if (metadata.shadowMethods().contains(key)) {
+                                return mapMixinDeclarationName(metadata, name, descriptor, mappings);
+                            }
+                            if (metadata.inferredAccessors().containsKey(key)) {
+                                return mapInferredAccessorName(metadata, name, descriptor, mappings);
+                            }
                         }
                         return mappings.mapBytecodeMemberName(owner, name, descriptor, true);
                     } catch (IOException exception) {
@@ -181,6 +189,8 @@ final class LegacyMixinBytecodeAdapter {
         Set<String> targets = new LinkedHashSet<>();
         Set<String> shadowMethods = new LinkedHashSet<>();
         Set<String> shadowFields = new LinkedHashSet<>();
+        Map<String, String> shadowMethodPrefixes = new HashMap<>();
+        Map<String, InferredAccessor> inferredAccessors = new HashMap<>();
 
         reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -218,13 +228,26 @@ final class LegacyMixinBytecodeAdapter {
             @Override
             public FieldVisitor visitField(int access, String name, String descriptor,
                                            String signature, Object value) {
+                String key = memberKey(name, descriptor);
                 return new FieldVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
-                        if (SHADOW_ANNOTATION.equals(annotationDescriptor)) {
-                            shadowFields.add(memberKey(name, descriptor));
-                        }
-                        return null;
+                        if (!SHADOW_ANNOTATION.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            private boolean remap = true;
+
+                            @Override
+                            public void visit(String property, Object value) {
+                                if ("remap".equals(property) && value instanceof Boolean enabled) {
+                                    remap = enabled;
+                                }
+                            }
+
+                            @Override
+                            public void visitEnd() {
+                                if (remap) shadowFields.add(key);
+                            }
+                        };
                     }
                 };
             }
@@ -232,12 +255,74 @@ final class LegacyMixinBytecodeAdapter {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
+                String key = memberKey(name, descriptor);
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
-                        if (SHADOW_ANNOTATION.equals(annotationDescriptor)
-                                || OVERWRITE_ANNOTATION.equals(annotationDescriptor)) {
-                            shadowMethods.add(memberKey(name, descriptor));
+                        if (SHADOW_ANNOTATION.equals(annotationDescriptor)) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                private String prefix = DEFAULT_SHADOW_PREFIX;
+                                private boolean remap = true;
+
+                                @Override
+                                public void visit(String property, Object value) {
+                                    if ("prefix".equals(property) && value instanceof String customPrefix) {
+                                        prefix = customPrefix;
+                                    } else if ("remap".equals(property) && value instanceof Boolean enabled) {
+                                        remap = enabled;
+                                    }
+                                }
+
+                                @Override
+                                public void visitEnd() {
+                                    if (remap) {
+                                        shadowMethods.add(key);
+                                        shadowMethodPrefixes.put(key, prefix);
+                                    }
+                                }
+                            };
+                        }
+                        if (OVERWRITE_ANNOTATION.equals(annotationDescriptor)) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                private boolean remap = true;
+
+                                @Override
+                                public void visit(String property, Object value) {
+                                    if ("remap".equals(property) && value instanceof Boolean enabled) {
+                                        remap = enabled;
+                                    }
+                                }
+
+                                @Override
+                                public void visitEnd() {
+                                    if (remap) shadowMethods.add(key);
+                                }
+                            };
+                        }
+                        if (ACCESSOR_ANNOTATION.equals(annotationDescriptor)
+                                || INVOKER_ANNOTATION.equals(annotationDescriptor)) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                private String specifiedValue = "";
+                                private boolean remap = true;
+
+                                @Override
+                                public void visit(String property, Object value) {
+                                    if ("value".equals(property) && value instanceof String selector) {
+                                        specifiedValue = selector;
+                                    } else if ("remap".equals(property) && value instanceof Boolean enabled) {
+                                        remap = enabled;
+                                    }
+                                }
+
+                                @Override
+                                public void visitEnd() {
+                                    if (remap && specifiedValue.isBlank()) {
+                                        InferredAccessor inferred = inferAccessor(name,
+                                                INVOKER_ANNOTATION.equals(annotationDescriptor));
+                                        if (inferred != null) inferredAccessors.put(key, inferred);
+                                    }
+                                }
+                            };
                         }
                         return null;
                     }
@@ -246,21 +331,21 @@ final class LegacyMixinBytecodeAdapter {
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
         return new MixinMetadata(reader.getClassName(), List.copyOf(targets),
-                Set.copyOf(shadowMethods), Set.copyOf(shadowFields));
+                Set.copyOf(shadowMethods), Set.copyOf(shadowFields),
+                Map.copyOf(shadowMethodPrefixes), Map.copyOf(inferredAccessors));
     }
 
     private static String mapMixinDeclarationName(MixinMetadata metadata, String originalName,
-                                                   String descriptor, boolean method,
+                                                   String descriptor,
                                                    LegacyClassTweakerMappings mappings) throws IOException {
-        String prefix = "";
+        String prefix = metadata.shadowMethodPrefixes().getOrDefault(
+                memberKey(originalName, descriptor), "");
         String lookupName = originalName;
-        if (method && lookupName.startsWith(DEFAULT_SHADOW_PREFIX)
-                && lookupName.substring(DEFAULT_SHADOW_PREFIX.length()).startsWith("method_")) {
-            prefix = DEFAULT_SHADOW_PREFIX;
+        if (!prefix.isEmpty() && lookupName.startsWith(prefix)) {
             lookupName = lookupName.substring(prefix.length());
         }
 
-        if (!(method ? lookupName.startsWith("method_") : lookupName.startsWith("field_"))) {
+        if (!lookupName.startsWith("method_")) {
             return originalName;
         }
         if (metadata.targetOwners().isEmpty()) {
@@ -272,7 +357,7 @@ final class LegacyMixinBytecodeAdapter {
         List<String> failures = new ArrayList<>();
         for (String targetOwner : metadata.targetOwners()) {
             try {
-                mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, method));
+                mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, true));
             } catch (IOException exception) {
                 failures.add(exception.getMessage());
             }
@@ -287,9 +372,51 @@ final class LegacyMixinBytecodeAdapter {
                 + metadata.targetOwners() + ". " + String.join(" | ", failures));
     }
 
+    private static InferredAccessor inferAccessor(String methodName, boolean invoker) {
+        String handlerPrefix = "";
+        String candidate = methodName;
+        int namespaceSeparator = candidate.lastIndexOf('$');
+        if (namespaceSeparator >= 0) {
+            handlerPrefix = candidate.substring(0, namespaceSeparator + 1);
+            candidate = candidate.substring(namespaceSeparator + 1);
+        }
+
+        String[] prefixes = invoker
+                ? new String[] { "call", "invoke" }
+                : new String[] { "get", "is", "set" };
+        for (String prefix : prefixes) {
+            if (!candidate.startsWith(prefix) || candidate.length() <= prefix.length()) continue;
+            String suffix = candidate.substring(prefix.length());
+            if (!Character.isUpperCase(suffix.charAt(0))) continue;
+            String targetName = Character.toLowerCase(suffix.charAt(0)) + suffix.substring(1);
+            if (invoker ? targetName.startsWith("method_") : targetName.startsWith("field_")) {
+                return new InferredAccessor(handlerPrefix + prefix, targetName, invoker);
+            }
+        }
+        return null;
+    }
+
+    private static String mapInferredAccessorName(MixinMetadata metadata, String originalName,
+            String descriptor, LegacyClassTweakerMappings mappings) throws IOException {
+        InferredAccessor inferred = metadata.inferredAccessors().get(memberKey(originalName, descriptor));
+        if (inferred == null) return originalName;
+        String mappedTarget = mapSelectorNameOnly(inferred.targetName(), metadata.targetOwners(),
+                mappings, inferred.method());
+        if (mappedTarget.equals(inferred.targetName())) return originalName;
+        return inferred.handlerPrefix() + capitalizeFirst(mappedTarget);
+    }
+
+    private static String capitalizeFirst(String value) {
+        if (value == null || value.isEmpty()) return value;
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
     private static AnnotationVisitor wrapAnnotation(AnnotationVisitor delegate, String descriptor,
             MixinMetadata metadata, LegacyClassTweakerMappings mappings) {
         if (delegate == null) return null;
+        if (ACCESSOR_ANNOTATION.equals(descriptor) || INVOKER_ANNOTATION.equals(descriptor)) {
+            return wrapAccessorAnnotation(delegate, descriptor, metadata, mappings);
+        }
         return new AnnotationVisitor(Opcodes.ASM9, delegate) {
             @Override
             public void visit(String name, Object value) {
@@ -334,6 +461,45 @@ final class LegacyMixinBytecodeAdapter {
                                 nestedDescriptor, metadata, mappings);
                     }
                 };
+            }
+        };
+    }
+
+    private static AnnotationVisitor wrapAccessorAnnotation(AnnotationVisitor delegate,
+            String descriptor, MixinMetadata metadata, LegacyClassTweakerMappings mappings) {
+        return new AnnotationVisitor(Opcodes.ASM9, delegate) {
+            private String specifiedValue;
+            private boolean hasValue;
+            private boolean remap = true;
+
+            @Override
+            public void visit(String name, Object value) {
+                if ("value".equals(name) && value instanceof String selector) {
+                    specifiedValue = selector;
+                    hasValue = true;
+                    return;
+                }
+                if ("remap".equals(name) && value instanceof Boolean enabled) {
+                    remap = enabled;
+                }
+                super.visit(name, value);
+            }
+
+            @Override
+            public void visitEnd() {
+                if (hasValue) {
+                    String mapped = specifiedValue;
+                    if (remap && !specifiedValue.isBlank()) {
+                        try {
+                            mapped = mapAnnotationString(descriptor, "value", specifiedValue,
+                                    metadata, mappings);
+                        } catch (IOException exception) {
+                            throw new UncheckedIOException(exception);
+                        }
+                    }
+                    super.visit("value", mapped);
+                }
+                super.visitEnd();
             }
         };
     }
@@ -507,5 +673,9 @@ final class LegacyMixinBytecodeAdapter {
     record Result(byte[] bytes, boolean changed) {}
 
     private record MixinMetadata(String className, List<String> targetOwners,
-                                 Set<String> shadowMethods, Set<String> shadowFields) {}
+                                 Set<String> shadowMethods, Set<String> shadowFields,
+                                 Map<String, String> shadowMethodPrefixes,
+                                 Map<String, InferredAccessor> inferredAccessors) {}
+
+    private record InferredAccessor(String handlerPrefix, String targetName, boolean method) {}
 }
