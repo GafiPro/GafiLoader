@@ -169,7 +169,8 @@ class LegacyClassTweakerRemapperTest {
                 + "f\\tI\\tb\\tfield_6097\\n"
                 + "m\\t(La;)V\\tc\\tmethod_42\\n"
                 + "c\\td\\tnet/minecraft/class_1959$class_5482\\n"
-                + "c\\te\\tnet/minecraft/class_1959$class_5484\\n")                .getBytes(StandardCharsets.UTF_8);
+                + "c\\te\\tnet/minecraft/class_1959$class_5484\\n")
+                .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
         Path mojangMappings = temporaryDirectory.resolve("client-mappings-1.21.11.txt");
