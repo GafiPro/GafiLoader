@@ -18,8 +18,6 @@ final class LegacyMinecraftVersionDetector {
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
     private static final Pattern LEGACY_ARTIFACT_SUFFIX =
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
-    private static final Pattern TARGET_MINECRAFT_VERSION =
-            Pattern.compile("(?<![0-9])26\\.2(?![0-9])");
     private static final Pattern NUMERIC_VERSION =
             Pattern.compile("^([0-9]+(?:\\.[0-9]+)*)(?:-[A-Za-z0-9.-]+)?$");
 
