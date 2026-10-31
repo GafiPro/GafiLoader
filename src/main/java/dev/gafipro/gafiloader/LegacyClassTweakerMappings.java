@@ -12,7 +12,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -25,11 +27,17 @@ final class LegacyClassTweakerMappings {
 
     private final Map<String, String> classes;
     private final Map<MemberKey, MappedMember> members;
+    private final Map<MemberSignature, Set<MemberName>> membersBySignature;
 
     private LegacyClassTweakerMappings(Map<String, String> classes,
-                                       Map<MemberKey, MappedMember> members) {
+                                       Map<MemberKey, MappedMember> members,
+                                       Map<MemberSignature, Set<MemberName>> membersBySignature) {
         this.classes = Map.copyOf(classes);
         this.members = Map.copyOf(members);
+        Map<MemberSignature, Set<MemberName>> immutableSignatures = new HashMap<>();
+        membersBySignature.forEach((signature, names) ->
+                immutableSignatures.put(signature, Set.copyOf(names)));
+        this.membersBySignature = Map.copyOf(immutableSignatures);
     }
 
     static LegacyClassTweakerMappings load(Path intermediaryJar, Path mojangMappingsFile)
@@ -57,6 +65,7 @@ final class LegacyClassTweakerMappings {
 
         Map<String, String> classes = new HashMap<>();
         Map<MemberKey, MappedMember> members = new HashMap<>();
+        Map<MemberSignature, Set<MemberName>> membersBySignature = new HashMap<>();
         for (MappingTree.ClassMapping classMapping : tree.getClasses()) {
             String officialOwner = classMapping.getName(officialId);
             String intermediaryOwner = classMapping.getName(intermediaryId);
@@ -82,6 +91,8 @@ final class LegacyClassTweakerMappings {
                                 oldIntermediaryName, intermediaryDescriptor),
                         new MappedMember(namedOwner, namedName, namedDescriptor),
                         "field " + intermediaryOwner + "#" + oldIntermediaryName);
+                addSignatureMapping(membersBySignature, MemberKind.FIELD,
+                        oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
             }
 
             for (MappingTree.MethodMapping method : classMapping.getMethods()) {
@@ -100,9 +111,11 @@ final class LegacyClassTweakerMappings {
                                 oldIntermediaryName, intermediaryDescriptor),
                         new MappedMember(namedOwner, namedName, namedDescriptor),
                         "method " + intermediaryOwner + "#" + oldIntermediaryName);
+                addSignatureMapping(membersBySignature, MemberKind.METHOD,
+                        oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
             }
         }
-        return new LegacyClassTweakerMappings(classes, members);
+        return new LegacyClassTweakerMappings(classes, members, membersBySignature);
     }
 
     String mapClass(String internalName) throws IOException {
@@ -137,6 +150,22 @@ final class LegacyClassTweakerMappings {
             return new MappedMember(mapClass(owner), name, mapDescriptor(descriptor));
         }
 
+        // ClassTweaker may name a concrete class even when the target method is declared
+        // by an implemented interface or a superclass. Intermediary assigns stable member
+        // IDs, so use the complete member signature as a fallback while retaining the
+        // requested owner. Never guess when that signature has conflicting named targets.
+        Set<MemberName> candidates = membersBySignature.get(
+                new MemberSignature(kind, name, descriptor));
+        if (candidates != null && candidates.size() == 1) {
+            MemberName candidate = candidates.iterator().next();
+            return new MappedMember(mapClass(owner), candidate.name(), candidate.descriptor());
+        }
+        if (candidates != null && candidates.size() > 1) {
+            throw new IOException("Ambiguous 1.21.11 Intermediary mapping for ClassTweaker "
+                    + (method ? "method " : "field ") + owner + "#" + name + descriptor
+                    + " across " + candidates.size() + " distinct named targets; refusing to guess.");
+        }
+
         throw new IOException("No 1.21.11 Intermediary mapping exists for ClassTweaker "
                 + (method ? "method " : "field ") + owner + "#" + name + descriptor + ".");
     }
@@ -168,6 +197,15 @@ final class LegacyClassTweakerMappings {
         };
     }
 
+    private static void addSignatureMapping(Map<MemberSignature, Set<MemberName>> target,
+                                             MemberKind kind, String intermediaryName,
+                                             String intermediaryDescriptor, String namedName,
+                                             String namedDescriptor) {
+        MemberSignature signature = new MemberSignature(kind, intermediaryName, intermediaryDescriptor);
+        target.computeIfAbsent(signature, ignored -> new HashSet<>())
+                .add(new MemberName(namedName, namedDescriptor));
+    }
+
     private static <K, V> void putConsistent(Map<K, V> target, K key, V value, String label)
             throws IOException {
         V old = target.putIfAbsent(key, value);
@@ -181,4 +219,8 @@ final class LegacyClassTweakerMappings {
     record MappedMember(String owner, String name, String descriptor) {}
 
     private record MemberKey(String owner, MemberKind kind, String name, String descriptor) {}
+
+    private record MemberSignature(MemberKind kind, String name, String descriptor) {}
+
+    private record MemberName(String name, String descriptor) {}
 }

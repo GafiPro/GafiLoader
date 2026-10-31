@@ -69,6 +69,25 @@ class LegacyClassTweakerRemapperTest {
     }
 
     @Test
+    void remapsInheritedMethodUsingUniqueIntermediarySignature() throws Exception {
+        LegacyClassTweakerMappings mappings = createMappings();
+        LegacyClassTweakerRemapper remapper =
+                new LegacyClassTweakerRemapper(temporaryDirectory, mappings);
+        String input = """
+                classTweaker v1 intermediary
+                accessible method net/minecraft/class_2446$class_10114 method_10319 (Lnet/minecraft/class_7403;)Ljava/util/concurrent/CompletableFuture;
+                """;
+
+        LegacyClassTweakerRemapper.Result result = remapper.remap(input);
+
+        assertTrue(result.remapped());
+        assertTrue(result.contents().contains(
+                "accessible method net/minecraft/data/recipe/RecipeGenerator$RecipeProvider run "
+                        + "(Lnet/minecraft/data/DataWriter;)Ljava/util/concurrent/CompletableFuture;"),
+                result.contents());
+    }
+
+    @Test
     void remapsClassTweakerInsideNestedFabricApiJarAndPreservesOriginalArchives() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         String classTweaker = String.valueOf((char) 0xFEFF) + """
@@ -169,7 +188,11 @@ class LegacyClassTweakerRemapperTest {
                 + "\tf\tI\tb\tfield_6097\n"
                 + "\tm\t(La;)V\tc\tmethod_42\n"
                 + "c\td\tnet/minecraft/class_1959$class_5482\n"
-                + "c\te\tnet/minecraft/class_1959$class_5484\n")
+                + "c\te\tnet/minecraft/class_1959$class_5484\n"
+                + "c\ton$b\tnet/minecraft/class_2446$class_10114\n"
+                + "c\tmq\tnet/minecraft/class_2405\n"
+                + "\tm\t(Lmo;)Ljava/util/concurrent/CompletableFuture;\ta\tmethod_10319\n"
+                + "c\tmo\tnet/minecraft/class_7403\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -180,6 +203,10 @@ class LegacyClassTweakerRemapperTest {
                     void tick(net.minecraft.world.entity.EntityType) -> c
                 net.minecraft.world.level.biome.BiomeSpecialEffects$GrassColorModifier -> d:
                 net.minecraft.world.level.biome.BiomeSpecialEffects$GrassColorModifier$Test -> e:
+                net.minecraft.data.recipe.RecipeGenerator$RecipeProvider -> on$b:
+                net.minecraft.data.DataProvider -> mq:
+                    java.util.concurrent.CompletableFuture run(net.minecraft.data.DataWriter) -> a
+                net.minecraft.data.DataWriter -> mo:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
