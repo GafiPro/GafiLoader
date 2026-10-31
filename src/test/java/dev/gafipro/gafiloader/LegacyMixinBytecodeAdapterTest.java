@@ -143,6 +143,78 @@ class LegacyMixinBytecodeAdapterTest {
     }
 
     @Test
+    void preservesInjectionAndAtSelectorsWhenRemapIsFalse() throws Exception {
+        LegacyMixinBytecodeAdapter.Result result = LegacyMixinBytecodeAdapter.remap(
+                mixinWithNonRemappedInjectionSelectors(), createMappings());
+
+        AtomicReference<String> methodSelector = new AtomicReference<>();
+        AtomicReference<String> atTargetSelector = new AtomicReference<>();
+        new ClassReader(result.bytes()).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"onUnmappedLookup".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!MODIFY_RETURN_VALUE.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String property, Object value) {
+                                if ("method".equals(property)) methodSelector.set((String) value);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                if (!"at".equals(property) || !AT.equals(nestedDescriptor)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String atProperty, Object value) {
+                                        if ("target".equals(atProperty)) atTargetSelector.set((String) value);
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, 0);
+
+        assertEquals("method_2345(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";", methodSelector.get());
+        assertEquals("L" + TARGET_OWNER + ";method_2345(L" + TARGET_OWNER + ";)L"
+                + TARGET_OWNER + ";", atTargetSelector.get());
+    }
+
+    private static byte[] mixinWithNonRemappedInjectionSelectors() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "net/fabricmc/fabric/mixin/registry/NonRemappedMixin", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
+        mixin.visit("value", Type.getObjectType(TARGET_OWNER));
+        mixin.visitEnd();
+
+        MethodVisitor inject = writer.visitMethod(Opcodes.ACC_PRIVATE, "onUnmappedLookup", "()V", null, null);
+        AnnotationVisitor modify = inject.visitAnnotation(MODIFY_RETURN_VALUE, true);
+        modify.visit("method", "method_2345(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";");
+        modify.visit("remap", false);
+        AnnotationVisitor at = modify.visitAnnotation("at", AT);
+        at.visit("value", "INVOKE");
+        at.visit("target", "L" + TARGET_OWNER + ";method_2345(L" + TARGET_OWNER + ";)L"
+                + TARGET_OWNER + ";");
+        at.visit("remap", false);
+        at.visitEnd();
+        modify.visitEnd();
+        inject.visitCode();
+        inject.visitInsn(Opcodes.RETURN);
+        inject.visitMaxs(0, 1);
+        inject.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    @Test
     void remapsImplicitAccessorInvokerAndCustomShadowPrefixWhileHonouringRemapFalse() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         LegacyMixinBytecodeAdapter.Result result = LegacyMixinBytecodeAdapter.remap(
