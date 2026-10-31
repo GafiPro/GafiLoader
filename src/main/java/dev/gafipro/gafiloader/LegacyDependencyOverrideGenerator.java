@@ -7,10 +7,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,6 +31,9 @@ import java.util.zip.ZipInputStream;
  */
 public final class LegacyDependencyOverrideGenerator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int MAX_NESTED_ARCHIVE_DEPTH = 12;
+    private static final long MAX_NESTED_ARCHIVE_BYTES = 128L * 1024 * 1024;
+    private static final long MAX_METADATA_BYTES = 4L * 1024 * 1024;
 
     public Result generate(Path modsPath, Path configPath) throws IOException {
         if (modsPath == null || !Files.isDirectory(modsPath)) {
@@ -40,7 +45,8 @@ public final class LegacyDependencyOverrideGenerator {
 
         List<Path> jars;
         try (var paths = Files.walk(modsPath)) {
-            jars = paths.filter(Files::isRegularFile)
+            jars = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> !Files.isSymbolicLink(path))
                     .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".jar"))
                     .sorted(Comparator.comparing(Path::toString))
                     .toList();
@@ -59,14 +65,20 @@ public final class LegacyDependencyOverrideGenerator {
                     if (entry.isDirectory()) continue;
                     if (entry.getName().equalsIgnoreCase("fabric.mod.json")) {
                         try (InputStream input = jar.getInputStream(entry)) {
-                            collectMetadata(input.readAllBytes(), jarPath + "!/" + entry.getName(), legacyMods, unreadable);
+                            collectMetadata(readBounded(input, MAX_METADATA_BYTES,
+                                    jarPath + "!/" + entry.getName()),
+                                    jarPath + "!/" + entry.getName(), legacyMods, unreadable);
                         }
                     } else if (entry.getName().toLowerCase().endsWith(".jar")) {
                         try (InputStream input = jar.getInputStream(entry)) {
-                            collectNestedJar(input.readAllBytes(), jarPath + "!/" + entry.getName(), legacyMods, unreadable);
+                            collectNestedJar(readBounded(input, MAX_NESTED_ARCHIVE_BYTES,
+                                            jarPath + "!/" + entry.getName()),
+                                    jarPath + "!/" + entry.getName(), legacyMods, unreadable, 1);
                         }
                     }
                 }
+            } catch (UnsafeArchiveException exception) {
+                throw exception;
             } catch (IOException exception) {
                 unreadable.add(jarPath + ": " + exception.getMessage());
             }
@@ -214,19 +226,51 @@ public final class LegacyDependencyOverrideGenerator {
     }
 
     private static void collectNestedJar(byte[] bytes, String source, TreeMap<String, JsonObject> found,
-                                         List<String> unreadable) {
+                                         List<String> unreadable, int depth) throws UnsafeArchiveException {
+        if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
+            throw new UnsafeArchiveException("Nested mod archive depth exceeds the safety limit of "
+                    + MAX_NESTED_ARCHIVE_DEPTH + ": " + source);
+        }
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
                 if (entry.getName().equalsIgnoreCase("fabric.mod.json")) {
-                    collectMetadata(zip.readAllBytes(), source + "!/" + entry.getName(), found, unreadable);
+                    collectMetadata(readBounded(zip, MAX_METADATA_BYTES, source + "!/" + entry.getName()),
+                            source + "!/" + entry.getName(), found, unreadable);
                 } else if (entry.getName().toLowerCase().endsWith(".jar")) {
-                    collectNestedJar(zip.readAllBytes(), source + "!/" + entry.getName(), found, unreadable);
+                    String nestedSource = source + "!/" + entry.getName();
+                    byte[] nestedBytes = readBounded(zip, MAX_NESTED_ARCHIVE_BYTES, nestedSource);
+                    collectNestedJar(nestedBytes, nestedSource, found, unreadable, depth + 1);
                 }
             }
+        } catch (UnsafeArchiveException exception) {
+            throw exception;
         } catch (IOException exception) {
             unreadable.add(source + ": " + exception.getMessage());
+        }
+    }
+
+    private static byte[] readBounded(InputStream input, long maximumBytes, String source)
+            throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maximumBytes) {
+                throw new UnsafeArchiveException("Archive entry exceeds the "
+                        + maximumBytes + "-byte safety limit: " + source);
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static final class UnsafeArchiveException extends IOException {
+        private UnsafeArchiveException(String message) {
+            super(message);
         }
     }
 
