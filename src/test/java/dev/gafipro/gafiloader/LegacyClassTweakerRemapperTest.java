@@ -50,6 +50,25 @@ class LegacyClassTweakerRemapperTest {
     }
 
     @Test
+    void remapsConstructorOwnerAndDescriptorWhenIntermediaryMappingsOmitInit() throws Exception {
+        LegacyClassTweakerMappings mappings = createMappings();
+        LegacyClassTweakerRemapper remapper =
+                new LegacyClassTweakerRemapper(temporaryDirectory, mappings);
+        String input = """
+                classTweaker v1 intermediary
+                accessible method net/minecraft/class_1959$class_5482 <init> (ZFLnet/minecraft/class_1959$class_5484;F)V
+                """;
+
+        LegacyClassTweakerRemapper.Result result = remapper.remap(input);
+
+        assertTrue(result.remapped());
+        assertTrue(result.contents().contains(
+                "accessible method net/minecraft/world/level/biome/BiomeSpecialEffects$GrassColorModifier "
+                        + "<init> (ZFLnet/minecraft/world/level/biome/BiomeSpecialEffects$GrassColorModifier$Test;F)V"),
+                result.contents());
+    }
+
+    @Test
     void remapsClassTweakerInsideNestedFabricApiJarAndPreservesOriginalArchives() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         String classTweaker = String.valueOf((char) 0xFEFF) + """
@@ -145,11 +164,12 @@ class LegacyClassTweakerRemapperTest {
 
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-1.21.11-v2.jar");
-        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
-                + "c\ta\tnet/minecraft/class_1299\n"
-                + "\tf\tI\tb\tfield_6097\n"
-                + "\tm\t(La;)V\tc\tmethod_42\n")
-                .getBytes(StandardCharsets.UTF_8);
+        byte[] tiny = ("tiny\\t2\\t0\\tofficial\\tintermediary\\n"
+                + "c\\ta\\tnet/minecraft/class_1299\\n"
+                + "f\\tI\\tb\\tfield_6097\\n"
+                + "m\\t(La;)V\\tc\\tmethod_42\\n"
+                + "c\\td\\tnet/minecraft/class_1959$class_5482\\n"
+                + "c\\te\\tnet/minecraft/class_1959$class_5484\\n")                .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
         Path mojangMappings = temporaryDirectory.resolve("client-mappings-1.21.11.txt");
@@ -157,6 +177,8 @@ class LegacyClassTweakerRemapperTest {
                 net.minecraft.world.entity.EntityType -> a:
                     int player -> b
                     void tick(net.minecraft.world.entity.EntityType) -> c
+                net.minecraft.world.level.biome.BiomeSpecialEffects$GrassColorModifier -> d:
+                net.minecraft.world.level.biome.BiomeSpecialEffects$GrassColorModifier$Test -> e:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
