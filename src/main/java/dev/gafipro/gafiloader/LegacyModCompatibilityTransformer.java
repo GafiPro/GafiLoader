@@ -234,7 +234,7 @@ final class LegacyModCompatibilityTransformer {
         int start = 0;
         while (start < text.length()) {
             char character = text.charAt(start);
-            if (character == '\\uFEFF' || Character.isWhitespace(character)) {
+            if (character == (char) 0xFEFF || Character.isWhitespace(character)) {
                 start++;
             } else {
                 break;
@@ -381,7 +381,7 @@ final class LegacyModCompatibilityTransformer {
 
     private static String normalizeResourcePath(String resourcePath) {
         if (resourcePath == null) return null;
-        String normalized = resourcePath.trim().replace('\\\\', '/');
+        String normalized = resourcePath.trim().replace('\\', '/');
         while (normalized.startsWith("./")) normalized = normalized.substring(2);
         return normalized.isEmpty() ? null : normalized;
     }
