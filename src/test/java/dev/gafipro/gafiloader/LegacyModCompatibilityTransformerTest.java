@@ -85,6 +85,44 @@ class LegacyModCompatibilityTransformerTest {
     }
 
     @Test
+    void remapsLegacyFabricApiBytecodeInNestedJarBeforeFabricLoadsIt() throws Exception {
+        LegacyClassTweakerMappings mappings = createBytecodeMappings();
+        Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-bytecode-remap"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+
+        byte[] originalClass = classWithIntermediaryRegistryReferences();
+        byte[] nestedModule = jar(Map.of("net/example/LegacyApiEntrypoint.class", originalClass));
+        byte[] originalApi = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11"}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "META-INF/jars/fabric-registry-api-v1.jar", nestedModule));
+        Path source = modsDirectory.resolve("fabric-api.jar");
+        Files.write(source, originalApi);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
+
+        assertTrue(result.transformed());
+        assertEquals(1, result.remappedClasses());
+        assertEquals(0, result.rewrittenReferences());
+        assertEquals(1, result.modifiedJars());
+        assertArrayEquals(originalApi, Files.readAllBytes(source),
+                "The source Fabric API JAR must remain byte-for-byte unchanged.");
+
+        byte[] stagedNested = readEntry(Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
+                "META-INF/jars/fabric-registry-api-v1.jar");
+        byte[] stagedClass = readEntry(stagedNested, "net/example/LegacyApiEntrypoint.class");
+        String constantPoolText = new String(stagedClass, StandardCharsets.ISO_8859_1);
+        assertTrue(constantPoolText.contains("net/minecraft/core/Registry"), constantPoolText);
+        assertTrue(constantPoolText.contains("lookup"), constantPoolText);
+        assertTrue(constantPoolText.contains("entry"), constantPoolText);
+        assertFalse(constantPoolText.contains("net/minecraft/class_7924"), constantPoolText);
+        assertFalse(constantPoolText.contains("method_2345"), constantPoolText);
+        assertFalse(constantPoolText.contains("field_1234"), constantPoolText);
+    }
+
+    @Test
     void rewritesNamedPlayerFieldReference() throws Exception {
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-zombie"));
         Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
@@ -148,6 +186,55 @@ class LegacyModCompatibilityTransformerTest {
         method.visitInsn(Opcodes.ARETURN);
         method.visitMaxs(1, 0);
         method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private LegacyClassTweakerMappings createBytecodeMappings() throws IOException {
+        Path intermediaryJar = temporaryDirectory.resolve("intermediary-bytecode-fixture.jar");
+        byte[] tiny = ("tiny\\t2\\t0\\tofficial\\tintermediary\\n"
+                + "c\\ta\\tnet/minecraft/class_7924\\n"
+                + "\\tf\\tLa;\\tb\\tfield_1234\\n"
+                + "\\tm\\t(La;)La;\\tc\\tmethod_2345\\n")
+                .replace("\\\\t", "\\t").replace("\\\\n", "\\n")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
+
+        Path mojangMappings = temporaryDirectory.resolve("client-mappings-bytecode-fixture.txt");
+        Files.writeString(mojangMappings, """
+                net.minecraft.core.Registry -> a:
+                    net.minecraft.core.Registry entry -> b
+                    net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
+                """, StandardCharsets.UTF_8);
+        return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+    }
+
+    private static byte[] classWithIntermediaryRegistryReferences() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/example/LegacyApiEntrypoint", null,
+                "java/lang/Object", null);
+        writer.visitField(Opcodes.ACC_PUBLIC, "registry", "Lnet/minecraft/class_7924;", null, null)
+                .visitEnd();
+
+        MethodVisitor lookup = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "lookup", "(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;", null, null);
+        lookup.visitCode();
+        lookup.visitVarInsn(Opcodes.ALOAD, 0);
+        lookup.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraft/class_7924", "method_2345",
+                "(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;", false);
+        lookup.visitInsn(Opcodes.ARETURN);
+        lookup.visitMaxs(1, 1);
+        lookup.visitEnd();
+
+        MethodVisitor field = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "field", "()Lnet/minecraft/class_7924;", null, null);
+        field.visitCode();
+        field.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraft/class_7924", "field_1234",
+                "Lnet/minecraft/class_7924;");
+        field.visitInsn(Opcodes.ARETURN);
+        field.visitMaxs(1, 0);
+        field.visitEnd();
+
         writer.visitEnd();
         return writer.toByteArray();
     }

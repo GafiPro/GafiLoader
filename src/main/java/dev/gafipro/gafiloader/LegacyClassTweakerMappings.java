@@ -170,6 +170,18 @@ final class LegacyClassTweakerMappings {
                 + (method ? "method " : "field ") + owner + "#" + name + descriptor + ".");
     }
 
+    /**
+     * Maps Intermediary member IDs referenced by legacy bytecode. Non-Minecraft members
+     * and already named Java/library methods are intentionally preserved.
+     */
+    String mapBytecodeMemberName(String owner, String name, String descriptor, boolean method)
+            throws IOException {
+        if (owner == null || !owner.startsWith("net/minecraft/class_")) return name;
+        String prefix = method ? "method_" : "field_";
+        if (name == null || !name.startsWith(prefix)) return name;
+        return mapMember(owner, name, descriptor, method).name();
+    }
+
     String mapDescriptor(String descriptor) throws IOException {
         if (descriptor == null || descriptor.isBlank()) return descriptor;
         try {

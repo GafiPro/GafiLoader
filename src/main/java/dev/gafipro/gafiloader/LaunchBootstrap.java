@@ -89,6 +89,9 @@ public final class LaunchBootstrap {
                     log(logPath, "Minecraft 26.2 entity-registry compatibility: rewrote "
                             + compatibilityResult.rewrittenReferences() + " static EntityType registry reference(s) "
                             + "across " + compatibilityResult.modifiedJars() + " mod archive(s).", false);
+                    log(logPath, "Legacy bytecode compatibility: remapped "
+                            + compatibilityResult.remappedClasses()
+                            + " class file(s) from Intermediary to the 26.2 named namespace.", false);
                     log(logPath, "ClassTweaker compatibility: remapped "
                             + compatibilityResult.rewrittenClassTweakerFiles()
                             + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",

@@ -30,12 +30,8 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Applies narrow, version-specific bytecode owner fixes to staged mod copies.
- *
- * <p>Minecraft 26.2 moved vanilla entity registry constants from EntityType to EntityTypes.
- * Legacy 1.21.11 bytecode can therefore link to EntityType.PLAYER even though the equivalent
- * field now lives on EntityTypes. This rewrites only static field references whose descriptor
- * is EntityType, recursively including nested mod JARs. Source mod JARs are never modified.</p>
+ * Converts legacy 1.21.11 Intermediary bytecode/resources in staged mod copies and then
+ * applies narrow version-specific compatibility fixes. Original mod JARs are never modified.
  */
 final class LegacyModCompatibilityTransformer {
     private final LegacyClassTweakerMappings suppliedClassTweakerMappings;
@@ -77,9 +73,6 @@ final class LegacyModCompatibilityTransformer {
                             + "automatic compatibility rewrites were skipped."));
         }
 
-        LegacyClassTweakerRemapper classTweakerRemapper =
-                new LegacyClassTweakerRemapper(game, suppliedClassTweakerMappings);
-
         List<Path> jarPaths;
         try (var files = Files.walk(source)) {
             jarPaths = files.filter(path -> !path.startsWith(staging))
@@ -89,13 +82,36 @@ final class LegacyModCompatibilityTransformer {
                     .toList();
         }
         if (jarPaths.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, List.of());
+            return new Result(false, source, 0, 0, 0, 0, List.of());
         }
+
+        // Load the full 1.21.11 namespace bridge when any top-level or nested mod
+        // explicitly identifies itself as a 1.21.11 build. This keeps unrelated mods
+        // outside the generic bytecode remapping pass.
+        boolean hasLegacyMod = false;
+        for (Path jarPath : jarPaths) {
+            if (containsLegacyModMetadata(Files.readAllBytes(jarPath), 0)) {
+                hasLegacyMod = true;
+                break;
+            }
+        }
+
+        LegacyClassTweakerMappings activeMappings = suppliedClassTweakerMappings;
+        if (hasLegacyMod && activeMappings == null) {
+            LegacyMappingRepository.MappingFiles files = LegacyMappingRepository.ensure(game);
+            activeMappings = LegacyClassTweakerMappings.load(
+                    files.intermediaryJar(), files.mojangMappings());
+        }
+        LegacyClassTweakerRemapper classTweakerRemapper =
+                new LegacyClassTweakerRemapper(game, activeMappings);
+        LegacyBytecodeRemapper bytecodeRemapper = activeMappings == null
+                ? null : new LegacyBytecodeRemapper(activeMappings);
 
         Map<Path, byte[]> changedArchives = new LinkedHashMap<>();
         List<String> warnings = new ArrayList<>();
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
+        int remappedClasses = 0;
         for (Path jarPath : jarPaths) {
             byte[] originalBytes;
             try {
@@ -105,17 +121,21 @@ final class LegacyModCompatibilityTransformer {
                 continue;
             }
 
-            ArchiveTransform transformed = transformArchive(originalBytes, 0, classTweakerRemapper);
+            boolean remapIntermediaryBytecode = declaresLegacyMinecraft(originalBytes);
+            ArchiveTransform transformed = transformArchive(originalBytes, 0,
+                    classTweakerRemapper, bytecodeRemapper, remapIntermediaryBytecode);
             warnings.addAll(transformed.warnings());
-            if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0) {
+            if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0
+                    || transformed.remappedClasses() > 0) {
                 changedArchives.put(source.relativize(jarPath), transformed.bytes());
                 rewrittenReferences += transformed.rewrittenReferences();
                 rewrittenClassTweakerFiles += transformed.rewrittenClassTweakerFiles();
+                remappedClasses += transformed.remappedClasses();
             }
         }
 
         if (changedArchives.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, List.copyOf(warnings));
+            return new Result(false, source, 0, 0, 0, 0, List.copyOf(warnings));
         }
 
         if (Files.isSymbolicLink(internalRoot)) {
@@ -201,7 +221,7 @@ final class LegacyModCompatibilityTransformer {
         }
 
         return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
-                changedArchives.size(), List.copyOf(warnings));
+                remappedClasses, changedArchives.size(), List.copyOf(warnings));
     }
 
     private static void auditArchiveForIntermediaryClassTweakers(byte[] archive, int depth,
@@ -268,10 +288,11 @@ final class LegacyModCompatibilityTransformer {
     }
 
     private static ArchiveTransform transformArchive(byte[] originalBytes, int depth,
-                                                        LegacyClassTweakerRemapper classTweakerRemapper)
-            throws IOException {
+            LegacyClassTweakerRemapper classTweakerRemapper,
+            LegacyBytecodeRemapper bytecodeRemapper,
+            boolean remapIntermediaryBytecode) throws IOException {
         if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
-            return new ArchiveTransform(originalBytes, 0, 0,
+            return new ArchiveTransform(originalBytes, 0, 0, 0,
                     List.of("Nested JAR depth limit reached; deeper archive was left unchanged."));
         }
 
@@ -280,6 +301,7 @@ final class LegacyModCompatibilityTransformer {
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
+        int remappedClasses = 0;
         List<String> warnings = new ArrayList<>();
 
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(originalBytes));
@@ -296,6 +318,21 @@ final class LegacyModCompatibilityTransformer {
                 if (!entry.isDirectory()) {
                     String lowerName = entryName.toLowerCase(Locale.ROOT);
                     if (lowerName.endsWith(".class")) {
+                        if (remapIntermediaryBytecode) {
+                            if (bytecodeRemapper == null) {
+                                throw new IOException("A legacy mod was marked for Intermediary bytecode remapping, "
+                                        + "but the 1.21.11 mappings were not initialized.");
+                            }
+                            LegacyBytecodeRemapper.Result namespaceResult = bytecodeRemapper.remap(data);
+                            if (namespaceResult.changed()) {
+                                data = namespaceResult.bytes();
+                                archiveChanged = true;
+                                remappedClasses++;
+                            }
+                        }
+
+                        // Apply narrow 26.2 API moves after namespace conversion, so the
+                        // compatibility rule sees stable Mojang names, not class_ IDs.
                         ClassTransform classTransform = transformClass(data);
                         if (classTransform.rewrittenReferences() > 0) {
                             data = classTransform.bytes();
@@ -303,13 +340,18 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenReferences += classTransform.rewrittenReferences();
                         }
                     } else if (lowerName.endsWith(".jar")) {
-                        ArchiveTransform nested = transformArchive(data, depth + 1, classTweakerRemapper);
+                        boolean nestedLegacy = remapIntermediaryBytecode
+                                || declaresLegacyMinecraft(data);
+                        ArchiveTransform nested = transformArchive(data, depth + 1,
+                                classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
-                        if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0) {
+                        if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0
+                                || nested.remappedClasses() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
                             rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
+                            remappedClasses += nested.remappedClasses();
                         }
                     } else if (isClassTweakerResource(entryName, data, declaredClassTweakerResource)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
@@ -336,10 +378,58 @@ final class LegacyModCompatibilityTransformer {
         }
 
         if (!archiveChanged) {
-            return new ArchiveTransform(originalBytes, 0, 0, List.copyOf(warnings));
+            return new ArchiveTransform(originalBytes, 0, 0, 0, List.copyOf(warnings));
         }
         return new ArchiveTransform(output.toByteArray(), rewrittenReferences,
-                rewrittenClassTweakerFiles, List.copyOf(warnings));
+                rewrittenClassTweakerFiles, remappedClasses, List.copyOf(warnings));
+    }
+
+    private static boolean declaresLegacyMinecraft(byte[] archive) throws IOException {
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
+                    return metadataDeclaresLegacyMinecraft(input.readAllBytes());
+                }
+                input.closeEntry();
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsLegacyModMetadata(byte[] archive, int depth) throws IOException {
+        if (depth > MAX_NESTED_ARCHIVE_DEPTH) return false;
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    input.closeEntry();
+                    continue;
+                }
+                byte[] contents = input.readAllBytes();
+                String name = entry.getName();
+                if ("fabric.mod.json".equals(name) && metadataDeclaresLegacyMinecraft(contents)) {
+                    return true;
+                }
+                if (name.toLowerCase(Locale.ROOT).endsWith(".jar")
+                        && containsLegacyModMetadata(contents, depth + 1)) {
+                    return true;
+                }
+                input.closeEntry();
+            }
+        }
+        return false;
+    }
+
+    private static boolean metadataDeclaresLegacyMinecraft(byte[] metadataBytes) {
+        try {
+            JsonElement parsed = JsonParser.parseString(
+                    new String(metadataBytes, StandardCharsets.UTF_8));
+            return parsed.isJsonObject()
+                    && LegacyMinecraftVersionDetector.matches(parsed.getAsJsonObject());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     /**
@@ -553,12 +643,14 @@ final class LegacyModCompatibilityTransformer {
     }
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
-                  int rewrittenClassTweakerFiles, int modifiedJars, List<String> warnings) {}
+                  int rewrittenClassTweakerFiles, int remappedClasses,
+                  int modifiedJars, List<String> warnings) {}
 
     private record FieldReference(String owner, String name) {}
 
     private record ArchiveTransform(byte[] bytes, int rewrittenReferences,
-                                    int rewrittenClassTweakerFiles, List<String> warnings) {}
+                                    int rewrittenClassTweakerFiles, int remappedClasses,
+                                    List<String> warnings) {}
 
     private record ClassTransform(byte[] bytes, int rewrittenReferences) {}
 }

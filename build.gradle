@@ -18,6 +18,8 @@ application {
 
 dependencies {
     implementation 'org.ow2.asm:asm:9.9.1'
+    // Fabric Loader supplies ASM Commons on the Minecraft launch classpath.
+    compileOnly 'org.ow2.asm:asm-commons:9.9.1'
     implementation 'com.google.code.gson:gson:2.13.2'
     implementation 'net.fabricmc:mapping-io:0.9.1'
     implementation 'net.fabricmc:tiny-remapper:0.15.0'
@@ -25,6 +27,7 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.13.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'org.ow2.asm:asm-commons:9.9.1'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -65,6 +68,7 @@ def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
         include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class'
         include 'dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class'
         include 'dev/gafipro/gafiloader/LegacyModCompatibilityTransformer*.class'
+        include 'dev/gafipro/gafiloader/LegacyBytecodeRemapper*.class'
         include 'dev/gafipro/gafiloader/LegacyMappingRepository*.class'
         include 'dev/gafipro/gafiloader/LegacyClassTweakerMappings*.class'
         include 'dev/gafipro/gafiloader/LegacyClassTweakerRemapper*.class'
