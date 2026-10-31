@@ -243,23 +243,44 @@ final class LegacyModCompatibilityTransformer {
 
     private static Map<String, List<String>> collectMixinTargets(byte[] archive) throws IOException {
         Map<String, List<String>> targets = new LinkedHashMap<>();
+        collectMixinTargets(archive, 0, targets);
+        return Map.copyOf(targets);
+    }
+
+    private static void collectMixinTargets(byte[] archive, int depth,
+                                            Map<String, List<String>> targets) throws IOException {
+        if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
+            throw new IOException("Nested Mixin target discovery exceeds the safety depth limit.");
+        }
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
-                if (entry.isDirectory() || !entry.getName().toLowerCase(Locale.ROOT).endsWith(".class")) {
+                if (entry.isDirectory()) {
                     input.closeEntry();
                     continue;
                 }
-                byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES, entry.getName());
-                List<String> classTargets = LegacyBytecodeRemapper.mixinTargets(classBytes);
-                if (!classTargets.isEmpty()) {
-                    String className = entry.getName().substring(0, entry.getName().length() - ".class".length());
-                    targets.put(className, classTargets);
+                String entryName = entry.getName();
+                String lowerName = entryName.toLowerCase(Locale.ROOT);
+                if (lowerName.endsWith(".class")) {
+                    byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES, entryName);
+                    List<String> classTargets = LegacyBytecodeRemapper.mixinTargets(classBytes);
+                    if (!classTargets.isEmpty()) {
+                        String className = entryName.substring(0,
+                                entryName.length() - ".class".length());
+                        List<String> previous = targets.putIfAbsent(className, classTargets);
+                        if (previous != null && !previous.equals(classTargets)) {
+                            throw new IOException("Conflicting @Mixin targets were found for "
+                                    + className + " across nested mod modules.");
+                        }
+                    }
+                } else if (lowerName.endsWith(".jar")) {
+                    byte[] nested = readBounded(input, MAX_NESTED_ARCHIVE_BYTES,
+                            entryName);
+                    collectMixinTargets(nested, depth + 1, targets);
                 }
                 input.closeEntry();
             }
         }
-        return Map.copyOf(targets);
     }
 
     private static void auditArchiveForIntermediaryClassTweakers(byte[] archive, int depth,
