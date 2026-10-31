@@ -129,6 +129,27 @@ final class MojangMappings {
         return obfuscatedToNamedClasses.getOrDefault(obfuscatedInternalName, obfuscatedInternalName);
     }
 
+    /**
+     * Resolves a class name coming from the official namespace in a Tiny mapping row.
+     * Identity mappings are valid for already-named package paths, but an unmapped
+     * ProGuard-style short class name is almost certainly an obfuscated Minecraft class.
+     * Do not let that name leak into the 26.2 named namespace.
+     */
+    String toNamedClassRequired(String officialInternalName) throws IOException {
+        String mapped = obfuscatedToNamedClasses.get(officialInternalName);
+        if (mapped != null) return mapped;
+        if (looksLikeObfuscatedClassName(officialInternalName)) {
+            throw new IOException("No Mojang 1.21.11 client mapping exists for obfuscated class "
+                    + officialInternalName + ".");
+        }
+        return officialInternalName;
+    }
+
+    private static boolean looksLikeObfuscatedClassName(String internalName) {
+        return internalName != null
+                && internalName.matches("(?:[A-Za-z]{1,2}/)*[A-Za-z]{1,2}(?:\\\\$[A-Za-z0-9_$]+)*");
+    }
+
     String toNamedDescriptor(String obfuscatedDescriptor) {
         return mapDescriptor(obfuscatedDescriptor, obfuscatedToNamedClasses);
     }
