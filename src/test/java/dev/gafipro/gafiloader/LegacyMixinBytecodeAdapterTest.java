@@ -51,9 +51,10 @@ class LegacyMixinBytecodeAdapterTest {
         Path mojangMappings = temporaryDirectory.resolve("client-mappings-missing-class-fixture.txt");
         Files.writeString(mojangMappings, "net.minecraft.core.Registry -> b:\n", StandardCharsets.UTF_8);
 
-        assertThrows(IOException.class, () ->
-                LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings),
-                "An unresolved obfuscated class name must not leak into the 26.2 named namespace.");
+        LegacyClassTweakerMappings mappings =
+                LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+        assertThrows(IOException.class, () -> mappings.mapClass(TARGET_OWNER),
+                "An unresolved obfuscated class must fail when a mod actually references it.");
     }
 
     @Test
