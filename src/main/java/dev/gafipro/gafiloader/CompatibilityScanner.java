@@ -37,6 +37,8 @@ import java.util.jar.JarFile;
 public final class CompatibilityScanner {
     private static final String MINECRAFT_PACKAGE = "net/minecraft/";
     private static final String FABRIC_API_PACKAGE = "net/fabricmc/fabric/api/";
+    private static final long MAX_TOP_LEVEL_ARCHIVE_BYTES = 512L * 1024 * 1024;
+    private static final long MAX_NESTED_ARCHIVE_BYTES = 128L * 1024 * 1024;
 
     public Report scan(Path gameJar, Collection<Path> modJars) throws IOException {
         return scan(gameJar, modJars, null, null, null);
@@ -248,6 +250,12 @@ public final class CompatibilityScanner {
         if (apiJar == null || !Files.isRegularFile(apiJar)) {
             throw new IllegalArgumentException("Target Fabric API JAR does not exist: " + apiJar);
         }
+        long archiveSize = Files.size(apiJar);
+        long archiveLimit = depth == 0 ? MAX_TOP_LEVEL_ARCHIVE_BYTES : MAX_NESTED_ARCHIVE_BYTES;
+        if (archiveSize > archiveLimit) {
+            throw new IOException("Target API archive exceeds the " + archiveLimit
+                    + "-byte safety limit: " + apiJar);
+        }
         try (JarFile jar = new JarFile(apiJar.toFile())) {
             var entries = jar.entries();
             while (entries.hasMoreElements()) {
@@ -268,7 +276,8 @@ public final class CompatibilityScanner {
                     Path nested = Files.createTempFile("gafiloader-target-api-", ".jar");
                     try {
                         try (InputStream input = jar.getInputStream(entry)) {
-                            Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            copyBounded(input, nested, MAX_NESTED_ARCHIVE_BYTES,
+                                    apiJar + "!/" + name);
                         }
                         indexTargetApiJar(nested, classes, depth + 1);
                     } finally {
@@ -327,6 +336,11 @@ public final class CompatibilityScanner {
     }
 
     private ModScan scanMod(Path modJar) throws IOException {
+        long archiveSize = Files.size(modJar);
+        if (archiveSize > MAX_TOP_LEVEL_ARCHIVE_BYTES) {
+            throw new IOException("Mod archive exceeds the " + MAX_TOP_LEVEL_ARCHIVE_BYTES
+                    + "-byte safety limit: " + modJar);
+        }
         Set<Reference> references = new LinkedHashSet<>();
         int[] classCount = {0};
         scanModArchive(modJar, modJar.toString(), references, classCount, 0);
@@ -341,6 +355,12 @@ public final class CompatibilityScanner {
                                 int[] classCount, int depth) throws IOException {
         if (depth >= 8) {
             throw new IOException("Nested mod JAR depth exceeded the safety limit: " + displaySource);
+        }
+        long archiveSize = Files.size(archive);
+        long archiveLimit = depth == 0 ? MAX_TOP_LEVEL_ARCHIVE_BYTES : MAX_NESTED_ARCHIVE_BYTES;
+        if (archiveSize > archiveLimit) {
+            throw new IOException("Mod archive exceeds the " + archiveLimit
+                    + "-byte safety limit: " + displaySource);
         }
         try (JarFile jar = new JarFile(archive.toFile())) {
             var entries = jar.entries();
@@ -369,7 +389,8 @@ public final class CompatibilityScanner {
                 Path nested = Files.createTempFile("gafiloader-legacy-mod-", ".jar");
                 try {
                     try (InputStream input = jar.getInputStream(entry)) {
-                        Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        copyBounded(input, nested, MAX_NESTED_ARCHIVE_BYTES,
+                                displaySource + "!/" + name);
                     }
                     scanModArchive(nested, displaySource + "!/" + name, references, classCount, depth + 1);
                 } finally {
@@ -378,6 +399,26 @@ public final class CompatibilityScanner {
             }
         } catch (java.util.zip.ZipException exception) {
             throw new IOException("Mod archive is not a readable JAR: " + displaySource, exception);
+        }
+    }
+
+    private static void copyBounded(InputStream input, Path destination,
+                                     long maximumBytes, String source) throws IOException {
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        try (var output = Files.newOutputStream(destination)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maximumBytes) {
+                    throw new IOException("Nested archive entry exceeds the " + maximumBytes
+                            + "-byte safety limit: " + source);
+                }
+                output.write(buffer, 0, read);
+            }
+        } catch (IOException exception) {
+            Files.deleteIfExists(destination);
+            throw exception;
         }
     }
 
