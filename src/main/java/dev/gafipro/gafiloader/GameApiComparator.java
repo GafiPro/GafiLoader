@@ -117,7 +117,7 @@ public final class GameApiComparator {
                                     : mappings == null ? superName : mappings.toNamedClass(superName);
                             this.interfaces = interfaces == null ? List.of()
                                     : java.util.Arrays.stream(interfaces)
-                                            .map(name -> mappings == null ? name : mappings.toNamedClass(name))
+                                            .map(interfaceName -> mappings == null ? interfaceName : mappings.toNamedClass(interfaceName))
                                             .toList();
                         }
 
