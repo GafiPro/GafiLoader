@@ -16,6 +16,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.List;
@@ -423,18 +424,36 @@ final class LegacyMixinBytecodeAdapter {
         if (ACCESSOR_ANNOTATION.equals(descriptor) || INVOKER_ANNOTATION.equals(descriptor)) {
             return wrapAccessorAnnotation(delegate, descriptor, metadata, mappings);
         }
+        if (MIXIN_ANNOTATION.equals(descriptor) || AT_ANNOTATION.equals(descriptor)
+                || isInjectionAnnotation(descriptor)) {
+            return wrapSelectorAnnotation(delegate, descriptor, metadata, mappings);
+        }
         return new AnnotationVisitor(Opcodes.ASM9, delegate) {
             @Override
+            public AnnotationVisitor visitAnnotation(String name, String nestedDescriptor) {
+                return wrapAnnotation(super.visitAnnotation(name, nestedDescriptor),
+                        nestedDescriptor, metadata, mappings);
+            }
+        };
+    }
+
+    private static AnnotationVisitor wrapSelectorAnnotation(AnnotationVisitor delegate, String descriptor,
+            MixinMetadata metadata, LegacyClassTweakerMappings mappings) {
+        return new AnnotationVisitor(Opcodes.ASM9, delegate) {
+            private final Map<String, Object> selectorValues = new LinkedHashMap<>();
+            private final Map<String, List<Object>> selectorArrays = new LinkedHashMap<>();
+            private boolean remap = true;
+
+            @Override
             public void visit(String name, Object value) {
-                Object mapped = value;
-                if (value instanceof String text) {
-                    try {
-                        mapped = mapAnnotationString(descriptor, name, text, metadata, mappings);
-                    } catch (IOException exception) {
-                        throw new UncheckedIOException(exception);
-                    }
+                if ("remap".equals(name) && value instanceof Boolean enabled) {
+                    remap = enabled;
+                    super.visit(name, value);
+                } else if (isSelectorProperty(descriptor, name)) {
+                    selectorValues.put(name, value);
+                } else {
+                    super.visit(name, value);
                 }
-                super.visit(name, mapped);
             }
 
             @Override
@@ -445,30 +464,54 @@ final class LegacyMixinBytecodeAdapter {
 
             @Override
             public AnnotationVisitor visitArray(String name) {
-                AnnotationVisitor nested = super.visitArray(name);
-                if (nested == null) return null;
-                return new AnnotationVisitor(Opcodes.ASM9, nested) {
+                if (!isSelectorProperty(descriptor, name)) {
+                    return super.visitArray(name);
+                }
+                List<Object> values = new ArrayList<>();
+                selectorArrays.put(name, values);
+                return new AnnotationVisitor(Opcodes.ASM9) {
                     @Override
                     public void visit(String ignored, Object value) {
-                        Object mapped = value;
-                        if (value instanceof String text) {
-                            try {
-                                mapped = mapAnnotationString(descriptor, name, text, metadata, mappings);
-                            } catch (IOException exception) {
-                                throw new UncheckedIOException(exception);
-                            }
-                        }
-                        super.visit(ignored, mapped);
-                    }
-
-                    @Override
-                    public AnnotationVisitor visitAnnotation(String ignored, String nestedDescriptor) {
-                        return wrapAnnotation(super.visitAnnotation(ignored, nestedDescriptor),
-                                nestedDescriptor, metadata, mappings);
+                        values.add(value);
                     }
                 };
             }
+
+            @Override
+            public void visitEnd() {
+                try {
+                    for (Map.Entry<String, Object> entry : selectorValues.entrySet()) {
+                        Object value = entry.getValue();
+                        if (remap && value instanceof String text) {
+                            value = mapAnnotationString(descriptor, entry.getKey(), text,
+                                    metadata, mappings);
+                        }
+                        super.visit(entry.getKey(), value);
+                    }
+                    for (Map.Entry<String, List<Object>> entry : selectorArrays.entrySet()) {
+                        AnnotationVisitor array = super.visitArray(entry.getKey());
+                        for (Object item : entry.getValue()) {
+                            Object value = item;
+                            if (remap && item instanceof String text) {
+                                value = mapAnnotationString(descriptor, entry.getKey(), text,
+                                        metadata, mappings);
+                            }
+                            array.visit(null, value);
+                        }
+                        array.visitEnd();
+                    }
+                } catch (IOException exception) {
+                    throw new UncheckedIOException(exception);
+                }
+                super.visitEnd();
+            }
         };
+    }
+
+    private static boolean isSelectorProperty(String descriptor, String name) {
+        return (MIXIN_ANNOTATION.equals(descriptor) && "targets".equals(name))
+                || (AT_ANNOTATION.equals(descriptor) && "target".equals(name))
+                || (isInjectionAnnotation(descriptor) && "method".equals(name));
     }
 
     private static AnnotationVisitor wrapAccessorAnnotation(AnnotationVisitor delegate,
