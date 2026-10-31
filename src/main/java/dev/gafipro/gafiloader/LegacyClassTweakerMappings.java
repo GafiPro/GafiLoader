@@ -29,14 +29,17 @@ final class LegacyClassTweakerMappings {
     private final Map<MemberKey, MappedMember> members;
     private final Map<MemberSignature, Set<MemberName>> membersBySignature;
     private final Map<String, String> unresolvedClassMappings;
+    private final Map<MemberKey, String> unresolvedMemberMappings;
 
     private LegacyClassTweakerMappings(Map<String, String> classes,
                                        Map<MemberKey, MappedMember> members,
                                        Map<MemberSignature, Set<MemberName>> membersBySignature,
-                                       Map<String, String> unresolvedClassMappings) {
+                                       Map<String, String> unresolvedClassMappings,
+                                       Map<MemberKey, String> unresolvedMemberMappings) {
         this.classes = Map.copyOf(classes);
         this.members = Map.copyOf(members);
         this.unresolvedClassMappings = Map.copyOf(unresolvedClassMappings);
+        this.unresolvedMemberMappings = Map.copyOf(unresolvedMemberMappings);
         Map<MemberSignature, Set<MemberName>> immutableSignatures = new HashMap<>();
         membersBySignature.forEach((signature, names) ->
                 immutableSignatures.put(signature, Set.copyOf(names)));
@@ -69,6 +72,7 @@ final class LegacyClassTweakerMappings {
         Map<String, String> classes = new HashMap<>();
         Map<String, String> unresolvedClassMappings = new HashMap<>();
         Map<MemberKey, MappedMember> members = new HashMap<>();
+        Map<MemberKey, String> unresolvedMemberMappings = new HashMap<>();
         Map<MemberSignature, Set<MemberName>> membersBySignature = new HashMap<>();
         for (MappingTree.ClassMapping classMapping : tree.getClasses()) {
             String officialOwner = classMapping.getName(officialId);
@@ -95,16 +99,23 @@ final class LegacyClassTweakerMappings {
                 if (oldName == null || oldIntermediaryName == null
                         || oldDescriptor == null || intermediaryDescriptor == null) continue;
 
+                MemberKey key = new MemberKey(intermediaryOwner, MemberKind.FIELD,
+                        oldIntermediaryName, intermediaryDescriptor);
                 String namedDescriptor = mojang.toNamedDescriptor(oldDescriptor);
-                String namedName = mojang.toNamedMember(officialOwner,
-                        MojangMappings.SymbolKind.FIELD, oldName, namedDescriptor);
-                putConsistent(members,
-                        new MemberKey(intermediaryOwner, MemberKind.FIELD,
-                                oldIntermediaryName, intermediaryDescriptor),
+                String namedName;
+                try {
+                    namedDescriptor = mojang.toNamedDescriptorRequired(oldDescriptor);
+                    namedName = mojang.toNamedMemberRequired(officialOwner,
+                            MojangMappings.SymbolKind.FIELD, oldName, namedDescriptor);
+                    addSignatureMapping(membersBySignature, MemberKind.FIELD,
+                            oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
+                } catch (IOException exception) {
+                    unresolvedMemberMappings.put(key, exception.getMessage());
+                    namedName = oldName;
+                }
+                putConsistent(members, key,
                         new MappedMember(namedOwner, namedName, namedDescriptor),
                         "field " + intermediaryOwner + "#" + oldIntermediaryName);
-                addSignatureMapping(membersBySignature, MemberKind.FIELD,
-                        oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
             }
 
             for (MappingTree.MethodMapping method : classMapping.getMethods()) {
@@ -115,20 +126,27 @@ final class LegacyClassTweakerMappings {
                 if (oldName == null || oldIntermediaryName == null
                         || oldDescriptor == null || intermediaryDescriptor == null) continue;
 
+                MemberKey key = new MemberKey(intermediaryOwner, MemberKind.METHOD,
+                        oldIntermediaryName, intermediaryDescriptor);
                 String namedDescriptor = mojang.toNamedDescriptor(oldDescriptor);
-                String namedName = mojang.toNamedMember(officialOwner,
-                        MojangMappings.SymbolKind.METHOD, oldName, namedDescriptor);
-                putConsistent(members,
-                        new MemberKey(intermediaryOwner, MemberKind.METHOD,
-                                oldIntermediaryName, intermediaryDescriptor),
+                String namedName;
+                try {
+                    namedDescriptor = mojang.toNamedDescriptorRequired(oldDescriptor);
+                    namedName = mojang.toNamedMemberRequired(officialOwner,
+                            MojangMappings.SymbolKind.METHOD, oldName, namedDescriptor);
+                    addSignatureMapping(membersBySignature, MemberKind.METHOD,
+                            oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
+                } catch (IOException exception) {
+                    unresolvedMemberMappings.put(key, exception.getMessage());
+                    namedName = oldName;
+                }
+                putConsistent(members, key,
                         new MappedMember(namedOwner, namedName, namedDescriptor),
                         "method " + intermediaryOwner + "#" + oldIntermediaryName);
-                addSignatureMapping(membersBySignature, MemberKind.METHOD,
-                        oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
             }
         }
         return new LegacyClassTweakerMappings(classes, members, membersBySignature,
-                unresolvedClassMappings);
+                unresolvedClassMappings, unresolvedMemberMappings);
     }
 
     String mapClass(String internalName) throws IOException {
@@ -156,7 +174,14 @@ final class LegacyClassTweakerMappings {
     MappedMember mapMember(String owner, String name, String descriptor, boolean method)
             throws IOException {
         MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
-        MappedMember mapped = members.get(new MemberKey(owner, kind, name, descriptor));
+        MemberKey requested = new MemberKey(owner, kind, name, descriptor);
+        String unresolved = unresolvedMemberMappings.get(requested);
+        if (unresolved != null) {
+            throw new IOException("No complete Mojang 1.21.11 mapping exists for "
+                    + (method ? "method " : "field ") + owner + "#" + name + descriptor
+                    + ": " + unresolved);
+        }
+        MappedMember mapped = members.get(requested);
         if (mapped != null) {
             return mapped;
         }
@@ -234,7 +259,8 @@ final class LegacyClassTweakerMappings {
         MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
         Set<MemberName> candidates = new HashSet<>();
         members.forEach((key, value) -> {
-            if (key.owner().equals(targetOwner) && key.kind() == kind && key.name().equals(name)) {
+            if (key.owner().equals(targetOwner) && key.kind() == kind && key.name().equals(name)
+                    && !unresolvedMemberMappings.containsKey(key)) {
                 candidates.add(new MemberName(value.name(), value.descriptor()));
             }
         });
