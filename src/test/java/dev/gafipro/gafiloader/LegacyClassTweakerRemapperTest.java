@@ -96,8 +96,8 @@ class LegacyClassTweakerRemapperTest {
     void remapsMetadataDeclaredClassTweakerWithCustomNameAndWhitespaceBeforeBom() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         String classTweaker = " " + String.valueOf((char) 0xFEFF)
-                + "classTweaker v1 intermediary\\n"
-                + "accessible class net/minecraft/class_1299\\n";
+                + "classTweaker v1 intermediary" + System.lineSeparator()
+                + "accessible class net/minecraft/class_1299" + System.lineSeparator();
         byte[] moduleMetadata = """
                 {"schemaVersion":1,"id":"fabric-biome-api-v1",
                  "accessWidener":"compat/biome-tweaker.data"}
