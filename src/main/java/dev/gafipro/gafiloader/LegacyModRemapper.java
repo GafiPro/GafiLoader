@@ -31,6 +31,10 @@ import java.util.Map;
  * adapters and runtime validation.</p>
  */
 public final class LegacyModRemapper {
+    private static final long MAX_TOP_LEVEL_ARCHIVE_BYTES = 512L * 1024 * 1024;
+    private static final long MAX_NESTED_ARCHIVE_BYTES = 128L * 1024 * 1024;
+    private static final long MAX_METADATA_BYTES = 4L * 1024 * 1024;
+
     public Result remap(Path modsDirectory, Path intermediaryMappings, Path legacyMojangMappings,
                         Path aliasesFile, Path outputDirectory, Path targetGameJar) throws IOException {
         requireDirectory(modsDirectory, "Legacy mods directory");
@@ -70,6 +74,7 @@ public final class LegacyModRemapper {
         List<String> warnings = new ArrayList<>();
 
         for (Path input : inputs) {
+            requireArchiveSize(input, MAX_TOP_LEVEL_ARCHIVE_BYTES, "Top-level mod archive");
             Path relative = inputRoot.relativize(input);
             Path output = outputRoot.resolve(relative).normalize();
             if (!output.startsWith(outputRoot)) {
@@ -133,12 +138,15 @@ public final class LegacyModRemapper {
     }
 
     private static boolean declaresLegacyMinecraft(Path jarPath) throws IOException {
+        requireArchiveSize(jarPath, MAX_TOP_LEVEL_ARCHIVE_BYTES, "Mod archive");
         try (JarFile jar = new JarFile(jarPath.toFile())) {
             var entry = jar.getJarEntry("fabric.mod.json");
             if (entry == null) return false;
             try (InputStream input = jar.getInputStream(entry)) {
+                byte[] metadataBytes = readBounded(input, MAX_METADATA_BYTES,
+                        jarPath + "!/fabric.mod.json");
                 var metadata = com.google.gson.JsonParser.parseString(
-                        new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                        new String(metadataBytes, java.nio.charset.StandardCharsets.UTF_8));
                 return metadata.isJsonObject()
                         && LegacyMinecraftVersionDetector.matches(metadata.getAsJsonObject());
             }
@@ -153,6 +161,8 @@ public final class LegacyModRemapper {
                                         net.fabricmc.tinyremapper.IMappingProvider mappings,
                                         int depth) throws IOException {
         if (depth >= 8) throw new IOException("Nested mod JAR depth exceeded the safety limit: " + outerJar);
+        long outerLimit = depth == 0 ? MAX_TOP_LEVEL_ARCHIVE_BYTES : MAX_NESTED_ARCHIVE_BYTES;
+        requireArchiveSize(outerJar, outerLimit, "Nested remapper input archive");
         Map<String, byte[]> replacements = new LinkedHashMap<>();
         try (ZipFile zip = new ZipFile(outerJar.toFile())) {
             var entries = zip.entries();
@@ -163,17 +173,24 @@ public final class LegacyModRemapper {
                         || !(name.startsWith("META-INF/jars/") || name.startsWith("META-INF/JARS/"))) {
                     continue;
                 }
+                if (entry.getSize() > MAX_NESTED_ARCHIVE_BYTES) {
+                    throw new IOException("Nested mod archive exceeds the "
+                            + MAX_NESTED_ARCHIVE_BYTES + "-byte safety limit: " + name);
+                }
                 Path work = Files.createTempDirectory(temporaryRoot.getParent(), "gafiloader-nested-");
                 Path nestedInput = work.resolve("nested-input.jar");
                 Path nestedOutput = work.resolve("nested-output.jar");
                 try (InputStream input = zip.getInputStream(entry)) {
-                    Files.copy(input, nestedInput, StandardCopyOption.REPLACE_EXISTING);
+                    copyBounded(input, nestedInput, MAX_NESTED_ARCHIVE_BYTES,
+                            outerJar + "!/" + name);
                 }
                 try {
                     // This nested archive belongs to an outer mod already confirmed as 1.21.11.
                     // Remap it even if the module omits its own minecraft dependency metadata.
                     remapOne(nestedInput, nestedOutput, classpath, mappings);
                     remapNestedJars(nestedOutput, temporaryRoot, classpath, mappings, depth + 1);
+                    requireArchiveSize(nestedOutput, MAX_NESTED_ARCHIVE_BYTES,
+                            "Remapped nested archive");
                     replacements.put(name, Files.readAllBytes(nestedOutput));
                 } finally {
                     try (Stream<Path> files = Files.walk(work)) {
@@ -208,6 +225,52 @@ public final class LegacyModRemapper {
             }
         }
         Files.move(rewritten, outerJar, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void requireArchiveSize(Path path, long maximumBytes, String description)
+            throws IOException {
+        long size = Files.size(path);
+        if (size > maximumBytes) {
+            throw new IOException(description + " exceeds the " + maximumBytes
+                    + "-byte safety limit: " + path);
+        }
+    }
+
+    private static byte[] readBounded(InputStream input, long maximumBytes, String source)
+            throws IOException {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maximumBytes) {
+                throw new IOException("Archive entry exceeds the " + maximumBytes
+                        + "-byte safety limit: " + source);
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static void copyBounded(InputStream input, Path destination, long maximumBytes,
+                                    String source) throws IOException {
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        try (OutputStream output = Files.newOutputStream(destination)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maximumBytes) {
+                    throw new IOException("Archive entry exceeds the " + maximumBytes
+                            + "-byte safety limit: " + source);
+                }
+                output.write(buffer, 0, read);
+            }
+        } catch (IOException exception) {
+            Files.deleteIfExists(destination);
+            throw exception;
+        }
     }
 
     private static void requireDirectory(Path path, String description) {
