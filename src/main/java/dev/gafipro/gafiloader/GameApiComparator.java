@@ -104,6 +104,7 @@ public final class GameApiComparator {
                         private String originalName;
                         private String normalizedName;
                         private String superName;
+                        private List<String> interfaces = List.of();
                         private final Set<Member> methods = new LinkedHashSet<>();
                         private final Set<Member> fields = new LinkedHashSet<>();
 
@@ -114,6 +115,10 @@ public final class GameApiComparator {
                             normalizedName = mappings == null ? name : mappings.toNamedClass(name);
                             this.superName = superName == null ? null
                                     : mappings == null ? superName : mappings.toNamedClass(superName);
+                            this.interfaces = interfaces == null ? List.of()
+                                    : java.util.Arrays.stream(interfaces)
+                                            .map(name -> mappings == null ? name : mappings.toNamedClass(name))
+                                            .toList();
                         }
 
                         @Override
@@ -142,7 +147,7 @@ public final class GameApiComparator {
 
                         @Override
                         public void visitEnd() {
-                            ApiClass value = new ApiClass(normalizedName, superName,
+                            ApiClass value = new ApiClass(normalizedName, superName, interfaces,
                                     Set.copyOf(fields), Set.copyOf(methods));
                             ApiClass previous = classes.putIfAbsent(normalizedName, value);
                             if (previous != null && !previous.equals(value)) {
@@ -230,6 +235,9 @@ public final class GameApiComparator {
         Set<Member> members = new LinkedHashSet<>(
                 kind == MojangMappings.SymbolKind.METHOD ? classInfo.methods() : classInfo.fields());
         members.addAll(resolveMembers(classInfo.superName(), kind, classes, visited));
+        for (String interfaceName : classInfo.interfaces()) {
+            members.addAll(resolveMembers(interfaceName, kind, classes, visited));
+        }
         return members;
     }
 
@@ -245,7 +253,8 @@ public final class GameApiComparator {
         return value == null ? "" : value;
     }
 
-    private record ApiClass(String name, String superName, Set<Member> fields, Set<Member> methods) {}
+    private record ApiClass(String name, String superName, List<String> interfaces,
+                            Set<Member> fields, Set<Member> methods) {}
     private record Member(String name, String descriptor) {}
 
     private static final class DuplicateClassException extends RuntimeException {
