@@ -70,6 +70,7 @@ def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
         include 'dev/gafipro/gafiloader/LegacyModCompatibilityTransformer*.class'
         include 'dev/gafipro/gafiloader/LegacyFabricModelLoadingApiAdapter*.class'
         include 'dev/gafipro/gafiloader/LegacyBytecodeRemapper*.class'
+        include 'dev/gafipro/gafiloader/LegacyMixinBytecodeAdapter*.class'
         include 'dev/gafipro/gafiloader/LegacyMappingRepository*.class'
         include 'dev/gafipro/gafiloader/LegacyClassTweakerMappings*.class'
         include 'dev/gafipro/gafiloader/LegacyClassTweakerRemapper*.class'
