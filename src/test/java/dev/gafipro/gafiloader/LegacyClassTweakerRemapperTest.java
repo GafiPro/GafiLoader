@@ -72,7 +72,8 @@ class LegacyClassTweakerRemapperTest {
         LegacyModCompatibilityTransformer.Result result =
                 new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
 
-        assertTrue(result.transformed());
+        assertTrue(result.transformed(), "Staging should change the nested module because its metadata declares "
+                + "an Intermediary ClassTweaker resource.");
         assertEquals(1, result.rewrittenClassTweakerFiles());
         assertEquals(0, result.rewrittenReferences());
         assertEquals(1, result.modifiedJars());
@@ -115,6 +116,13 @@ class LegacyClassTweakerRemapperTest {
         Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
         Path original = modsDirectory.resolve("fabric-api.jar");
         Files.write(original, outerJar);
+
+        assertEquals("compat/biome-tweaker.data",
+                LegacyModCompatibilityTransformer.declaredClassTweakerResource(moduleJar));
+        LegacyClassTweakerRemapper directRemapper =
+                new LegacyClassTweakerRemapper(gameDirectory, mappings);
+        assertTrue(directRemapper.remap(classTweaker).remapped(),
+                "The whitespace/BOM-prefixed ClassTweaker header must be recognized.");
 
         LegacyModCompatibilityTransformer.Result result =
                 new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
