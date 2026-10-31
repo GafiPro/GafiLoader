@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
@@ -113,13 +114,62 @@ class LegacyModCompatibilityTransformerTest {
         byte[] stagedNested = readEntry(Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
                 "META-INF/jars/fabric-registry-api-v1.jar");
         byte[] stagedClass = readEntry(stagedNested, "net/example/LegacyApiEntrypoint.class");
-        String constantPoolText = new String(stagedClass, StandardCharsets.ISO_8859_1);
-        assertTrue(constantPoolText.contains("net/minecraft/core/Registry"), constantPoolText);
-        assertTrue(constantPoolText.contains("lookup"), constantPoolText);
-        assertTrue(constantPoolText.contains("entry"), constantPoolText);
-        assertFalse(constantPoolText.contains("net/minecraft/class_7924"), constantPoolText);
-        assertFalse(constantPoolText.contains("method_2345"), constantPoolText);
-        assertFalse(constantPoolText.contains("field_1234"), constantPoolText);
+        AtomicReference<String> registryFieldDescriptor = new AtomicReference<>();
+        AtomicReference<String> lookupMethodDescriptor = new AtomicReference<>();
+        AtomicReference<String> invocationOwner = new AtomicReference<>();
+        AtomicReference<String> invocationName = new AtomicReference<>();
+        AtomicReference<String> invocationDescriptor = new AtomicReference<>();
+        AtomicReference<String> staticFieldOwner = new AtomicReference<>();
+        AtomicReference<String> staticFieldName = new AtomicReference<>();
+        AtomicReference<String> staticFieldDescriptor = new AtomicReference<>();
+
+        new ClassReader(stagedClass).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor,
+                                           String signature, Object value) {
+                if ("registry".equals(name)) registryFieldDescriptor.set(descriptor);
+                return null;
+            }
+
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if ("lookup".equals(name)) lookupMethodDescriptor.set(descriptor);
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        if (invocationOwner.get() == null && owner.contains("Registry")) {
+                            invocationOwner.set(owner);
+                            invocationName.set(methodName);
+                            invocationDescriptor.set(methodDescriptor);
+                        }
+                    }
+
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName,
+                                               String fieldDescriptor) {
+                        if (staticFieldOwner.get() == null) {
+                            staticFieldOwner.set(owner);
+                            staticFieldName.set(fieldName);
+                            staticFieldDescriptor.set(fieldDescriptor);
+                        }
+                    }
+                };
+            }
+        }, 0);
+
+        String registryDescriptor = "Lnet/minecraft/core/Registry;";
+        String lookupDescriptor =
+                "(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
+        assertEquals(registryDescriptor, registryFieldDescriptor.get());
+        assertEquals(lookupDescriptor, lookupMethodDescriptor.get());
+        assertEquals("net/minecraft/core/Registry", invocationOwner.get());
+        assertEquals("lookup", invocationName.get());
+        assertEquals(lookupDescriptor, invocationDescriptor.get());
+        assertEquals("net/minecraft/core/Registry", staticFieldOwner.get());
+        assertEquals("entry", staticFieldName.get());
+        assertEquals(registryDescriptor, staticFieldDescriptor.get());
     }
 
     @Test
