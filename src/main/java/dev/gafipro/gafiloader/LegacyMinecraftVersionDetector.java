@@ -20,19 +20,28 @@ final class LegacyMinecraftVersionDetector {
 
     static boolean matches(JsonObject metadata) {
         if (metadata == null) return false;
-        if (containsLegacyVersion(metadata.get("version"))) return true;
 
         JsonElement depends = metadata.get("depends");
-        if (depends == null || !depends.isJsonObject()) return false;
-        JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
-        if (containsLegacyVersion(minecraft)) return true;
-        if (minecraft == null || !minecraft.isJsonArray()) return false;
-
-        JsonArray ranges = minecraft.getAsJsonArray();
-        for (JsonElement range : ranges) {
-            if (containsLegacyVersion(range)) return true;
+        if (depends != null && depends.isJsonObject()) {
+            JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
+            if (minecraft != null) {
+                if (containsLegacyVersion(minecraft)) return true;
+                if (minecraft.isJsonArray()) {
+                    JsonArray ranges = minecraft.getAsJsonArray();
+                    for (JsonElement range : ranges) {
+                        if (containsLegacyVersion(range)) return true;
+                    }
+                }
+                // An explicit Minecraft dependency is authoritative. Never override a
+                // modern (or otherwise non-1.21.11) range merely because the mod's own
+                // artifact version happens to contain the text "1.21.11".
+                return false;
+            }
         }
-        return false;
+
+        // Fabric API artifacts encode their target game version in values such as
+        // 0.141.6+1.21.11, so retain this fallback when no Minecraft dependency exists.
+        return containsLegacyVersion(metadata.get("version"));
     }
 
     private static boolean containsLegacyVersion(JsonElement value) {
