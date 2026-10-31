@@ -159,9 +159,10 @@ final class LegacyMixinBytecodeAdapter {
                 }
 
                 @Override
-                public void visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
-                                                String descriptor, boolean visible) {
-                    super.visitTypeAnnotation(typeRef, typePath, descriptor, visible);
+                public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
+                                                              String descriptor, boolean visible) {
+                    return wrapAnnotation(super.visitTypeAnnotation(typeRef, typePath, descriptor, visible),
+                            descriptor, metadata, mappings);
                 }
             };
 
@@ -377,14 +378,6 @@ final class LegacyMixinBytecodeAdapter {
         return String.join(",", mapped);
     }
 
-    private static String mapSelectorNameOnly(String value, List<String> targetOwners,
-                                              LegacyClassTweakerMappings mappings,
-                                              boolean method) throws IOException {
-        String owner = targetOwners.isEmpty() ? null : targetOwners.getFirst();
-        if (owner == null) return value;
-        return mappings.mapMixinSelectorName(owner, value, null, method);
-    }
-
     /**
      * Remaps Mixin member selectors such as
      * Lnet/minecraft/class_2378;method_60915(Lnet/minecraft/class_5321;)Ljava/lang/String;.
@@ -425,10 +418,10 @@ final class LegacyMixinBytecodeAdapter {
 
         String memberName = member.substring(0, method ? methodDescriptorStart : fieldDescriptorStart);
         String descriptor = member.substring(method ? methodDescriptorStart + 0 : fieldDescriptorStart + 1);
-        String owner = selectorOwner(explicitOwner, targetOwners);
-        if (owner == null) return original;
+        List<String> owners = selectorOwner(explicitOwner, targetOwners);
+        if (owners.isEmpty()) return original;
 
-        String mappedName = mappings.mapMixinSelectorName(owner, memberName, descriptor, method);
+        String mappedName = mapSelectorMemberName(memberName, descriptor, owners, mappings, method);
         String mappedDescriptor = mappings.mapDescriptor(descriptor);
         String mappedMember = mappedName + (method ? mappedDescriptor : ":" + mappedDescriptor);
         if (!hasExplicitOwner) return mappedMember;
@@ -440,6 +433,27 @@ final class LegacyMixinBytecodeAdapter {
     private static List<String> selectorOwner(String explicitOwner, List<String> targetOwners) {
         if (explicitOwner != null) return List.of(explicitOwner);
         return targetOwners;
+    }
+
+    private static String mapSelectorMemberName(String name, String descriptor, List<String> owners,
+                                                LegacyClassTweakerMappings mappings, boolean method)
+            throws IOException {
+        Set<String> names = new LinkedHashSet<>();
+        List<String> failures = new ArrayList<>();
+        for (String owner : owners) {
+            try {
+                names.add(mappings.mapMixinSelectorName(owner, name, descriptor, method));
+            } catch (IOException exception) {
+                failures.add(exception.getMessage());
+            }
+        }
+        if (names.size() == 1) return names.iterator().next();
+        if (names.size() > 1) {
+            throw new IOException("Conflicting target mappings for selector " + name + descriptor
+                    + " across " + owners + ": " + names);
+        }
+        throw new IOException("Could not resolve selector " + name + descriptor
+                + " against " + owners + ". " + String.join(" | ", failures));
     }
 
     private static String mapSelectorNameOnly(String name, List<String> owners,
