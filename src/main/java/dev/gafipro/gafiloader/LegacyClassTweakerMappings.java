@@ -126,11 +126,19 @@ final class LegacyClassTweakerMappings {
             throws IOException {
         MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
         MappedMember mapped = members.get(new MemberKey(owner, kind, name, descriptor));
-        if (mapped == null) {
-            throw new IOException("No 1.21.11 Intermediary mapping exists for ClassTweaker "
-                    + (method ? "method " : "field ") + owner + "#" + name + descriptor + ".");
+        if (mapped != null) {
+            return mapped;
         }
-        return mapped;
+
+        // JVM constructor and class-initializer names are fixed by the class-file format.
+        // Intermediary mapping files may omit them because their names never change. Their
+        // descriptors still contain Intermediary class names and must be remapped.
+        if (method && (name.equals("<init>") || name.equals("<clinit>"))) {
+            return new MappedMember(mapClass(owner), name, mapDescriptor(descriptor));
+        }
+
+        throw new IOException("No 1.21.11 Intermediary mapping exists for ClassTweaker "
+                + (method ? "method " : "field ") + owner + "#" + name + descriptor + ".");
     }
 
     String mapDescriptor(String descriptor) throws IOException {
