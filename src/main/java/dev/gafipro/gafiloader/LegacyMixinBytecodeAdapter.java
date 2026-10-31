@@ -490,6 +490,7 @@ final class LegacyMixinBytecodeAdapter {
                     }
                     for (Map.Entry<String, List<Object>> entry : selectorArrays.entrySet()) {
                         AnnotationVisitor array = super.visitArray(entry.getKey());
+                        if (array == null) continue;
                         for (Object item : entry.getValue()) {
                             Object value = item;
                             if (remap && item instanceof String text) {
