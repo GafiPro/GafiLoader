@@ -241,6 +241,53 @@ final class LegacyModCompatibilityTransformer {
                 changedArchives.size(), List.copyOf(warnings));
     }
 
+    private static Set<String> collectMixinRefmapResources(byte[] archive) throws IOException {
+        Set<String> resources = new java.util.LinkedHashSet<>();
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    input.closeEntry();
+                    continue;
+                }
+                String entryName = entry.getName();
+                if (!entryName.toLowerCase(Locale.ROOT).endsWith(".json")) {
+                    input.closeEntry();
+                    continue;
+                }
+                byte[] jsonBytes = readBounded(input, MAX_RESOURCE_ENTRY_BYTES, entryName);
+                if (entryName.toLowerCase(Locale.ROOT).endsWith(".refmap.json")) {
+                    resources.add(normalizeResourcePath(entryName));
+                }
+                try {
+                    JsonElement parsed = JsonParser.parseString(
+                            new String(jsonBytes, StandardCharsets.UTF_8));
+                    if (parsed.isJsonObject()) {
+                        JsonElement refmap = parsed.getAsJsonObject().get("refmap");
+                        if (refmap != null && refmap.isJsonPrimitive()
+                                && refmap.getAsJsonPrimitive().isString()) {
+                            String normalized = safeRefmapResource(refmap.getAsString());
+                            if (normalized != null) resources.add(normalized);
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                    // Other JSON resources need not be valid mixin configs; only declared refmap paths matter.
+                }
+                input.closeEntry();
+            }
+        }
+        return Set.copyOf(resources);
+    }
+
+    private static String safeRefmapResource(String resource) {
+        String normalized = normalizeResourcePath(resource);
+        if (normalized == null || normalized.startsWith("/") || normalized.contains(":")) return null;
+        for (String segment : normalized.split("/")) {
+            if ("..".equals(segment)) return null;
+        }
+        return normalized;
+    }
+
     private static Map<String, List<String>> collectMixinTargets(byte[] archive) throws IOException {
         Map<String, List<String>> targets = new LinkedHashMap<>();
         collectMixinTargets(archive, 0, targets);
@@ -361,6 +408,8 @@ final class LegacyModCompatibilityTransformer {
         }
 
         String declaredClassTweakerResource = declaredClassTweakerResource(originalBytes);
+        Set<String> refmapResources = remapIntermediaryBytecode
+                ? collectMixinRefmapResources(originalBytes) : Set.of();
         Map<String, List<String>> mixinTargets = remapIntermediaryBytecode && bytecodeRemapper != null
                 ? collectMixinTargets(originalBytes) : Map.of();
         boolean adaptLegacyModelLoadingApi = remapIntermediaryBytecode
@@ -466,7 +515,9 @@ final class LegacyModCompatibilityTransformer {
                             archiveChanged = true;
                             rewrittenClassTweakerFiles++;
                         }
-                    } else if (remapIntermediaryBytecode && lowerName.endsWith(".refmap.json")) {
+                    } else if (remapIntermediaryBytecode
+                            && (lowerName.endsWith(".refmap.json")
+                            || refmapResources.contains(normalizeResourcePath(entryName)))) {
                         if (bytecodeRemapper == null) {
                             throw new IOException("A legacy Mixin refmap was found but the 1.21.11 mappings "
                                     + "were not initialized.");
