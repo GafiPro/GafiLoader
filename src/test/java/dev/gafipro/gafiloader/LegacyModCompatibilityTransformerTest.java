@@ -187,7 +187,15 @@ class LegacyModCompatibilityTransformerTest {
                         {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11"}
                         """.getBytes(StandardCharsets.UTF_8),
                 mixinClass + ".class", classWithMixinTarget(mixinClass, targetOwner),
-                "fabric-registry.refmap.json", """
+                "mixins/registry.mixins.json", """
+                        {
+                          "required": true,
+                          "package": "net.fabricmc.fabric.mixin.registry",
+                          "refmap": "custom-registry-map.json",
+                          "mixins": ["LegacyRegistryMixin"]
+                        }
+                        """.getBytes(StandardCharsets.UTF_8),
+                "custom-registry-map.json", """
                         {
                           "mappings": {
                             "net.fabricmc.fabric.mixin.registry.LegacyRegistryMixin": {
@@ -209,7 +217,7 @@ class LegacyModCompatibilityTransformerTest {
                 "The source Fabric API JAR must remain byte-for-byte unchanged.");
 
         byte[] stagedRefmap = readEntry(Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
-                "fabric-registry.refmap.json");
+                "custom-registry-map.json");
         com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(
                 new String(stagedRefmap, StandardCharsets.UTF_8)).getAsJsonObject();
         String mappedKey = "lookup(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
