@@ -407,7 +407,7 @@ final class LegacyModCompatibilityTransformer {
         int start = 0;
         while (start < text.length()) {
             char character = text.charAt(start);
-            if (character == '\\uFEFF' || Character.isWhitespace(character)) {
+            if (character == (char) 0xFEFF || Character.isWhitespace(character)) {
                 start++;
             } else {
                 break;
