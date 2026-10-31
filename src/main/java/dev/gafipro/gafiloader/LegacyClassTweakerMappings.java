@@ -71,7 +71,7 @@ final class LegacyClassTweakerMappings {
             String intermediaryOwner = classMapping.getName(intermediaryId);
             if (officialOwner == null || intermediaryOwner == null) continue;
 
-            String namedOwner = mojang.toNamedClass(officialOwner);
+            String namedOwner = mojang.toNamedClassRequired(officialOwner);
             putConsistent(classes, intermediaryOwner, namedOwner,
                     "class " + intermediaryOwner);
 
