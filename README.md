@@ -61,12 +61,12 @@ This command is a separate experimental **TinyRemapper preparation tool** for pr
 The launch-time bootstrap also prepares staged copies under `.gafiloader/compat-mods` when a supported transformation is detected, including top-level and nested JARs. The automatic pass includes:
 
 - Intermediary-to-Mojang class and descriptor remapping for detected 1.21.11 mods.
-- Mixin class targets, selector strings, `@Shadow`/`@Overwrite` declarations, inferred `@Accessor`/`@Invoker` names, and supported `@At` targets.
+- Mixin class targets, selector strings, `@Shadow`/`@Overwrite` declarations, inferred `@Accessor`/`@Invoker` names, supported `@At` targets, and target-aware selector entries in `*.refmap.json` files.
 - Intermediary ClassTweaker/access-widener resource conversion into the runtime namespace.
 - A targeted rewrite of `EntityType.PLAYER` (`class_1299.field_6097`) to `EntityTypes.PLAYER`.
 - A module-scoped Fabric model-loading adapter that ports selected 1.21.11 `BlockModel` hooks to the 26.2 `CuboidModel` implementation.
 
-The original mod JARs remain byte-for-byte unchanged; modified archive copies have obsolete signature files removed. Compatibility preparation now rejects unresolvable legacy class mappings and archives that exceed the configured scan-depth or size limits, rather than silently launching with a partially transformed legacy archive. These adapters cover known cases only. Other removed members, changed descriptors or semantics, unhandled Mixin patterns, resource-based selectors, registries, and Fabric API behavior still require separate compatibility work and real-game testing. The broader TinyRemapper command above remains a separate experimental manual tool.
+The original mod JARs remain byte-for-byte unchanged; modified archive copies have obsolete signature files removed. Mixin refmap keys and values are rewritten in the context of the owning mixin's `@Mixin` targets, including context-specific maps. Compatibility preparation now rejects unresolvable legacy class mappings and archives that exceed the configured scan-depth or size limits, rather than silently launching with a partially transformed legacy archive. These adapters cover known cases only. Other removed members, changed descriptors or semantics, unhandled Mixin patterns, resource-based selectors, registries, and Fabric API behavior still require separate compatibility work and real-game testing. The broader TinyRemapper command above remains a separate experimental manual tool.
 
 ## Compatibility scanner
 
