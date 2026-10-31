@@ -185,6 +185,58 @@ class LegacyMixinBytecodeAdapterTest {
                 + TARGET_OWNER + ";", atTargetSelector.get());
     }
 
+    @Test
+    void preservesMemberNamesForMixinTargetsOutsideMinecraftIntermediary() throws Exception {
+        byte[] original = mixinWithExternalTargetSelector();
+        LegacyMixinBytecodeAdapter.Result result =
+                LegacyMixinBytecodeAdapter.remap(original, createMappings());
+
+        AtomicReference<String> selector = new AtomicReference<>();
+        new ClassReader(result.bytes()).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"onExternalLookup".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!MODIFY_RETURN_VALUE.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String property, Object value) {
+                                if ("method".equals(property)) selector.set((String) value);
+                            }
+                        };
+                    }
+                };
+            }
+        }, 0);
+
+        assertEquals("method_987()V", selector.get(),
+                "Minecraft Intermediary mappings must not rename members of another mod's target class.");
+    }
+
+    private static byte[] mixinWithExternalTargetSelector() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "net/fabricmc/fabric/mixin/other/ExternalTargetMixin", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
+        mixin.visit("value", Type.getObjectType("com/example/othermod/ExternalTarget"));
+        mixin.visitEnd();
+
+        MethodVisitor inject = writer.visitMethod(Opcodes.ACC_PRIVATE, "onExternalLookup", "()V", null, null);
+        AnnotationVisitor modify = inject.visitAnnotation(MODIFY_RETURN_VALUE, true);
+        modify.visit("method", "method_987()V");
+        modify.visitEnd();
+        inject.visitCode();
+        inject.visitInsn(Opcodes.RETURN);
+        inject.visitMaxs(0, 1);
+        inject.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] mixinWithNonRemappedInjectionSelectors() {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
