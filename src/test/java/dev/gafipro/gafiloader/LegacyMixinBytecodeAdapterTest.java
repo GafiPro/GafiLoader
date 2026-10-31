@@ -58,6 +58,29 @@ class LegacyMixinBytecodeAdapterTest {
     }
 
     @Test
+    void rejectsReferencedObfuscatedMembersMissingFromMojangMappings() throws Exception {
+        Path intermediaryJar = temporaryDirectory.resolve("intermediary-missing-member-fixture.jar");
+        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\tnet/minecraft/class_7924\n"
+                + "\tm\t(La;)La;\td\tmethod_9999\n"
+                + "\tm\t(La;)La;\tof\tmethod_10000\n")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
+
+        Path mojangMappings = temporaryDirectory.resolve("client-mappings-missing-member-fixture.txt");
+        Files.writeString(mojangMappings, "net.minecraft.core.Registry -> a:\n", StandardCharsets.UTF_8);
+
+        LegacyClassTweakerMappings mappings =
+                LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+        assertThrows(IOException.class, () -> mappings.mapMember(TARGET_OWNER, "method_9999",
+                        "(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";", true),
+                "A referenced short obfuscated method name must not leak into the 26.2 bytecode.");
+        assertEquals("of", mappings.mapMember(TARGET_OWNER, "method_10000",
+                        "(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";", true).name(),
+                "A legitimate short method name must be preserved when it is not obfuscated.");
+    }
+
+    @Test
     void remapsMixinRefmapKeysAndValuesForDefaultAndNamedContexts() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         String refmap = """
