@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -15,8 +16,8 @@ import java.util.regex.Pattern;
 final class LegacyMinecraftVersionDetector {
     private static final Pattern TARGET_LEGACY_VERSION =
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
-    private static final Pattern UNBOUNDED_LEGACY_LOWER_BOUND =
-            Pattern.compile("^\\s*(?:>=|>)\\s*1\\.21\\.11\\s*$");
+    private static final Pattern UNBOUNDED_LOWER_BOUND =
+            Pattern.compile("^\\s*(>=|>)\\s*([0-9]+(?:\\.[0-9]+)+)\\s*$");
     private static final Pattern LEGACY_ARTIFACT_SUFFIX =
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
     private static final Pattern TARGET_MINECRAFT_VERSION =
@@ -33,7 +34,7 @@ final class LegacyMinecraftVersionDetector {
             if (minecraft != null) {
                 // Fabric accepts any alternative in a dependency array / disjunction.
                 // If one alternative admits 26.2, removing the dependency is unnecessary.
-                if (containsTargetVersion(minecraft) || containsUnboundedLegacyLowerBound(minecraft)) {
+                if (containsTargetVersion(minecraft) || containsUnboundedLowerBoundAdmittingTarget(minecraft)) {
                     return false;
                 }
                 if (containsLegacyVersion(minecraft)) return true;
@@ -90,20 +91,38 @@ final class LegacyMinecraftVersionDetector {
         return TARGET_MINECRAFT_VERSION.matcher(value.getAsString()).find();
     }
 
-    private static boolean containsUnboundedLegacyLowerBound(JsonElement value) {
+    private static boolean containsUnboundedLowerBoundAdmittingTarget(JsonElement value) {
         if (value == null) return false;
         if (value.isJsonArray()) {
             for (JsonElement alternative : value.getAsJsonArray()) {
-                if (containsUnboundedLegacyLowerBound(alternative)) return true;
+                if (containsUnboundedLowerBoundAdmittingTarget(alternative)) return true;
             }
             return false;
         }
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
-        String[] alternatives = value.getAsString().split("\\|\\|");
+        String[] alternatives = value.getAsString().split("\\\\|\\\\|");
         for (String alternative : alternatives) {
-            if (UNBOUNDED_LEGACY_LOWER_BOUND.matcher(alternative.trim()).matches()) return true;
+            Matcher matcher = UNBOUNDED_LOWER_BOUND.matcher(alternative.trim());
+            if (!matcher.matches()) continue;
+            int comparison = compareNumericVersions(matcher.group(2), "26.2");
+            if (comparison < 0 || (comparison == 0 && ">=".equals(matcher.group(1)))) {
+                return true;
+            }
         }
         return false;
+    }
+
+    private static int compareNumericVersions(String left, String right) {
+        String[] leftParts = left.split("\\\\.");
+        String[] rightParts = right.split("\\\\.");
+        int length = Math.max(leftParts.length, rightParts.length);
+        for (int i = 0; i < length; i++) {
+            int leftPart = i < leftParts.length ? Integer.parseInt(leftParts[i]) : 0;
+            int rightPart = i < rightParts.length ? Integer.parseInt(rightParts[i]) : 0;
+            int comparison = Integer.compare(leftPart, rightPart);
+            if (comparison != 0) return comparison;
+        }
+        return 0;
     }
 
     private static boolean containsLegacyVersionToken(JsonElement value) {
