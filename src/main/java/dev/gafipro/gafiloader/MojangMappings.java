@@ -147,7 +147,7 @@ final class MojangMappings {
 
     private static boolean looksLikeObfuscatedClassName(String internalName) {
         return internalName != null
-                && internalName.matches("(?:[A-Za-z]{1,2}/)*[A-Za-z]{1,2}(?:\\\\$[A-Za-z0-9_$]+)*");
+                && internalName.matches("(?:[A-Za-z]{1,2}/)*[A-Za-z]{1,2}(?:\\$[A-Za-z0-9_$]+)*");
     }
 
     String toNamedDescriptor(String obfuscatedDescriptor) {
