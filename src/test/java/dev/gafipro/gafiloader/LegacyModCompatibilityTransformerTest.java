@@ -96,7 +96,8 @@ class LegacyModCompatibilityTransformerTest {
         byte[] nestedModule = jar(Map.of("net/example/LegacyApiEntrypoint.class", originalClass));
         byte[] originalApi = jar(Map.of(
                 "fabric.mod.json", """
-                        {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11"}
+                        {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
                         """.getBytes(StandardCharsets.UTF_8),
                 "META-INF/jars/fabric-registry-api-v1.jar", nestedModule));
         Path source = modsDirectory.resolve("fabric-api.jar");
