@@ -100,7 +100,7 @@ final class LegacyMinecraftVersionDetector {
             return false;
         }
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
-        String[] alternatives = value.getAsString().split("\\\\|\\\\|");
+        String[] alternatives = value.getAsString().split(Pattern.quote("||"));
         for (String alternative : alternatives) {
             Matcher matcher = UNBOUNDED_LOWER_BOUND.matcher(alternative.trim());
             if (!matcher.matches()) continue;
@@ -113,8 +113,8 @@ final class LegacyMinecraftVersionDetector {
     }
 
     private static int compareNumericVersions(String left, String right) {
-        String[] leftParts = left.split("\\\\.");
-        String[] rightParts = right.split("\\\\.");
+        String[] leftParts = left.split(Pattern.quote("."));
+        String[] rightParts = right.split(Pattern.quote("."));
         int length = Math.max(leftParts.length, rightParts.length);
         for (int i = 0; i < length; i++) {
             int leftPart = i < leftParts.length ? Integer.parseInt(leftParts[i]) : 0;
