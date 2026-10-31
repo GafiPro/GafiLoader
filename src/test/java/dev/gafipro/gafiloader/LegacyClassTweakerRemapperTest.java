@@ -91,6 +91,45 @@ class LegacyClassTweakerRemapperTest {
         assertFalse(stagedClassTweaker.contains("net/minecraft/class_1299"));
     }
 
+    @Test
+    void remapsMetadataDeclaredClassTweakerWithCustomNameAndWhitespaceBeforeBom() throws Exception {
+        LegacyClassTweakerMappings mappings = createMappings();
+        String classTweaker = " \\uFEFFclassTweaker v1 intermediary\\n"
+                + "accessible class net/minecraft/class_1299\\n";
+        byte[] moduleJar = jar(Map.of(
+                "fabric.mod.json", ("{\\\"schemaVersion\\\":1,\\\"id\\\":\\\"fabric-biome-api-v1\\\","
+                        + "\\\"accessWidener\\\":\\\"compat/biome-tweaker.data\\\"}")
+                        .getBytes(StandardCharsets.UTF_8),
+                "compat/biome-tweaker.data", classTweaker.getBytes(StandardCharsets.UTF_8)));
+        byte[] outerJar = jar(Map.of(
+                "fabric.mod.json", ("{\\\"schemaVersion\\\":1,\\\"id\\\":\\\"fabric-api\\\","
+                        + "\\\"jars\\\":[{\\\"file\\\":\\\"META-INF/jars/fabric-biome-api-v1.jar\\\"}]}")
+                        .getBytes(StandardCharsets.UTF_8),
+                "META-INF/jars/fabric-biome-api-v1.jar", moduleJar));
+
+        Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-custom-resource"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+        Path original = modsDirectory.resolve("fabric-api.jar");
+        Files.write(original, outerJar);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
+
+        assertTrue(result.transformed());
+        assertEquals(1, result.rewrittenClassTweakerFiles());
+        assertArrayEquals(outerJar, Files.readAllBytes(original),
+                "Metadata-driven rewriting must never modify the original outer mod JAR.");
+
+        byte[] stagedNestedJar = readEntry(Files.readAllBytes(
+                result.modsDirectory().resolve("fabric-api.jar")),
+                "META-INF/jars/fabric-biome-api-v1.jar");
+        String remapped = new String(readEntry(stagedNestedJar, "compat/biome-tweaker.data"),
+                StandardCharsets.UTF_8);
+        assertTrue(remapped.startsWith("classTweaker v1 official"));
+        assertTrue(remapped.contains("net/minecraft/world/entity/EntityType"));
+        assertFalse(remapped.contains("net/minecraft/class_1299"));
+    }
+
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-1.21.11-v2.jar");
         byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
