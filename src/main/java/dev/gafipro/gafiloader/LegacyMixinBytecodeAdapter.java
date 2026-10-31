@@ -98,10 +98,17 @@ final class LegacyMixinBytecodeAdapter {
             throws IOException {
         for (Map.Entry<String, JsonElement> mixinEntry : scope.entrySet()) {
             if (!mixinEntry.getValue().isJsonObject()) continue;
-            List<String> targets = findMixinTargets(mixinEntry.getKey(), mixinTargets);
-            if (targets.isEmpty()) continue;
-
             JsonObject selectors = mixinEntry.getValue().getAsJsonObject();
+            List<String> targets = findMixinTargets(mixinEntry.getKey(), mixinTargets);
+            if (targets.isEmpty()) {
+                if (containsIntermediaryRefmapSelector(selectors)) {
+                    throw new IOException("Mixin refmap contains Intermediary selectors for "
+                            + mixinEntry.getKey() + ", but no matching @Mixin class was found in this archive.");
+                }
+                continue;
+            }
+
+
             Map<String, JsonElement> remapped = new LinkedHashMap<>();
             int localChanges = 0;
             for (Map.Entry<String, JsonElement> selector : selectors.entrySet()) {
@@ -129,6 +136,23 @@ final class LegacyMixinBytecodeAdapter {
                 changes[0] += localChanges;
             }
         }
+    }
+
+    private static boolean containsIntermediaryRefmapSelector(JsonObject selectors) {
+        for (Map.Entry<String, JsonElement> selector : selectors.entrySet()) {
+            if (containsIntermediaryRefmapToken(selector.getKey())) return true;
+            JsonElement value = selector.getValue();
+            if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+                    && containsIntermediaryRefmapToken(value.getAsString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsIntermediaryRefmapToken(String value) {
+        return value != null && (value.contains("class_")
+                || value.contains("method_") || value.contains("field_"));
     }
 
     private static List<String> findMixinTargets(String mixinClass,
