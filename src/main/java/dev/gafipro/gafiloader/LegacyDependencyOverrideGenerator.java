@@ -80,7 +80,7 @@ public final class LegacyDependencyOverrideGenerator {
             } catch (UnsafeArchiveException exception) {
                 throw exception;
             } catch (IOException exception) {
-                unreadable.add(jarPath + ": " + exception.getMessage());
+                throw new IOException("Could not safely inspect mod archive " + jarPath + ".", exception);
             }
         }
 
@@ -247,7 +247,8 @@ public final class LegacyDependencyOverrideGenerator {
         } catch (UnsafeArchiveException exception) {
             throw exception;
         } catch (IOException exception) {
-            unreadable.add(source + ": " + exception.getMessage());
+            throw new UnsafeArchiveException("Could not safely inspect nested mod archive "
+                    + source + ": " + exception.getMessage());
         }
     }
 
