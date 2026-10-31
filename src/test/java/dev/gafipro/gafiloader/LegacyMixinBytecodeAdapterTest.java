@@ -58,6 +58,35 @@ class LegacyMixinBytecodeAdapterTest {
     }
 
     @Test
+    void remapsMixinRefmapKeysAndValuesForDefaultAndNamedContexts() throws Exception {
+        LegacyClassTweakerMappings mappings = createMappings();
+        String refmap = """
+                {
+                  "mappings": {
+                    "net.fabricmc.fabric.mixin.registry.LegacyRegistryMixin": {
+                      "method_2345(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;": "Lnet/minecraft/class_7924;method_2345(Lnet/minecraft/class_7924;)Lnet/minecraft/class_7924;"
+                    }
+                  },
+                  "data": {
+                    "intermediary": {
+                      "net.fabricmc.fabric.mixin.registry.LegacyRegistryMixin": {
+                        "field_1234:Lnet/minecraft/class_7924;": "Lnet/minecraft/class_7924;field_1234:Lnet/minecraft/class_7924;"
+                      }
+                    }
+                  }
+                }
+                """;
+
+        LegacyMixinBytecodeAdapter.RefmapResult result =
+                LegacyMixinBytecodeAdapter.remapRefmap(refmap.getBytes(StandardCharsets.UTF_8),
+                        Map.of(MIXIN_CLASS, java.util.List.of(TARGET_OWNER)), mappings);
+
+        assertEquals(4, result.remappedSelectors(),
+                "Both selector keys and selector values should be translated in each refmap context.");
+        org.json? // marker
+    }
+
+    @Test
     void remapsMixinShadowDeclarationsAndInjectionSelectorsAgainstTheMixinTarget() throws Exception {
         LegacyClassTweakerMappings mappings = createMappings();
         byte[] original = legacyMixinClass();
