@@ -124,6 +124,92 @@ class LegacyMixinBytecodeAdapterTest {
         assertEquals("L" + TARGET_NAMED + ";lookup" + mappedMethodDescriptor, atTargetSelector.get());
     }
 
+    @Test
+    void remapsImplicitAccessorInvokerAndCustomShadowPrefixWhileHonouringRemapFalse() throws Exception {
+        LegacyClassTweakerMappings mappings = createMappings();
+        LegacyMixinBytecodeAdapter.Result result = LegacyMixinBytecodeAdapter.remap(
+                mixinWithImplicitAccessorsAndCustomShadowPrefix(), mappings);
+
+        AtomicReference<String> shadowMethod = new AtomicReference<>();
+        AtomicReference<String> accessorMethod = new AtomicReference<>();
+        AtomicReference<String> invokerMethod = new AtomicReference<>();
+        AtomicReference<String> nonRemappedAccessorValue = new AtomicReference<>();
+
+        new ClassReader(result.bytes()).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if ("bridge$lookup".equals(name)) shadowMethod.set(name);
+                if ("getEntry".equals(name)) accessorMethod.set(name);
+                if ("callLookup".equals(name)) invokerMethod.set(name);
+                if (!"getUnmappedField".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!"Lorg/spongepowered/asm/mixin/gen/Accessor;".equals(annotationDescriptor)) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String property, Object value) {
+                                if ("value".equals(property)) nonRemappedAccessorValue.set((String) value);
+                            }
+                        };
+                    }
+                };
+            }
+        }, 0);
+
+        assertEquals("bridge$lookup", shadowMethod.get(),
+                "A custom @Shadow prefix must be retained while its target method is remapped.");
+        assertEquals("getEntry", accessorMethod.get(),
+                "An omitted @Accessor value must be inferred and remapped from the handler name.");
+        assertEquals("callLookup", invokerMethod.get(),
+                "An omitted @Invoker value must be inferred and remapped from the handler name.");
+        assertEquals("field_1234", nonRemappedAccessorValue.get(),
+                "@Accessor(remap=false) must not have its explicit target rewritten.");
+    }
+
+    private static byte[] mixinWithImplicitAccessorsAndCustomShadowPrefix() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "net/fabricmc/fabric/mixin/registry/LegacyAccessorMixin", null,
+                "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
+        mixin.visit("value", Type.getObjectType(TARGET_OWNER));
+        mixin.visitEnd();
+
+        MethodVisitor shadow = writer.visitMethod(Opcodes.ACC_PROTECTED | Opcodes.ACC_ABSTRACT,
+                "bridge$method_2345", "(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";", null, null);
+        AnnotationVisitor shadowAnnotation = shadow.visitAnnotation(SHADOW, true);
+        shadowAnnotation.visit("prefix", "bridge$");
+        shadowAnnotation.visitEnd();
+        shadow.visitEnd();
+
+        MethodVisitor accessor = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "getField_1234", "()L" + TARGET_OWNER + ";", null, null);
+        accessor.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;", true).visitEnd();
+        accessor.visitEnd();
+
+        MethodVisitor invoker = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "callMethod_2345", "(L" + TARGET_OWNER + ";)L" + TARGET_OWNER + ";", null, null);
+        invoker.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Invoker;", true).visitEnd();
+        invoker.visitEnd();
+
+        MethodVisitor unmapped = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "getUnmappedField", "()L" + TARGET_OWNER + ";", null, null);
+        AnnotationVisitor accessorAnnotation =
+                unmapped.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;", true);
+        accessorAnnotation.visit("value", "field_1234");
+        accessorAnnotation.visit("remap", false);
+        accessorAnnotation.visitEnd();
+        unmapped.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-mixin-fixture.jar");
         byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
