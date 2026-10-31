@@ -28,12 +28,15 @@ final class LegacyClassTweakerMappings {
     private final Map<String, String> classes;
     private final Map<MemberKey, MappedMember> members;
     private final Map<MemberSignature, Set<MemberName>> membersBySignature;
+    private final Map<String, String> unresolvedClassMappings;
 
     private LegacyClassTweakerMappings(Map<String, String> classes,
                                        Map<MemberKey, MappedMember> members,
-                                       Map<MemberSignature, Set<MemberName>> membersBySignature) {
+                                       Map<MemberSignature, Set<MemberName>> membersBySignature,
+                                       Map<String, String> unresolvedClassMappings) {
         this.classes = Map.copyOf(classes);
         this.members = Map.copyOf(members);
+        this.unresolvedClassMappings = Map.copyOf(unresolvedClassMappings);
         Map<MemberSignature, Set<MemberName>> immutableSignatures = new HashMap<>();
         membersBySignature.forEach((signature, names) ->
                 immutableSignatures.put(signature, Set.copyOf(names)));
@@ -64,6 +67,7 @@ final class LegacyClassTweakerMappings {
         }
 
         Map<String, String> classes = new HashMap<>();
+        Map<String, String> unresolvedClassMappings = new HashMap<>();
         Map<MemberKey, MappedMember> members = new HashMap<>();
         Map<MemberSignature, Set<MemberName>> membersBySignature = new HashMap<>();
         for (MappingTree.ClassMapping classMapping : tree.getClasses()) {
@@ -71,7 +75,15 @@ final class LegacyClassTweakerMappings {
             String intermediaryOwner = classMapping.getName(intermediaryId);
             if (officialOwner == null || intermediaryOwner == null) continue;
 
-            String namedOwner = mojang.toNamedClassRequired(officialOwner);
+            String namedOwner;
+            try {
+                namedOwner = mojang.toNamedClassRequired(officialOwner);
+            } catch (IOException exception) {
+                // Keep loading the complete mapping table. A missing Mojang name only becomes
+                // fatal if a legacy mod actually references this particular Intermediary class.
+                namedOwner = officialOwner;
+                unresolvedClassMappings.put(intermediaryOwner, officialOwner);
+            }
             putConsistent(classes, intermediaryOwner, namedOwner,
                     "class " + intermediaryOwner);
 
@@ -115,10 +127,16 @@ final class LegacyClassTweakerMappings {
                         oldIntermediaryName, intermediaryDescriptor, namedName, namedDescriptor);
             }
         }
-        return new LegacyClassTweakerMappings(classes, members, membersBySignature);
+        return new LegacyClassTweakerMappings(classes, members, membersBySignature,
+                unresolvedClassMappings);
     }
 
     String mapClass(String internalName) throws IOException {
+        String unresolvedOfficialName = unresolvedClassMappings.get(internalName);
+        if (unresolvedOfficialName != null) {
+            throw new IOException("No Mojang 1.21.11 client mapping exists for obfuscated class "
+                    + unresolvedOfficialName + " (Intermediary " + internalName + ").");
+        }
         String mapped = classes.get(internalName);
         if (mapped != null) return mapped;
         if (internalName.startsWith("net/minecraft/class_")) {
@@ -189,6 +207,7 @@ final class LegacyClassTweakerMappings {
      */
     String mapMixinMemberName(String targetOwner, String name, String descriptor, boolean method)
             throws IOException {
+        mapClass(targetOwner);
         String prefix = method ? "method_" : "field_";
         if (name == null || !name.startsWith(prefix)) return name;
         if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) {
@@ -204,6 +223,7 @@ final class LegacyClassTweakerMappings {
      */
     String mapMixinSelectorName(String targetOwner, String name, String descriptor, boolean method)
             throws IOException {
+        mapClass(targetOwner);
         if (descriptor != null && !descriptor.isBlank()) {
             return mapMixinMemberName(targetOwner, name, descriptor, method);
         }
