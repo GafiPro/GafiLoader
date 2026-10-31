@@ -75,7 +75,7 @@ class LegacyFabricModelLoadingApiAdapterTest {
                         "net/fabricmc/fabric/mixin/client/model/loading/ModelManagerMixin.class", original);
 
         assertTrue(adapted.changed());
-        assertEquals(NEW_CUBOID_MODEL, modelManagerReturnType(adapted.bytes()));
+        assertEquals("()L" + NEW_CUBOID_MODEL + ";", modelManagerReturnType(adapted.bytes()));
 
         AtomicReference<String> redirectMethod = new AtomicReference<>();
         AtomicReference<String> redirectTarget = new AtomicReference<>();
