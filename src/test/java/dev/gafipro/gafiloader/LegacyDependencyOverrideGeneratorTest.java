@@ -128,6 +128,31 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void rejectsExcessiveNestedArchiveDepthInsteadOfSilentlyMissingLegacyModules() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("deep-nested-mods"));
+        byte[] nested = zipBytes("fabric.mod.json", """
+                {"id":"deep-legacy-module","depends":{"minecraft":"1.21.11"}}
+                """.getBytes(StandardCharsets.UTF_8));
+        for (int i = 0; i < 13; i++) {
+            nested = zipBytes("META-INF/jars/nested-" + i + ".jar", nested);
+        }
+
+        Path outer = mods.resolve("outer.jar");
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(outer))) {
+            jar.putNextEntry(new JarEntry("META-INF/jars/root.jar"));
+            jar.write(nested);
+            jar.closeEntry();
+        }
+
+        Path config = temporaryDirectory.resolve("deep-nested-config/fabric_loader_dependencies.json");
+        IOException exception = assertThrows(IOException.class,
+                () -> new LegacyDependencyOverrideGenerator().generate(mods, config));
+        assertTrue(exception.getMessage().contains("depth exceeds the safety limit"));
+        assertTrue(!Files.exists(config),
+                "The generator must not write a partial override after an incomplete nested scan.");
+    }
+
+    @Test
     void refusesToReplaceMalformedExistingOverrideForLegacyMod() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("malformed-override-mods"));
         writeJar(mods.resolve("fabric-api.jar"), "fabric.mod.json", """
