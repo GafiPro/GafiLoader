@@ -218,7 +218,7 @@ public final class GameApiComparator {
             String missingKind = kind == MojangMappings.SymbolKind.METHOD ? "MISSING_METHOD" : "MISSING_FIELD";
             differences.add(new Difference(missingKind, legacyClass.name(), oldMember.name(),
                     oldMember.descriptor(), List.of(),
-                    "No equivalent name/descriptor was found in the target class or its superclass chain."));
+                    "No equivalent name/descriptor was found in the target class or its class/interface hierarchy."));
         }
     }
 
