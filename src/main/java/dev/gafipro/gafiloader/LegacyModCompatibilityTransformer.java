@@ -57,7 +57,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
@@ -68,7 +68,7 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Refusing to create compatibility files outside the active game directory.");
         }
         if (source.startsWith(staging)) {
-            return new Result(false, source, 0, 0, 0, 0,
+            return new Result(false, source, 0, 0, 0, 0, 0,
                     List.of("The configured mods directory points inside GafiLoader's own compatibility cache; "
                             + "automatic compatibility rewrites were skipped."));
         }
@@ -82,7 +82,7 @@ final class LegacyModCompatibilityTransformer {
                     .toList();
         }
         if (jarPaths.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, List.of());
+            return new Result(false, source, 0, 0, 0, 0, 0, List.of());
         }
 
         // Load the full 1.21.11 namespace bridge when any top-level or nested mod
@@ -115,6 +115,7 @@ final class LegacyModCompatibilityTransformer {
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
         int remappedClasses = 0;
+        int adaptedModelLoadingClasses = 0;
         for (Path jarPath : jarPaths) {
             byte[] originalBytes;
             try {
@@ -129,16 +130,17 @@ final class LegacyModCompatibilityTransformer {
                     classTweakerRemapper, bytecodeRemapper, remapIntermediaryBytecode);
             warnings.addAll(transformed.warnings());
             if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0
-                    || transformed.remappedClasses() > 0) {
+                    || transformed.remappedClasses() > 0 || transformed.adaptedModelLoadingClasses() > 0) {
                 changedArchives.put(source.relativize(jarPath), transformed.bytes());
                 rewrittenReferences += transformed.rewrittenReferences();
                 rewrittenClassTweakerFiles += transformed.rewrittenClassTweakerFiles();
                 remappedClasses += transformed.remappedClasses();
+                adaptedModelLoadingClasses += transformed.adaptedModelLoadingClasses();
             }
         }
 
         if (changedArchives.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, List.copyOf(warnings));
+            return new Result(false, source, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
 
         if (Files.isSymbolicLink(internalRoot)) {
@@ -224,7 +226,7 @@ final class LegacyModCompatibilityTransformer {
         }
 
         return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
-                remappedClasses, changedArchives.size(), List.copyOf(warnings));
+                remappedClasses, adaptedModelLoadingClasses, changedArchives.size(), List.copyOf(warnings));
     }
 
     private static void auditArchiveForIntermediaryClassTweakers(byte[] archive, int depth,
@@ -295,16 +297,19 @@ final class LegacyModCompatibilityTransformer {
             LegacyBytecodeRemapper bytecodeRemapper,
             boolean remapIntermediaryBytecode) throws IOException {
         if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
-            return new ArchiveTransform(originalBytes, 0, 0, 0,
+            return new ArchiveTransform(originalBytes, 0, 0, 0, 0,
                     List.of("Nested JAR depth limit reached; deeper archive was left unchanged."));
         }
 
         String declaredClassTweakerResource = declaredClassTweakerResource(originalBytes);
+        boolean adaptLegacyModelLoadingApi = remapIntermediaryBytecode
+                && declaresModId(originalBytes, LegacyFabricModelLoadingApiAdapter.MODULE_ID);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
         int remappedClasses = 0;
+        int adaptedModelLoadingClasses = 0;
         List<String> warnings = new ArrayList<>();
 
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(originalBytes));
@@ -334,6 +339,16 @@ final class LegacyModCompatibilityTransformer {
                             }
                         }
 
+                        if (adaptLegacyModelLoadingApi) {
+                            LegacyFabricModelLoadingApiAdapter.Result modelLoadingResult =
+                                    LegacyFabricModelLoadingApiAdapter.adapt(entryName, data);
+                            if (modelLoadingResult.changed()) {
+                                data = modelLoadingResult.bytes();
+                                archiveChanged = true;
+                                adaptedModelLoadingClasses++;
+                            }
+                        }
+
                         // Apply narrow 26.2 API moves after namespace conversion, so the
                         // compatibility rule sees stable Mojang names, not class_ IDs.
                         ClassTransform classTransform = transformClass(data);
@@ -349,12 +364,13 @@ final class LegacyModCompatibilityTransformer {
                                 classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
                         if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0
-                                || nested.remappedClasses() > 0) {
+                                || nested.remappedClasses() > 0 || nested.adaptedModelLoadingClasses() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
                             rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
                             remappedClasses += nested.remappedClasses();
+                            adaptedModelLoadingClasses += nested.adaptedModelLoadingClasses();
                         }
                     } else if (isClassTweakerResource(entryName, data, declaredClassTweakerResource)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
@@ -381,10 +397,10 @@ final class LegacyModCompatibilityTransformer {
         }
 
         if (!archiveChanged) {
-            return new ArchiveTransform(originalBytes, 0, 0, 0, List.copyOf(warnings));
+            return new ArchiveTransform(originalBytes, 0, 0, 0, 0, List.copyOf(warnings));
         }
         return new ArchiveTransform(output.toByteArray(), rewrittenReferences,
-                rewrittenClassTweakerFiles, remappedClasses, List.copyOf(warnings));
+                rewrittenClassTweakerFiles, remappedClasses, adaptedModelLoadingClasses, List.copyOf(warnings));
     }
 
     private static boolean declaresLegacyMinecraft(byte[] archive) throws IOException {
@@ -417,6 +433,28 @@ final class LegacyModCompatibilityTransformer {
                 if (name.toLowerCase(Locale.ROOT).endsWith(".jar")
                         && containsLegacyModMetadata(contents, depth + 1)) {
                     return true;
+                }
+                input.closeEntry();
+            }
+        }
+        return false;
+    }
+
+    private static boolean declaresModId(byte[] archive, String expectedModId) throws IOException {
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
+                    try {
+                        JsonElement parsed = JsonParser.parseString(
+                                new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                        return parsed.isJsonObject()
+                                && parsed.getAsJsonObject().has("id")
+                                && parsed.getAsJsonObject().get("id").isJsonPrimitive()
+                                && parsed.getAsJsonObject().get("id").getAsString().equals(expectedModId);
+                    } catch (RuntimeException ignored) {
+                        return false;
+                    }
                 }
                 input.closeEntry();
             }
@@ -647,13 +685,13 @@ final class LegacyModCompatibilityTransformer {
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
                   int rewrittenClassTweakerFiles, int remappedClasses,
-                  int modifiedJars, List<String> warnings) {}
+                  int adaptedModelLoadingClasses, int modifiedJars, List<String> warnings) {}
 
     private record FieldReference(String owner, String name) {}
 
     private record ArchiveTransform(byte[] bytes, int rewrittenReferences,
                                     int rewrittenClassTweakerFiles, int remappedClasses,
-                                    List<String> warnings) {}
+                                    int adaptedModelLoadingClasses, List<String> warnings) {}
 
     private record ClassTransform(byte[] bytes, int rewrittenReferences) {}
 }
