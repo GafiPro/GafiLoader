@@ -1,7 +1,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-10-30
+> Última atualização: 2026-10-31
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -15,16 +15,24 @@
 - A experiência final deve ser simples no Windows: instalador e perfil `gafiloader-26.2`, sem exigir JDK de desenvolvimento ao utilizador final.
 - Atualizações não podem duplicar instalações/perfis nem apagar mundos, saves ou mods.
 
-## Estado atual — 2026-10-30
+## Estado atual — 2026-10-31
 
-- Código atual em `main`: `6d68dc35cd9b62f076974ce4514854419544972a` (PR #19 integrado). A correção de preparação de cópias está em `72b3637c3c7a7dc925d0c81a8932bf8a45454cf1`.
-- O crash mais recente fornecido pelo utilizador já ocorre durante o primeiro reload de recursos, dentro de `EntityRenderers`/Mixin `fabric-rendering-v1`; nesse arranque, o jogo passou a resolução de mods e falhou ao ligar a referência `EntityType.PLAYER`. Não confundir este erro de linkage com o gate de versão dos metadados.
-- A documentação oficial Yarn 1.21.11+build.6 confirma o símbolo de produção: `EntityType.PLAYER` = `net/minecraft/class_1299.field_6097`, descritor `Lnet/minecraft/class_1299;` ([referência](https://maven.fabricmc.net/docs/yarn-1.21.11%2Bbuild.6/net/minecraft/entity/EntityType.html)).
-- `LegacyModCompatibilityTransformer` reconhece agora tanto a referência nomeada `EntityType.PLAYER` como a referência Intermediary `class_1299.field_6097`; troca o owner para `net/minecraft/world/entity/EntityTypes`, preserva o descritor antigo para o remapper normal do Fabric o normalizar, percorre JARs aninhados e usa cópias em `.gafiloader/compat-mods`. Os JARs de origem ficam byte a byte intactos.
-- O teste `rewritesEntityRegistryReferenceInsideNestedFabricApiJarWithoutChangingOriginals` cria um JAR aninhado representativo de `fabric-rendering-v1`, usa exatamente owner/nome/descritor Intermediary, verifica o owner e nome de saída, confirma que o descritor é preservado, que as assinaturas da cópia alterada são removidas e que os JARs originais não mudam. Existe também teste para a referência nomeada.
-- Validação CI da branch que contém o código integrado: workflow run [40963584988](https://github.com/GafiPro/GafiLoader/actions/runs/40963584988) — Ubuntu `clean test build`: sucesso; Windows `clean test installDist`, app-image e instalador: sucesso. Não foi executado Gradle localmente nem um arranque real de Minecraft nesta sessão.
-- Artefacto Windows obtido da execução: `GafiLoader-Installer-Windows-x64`, ID `12936438296`, ZIP SHA-256 `34eae6910418022be36a4e65a6aa378192a1b664dbfdbc9b5318eb53780faec8`, expiração em 2026-11-01 22:10:08 UTC. O EXE extraído, `GafiLoader-0.1.631.exe`, tem 51,442,688 bytes; `sha256sum` executado no ficheiro local confirmou `7164fe1cbe545fa66823ef28129dd526d81bfb2dccf1f0a996a36eabfb001577`. O artefacto foi construído na cabeça da PR `136822ce14fa5e1f00870554540b6ec8105b9dbf`, cujo conteúdo de código foi integrado no commit indicado acima.
-- **Estado de runtime: por validar.** A CI demonstra compilação/testes automatizados e empacotamento, não que o novo EXE elimina o crash no computador do utilizador. O gate de versão tem testes de unidade, mas o arranque end-to-end com a instalação real continua sem confirmação.
+- A cabeça atual de `main` coincide com o commit `8d59966664216b659580d233bce0138fd084f0e1` (comparação GitHub `main...8d59966`: `identical`). O commit corrige a deteção de recursos ClassTweaker com BOM UTF-8.
+- **Erro de runtime mais recente:** o log enviado em 2026-10-30 falha em `FabricLoaderImpl.loadClassTweakers`, ao ler `fabric-biome-api-v1`: `Namespace (intermediary) does not match current runtime namespace (official)`. A falha acontece antes de `Knot.init`; não é a rejeição de dependências Minecraft nem o anterior `NoSuchFieldError: EntityType.PLAYER`. São três fases/problemas distintos.
+- Causa concreta identificada no código anterior: a deteção de ClassTweaker dependia de analisar o início do conteúdo, mas a remoção do BOM usava uma sequência literal incorreta. Um recurso `.classtweaker` com BOM podia não ser reconhecido e, por isso, não chegava ao remapper, apesar de o remapper já saber remover o BOM.
+- Correção integrada em `main` no commit `8d59966664216b659580d233bce0138fd084f0e1`: `LegacyModCompatibilityTransformer` reconhece recursos `.classtweaker` e `.accesswidener` pelo nome, mantendo deteção pelo cabeçalho como fallback; a leitura do cabeçalho remove o carácter BOM real e valida os três campos do formato.
+- O teste `remapsClassTweakerInsideNestedFabricApiJarAndPreservesOriginalArchives` foi atualizado para incluir um BOM UTF-8 real no recurso `fabric-biome-api-v1.classtweaker`, dentro de `META-INF/jars/fabric-biome-api-v1.jar`. Verifica remapeamento para `official`, transformação do JAR exterior e preservação byte a byte do JAR original.
+- **Validação CI ainda não confirmada nesta sessão:** a pesquisa de execuções associadas ao commit não devolveu execuções e os checks de commit disponíveis não reportaram estados. O workflow `.github/workflows/build.yml` continua configurado para executar testes/build em Ubuntu e testes/empacotamento em Windows em cada push a `main`, mas não declarar sucesso sem consultar uma execução concluída.
+- **Artefacto/runtime:** não foi obtido um instalador construído a partir do commit `8d59966`; o EXE `0.1.631` documentado na entrada anterior é anterior a esta correção. Não há ainda um novo `gafiloader-preflight.log` do utilizador que confirme que o recurso foi reescrito e que Fabric carregou a pasta de cópias.
+- Os JAR originais continuam protegidos pelo desenho do transformador: a alteração é aplicada em cópias na pasta `.gafiloader/compat-mods`; quando há transformação, o bootstrap aponta `fabric.modsFolder` para essa pasta.
+
+## Próximos passos — ordem recomendada
+
+1. Confirmar o resultado do workflow Build and test para o commit `8d59966664216b659580d233bce0138fd084f0e1` em Ubuntu e Windows; só depois disponibilizar o novo instalador.
+2. Testar o instalador produzido por esse commit no perfil `gafiloader-26.2`; verificar no `logs/gafiloader-preflight.log` a linha `ClassTweaker compatibility: remapped N legacy Intermediary file(s)` e a indicação de que Fabric usa `.gafiloader/compat-mods`.
+3. Se persistir a exceção de namespace, comparar o recurso `.classtweaker` na cópia staged com o original aninhado e confirmar se o JAR transformado é efetivamente o carregado; não adicionar aliases sem essa evidência.
+4. Se o namespace ficar resolvido, analisar o próximo primeiro erro de carregamento/runtime, mantendo separados erros de metadados, ClassTweaker, linkage de bytecode, Mixin e comportamento de API.
+5. Manter o arranque completo e a compatibilidade funcional com mods reais como **não validados** até existir evidência no jogo.
 
 ## Estado conhecido em 2026-10-27
 
@@ -228,3 +236,16 @@ Em cada sessão de trabalho:
 - Artefacto verificado localmente: `GafiLoader-0.1.631.exe`, 51,442,688 bytes, SHA-256 `7164fe1cbe545fa66823ef28129dd526d81bfb2dccf1f0a996a36eabfb001577`. O ZIP da Actions corresponde ao digest publicado `34eae6910418022be36a4e65a6aa378192a1b664dbfdbc9b5318eb53780faec8`; expira em 2026-11-01 22:10:08 UTC.
 - Limitação principal: não existe ainda um novo `latest.log` nem `gafiloader-preflight.log` gerado pelo EXE 0.1.631 no computador do utilizador. Portanto, não afirmar que o crash está resolvido em runtime.
 - Próximos passos prioritários: (1) testar o EXE 0.1.631 no perfil `gafiloader-26.2`; (2) confirmar no `logs/gafiloader-preflight.log` que o transformador reescreveu a referência e que Fabric usa `.gafiloader/compat-mods`; (3) se houver novo crash, analisar o primeiro erro relevante do `logs/latest.log` e o preflight completo antes de introduzir outra regra; (4) manter a compatibilidade geral de Fabric API 1.21.11 marcada como experimental até haver arranque real e testes de uso.
+
+
+## Update 2026-10-31 — Deteção de ClassTweaker com BOM integrada
+
+- Reaberto o repositório antes de editar: lidos `PROJECT_STATUS.md`, `README.md`, `build.gradle`, `settings.gradle`, `LaunchBootstrap.java`, `LegacyDependencyOverrideGenerator.java`, `LegacyMinecraftVersionDetector.java`, `LegacyModCompatibilityTransformer.java`, `LegacyClassTweakerRemapper.java` e os testes de bootstrap/overrides/ClassTweaker.
+- Verificados os commits recentes e a branch principal. O commit mais recente é `8d59966664216b659580d233bce0138fd084f0e1`; `compare_commits(main, 8d59966)` devolveu `identical`, confirmando que a correção está em `main`.
+- O erro do utilizador `ClassTweakerFormatException: Namespace (intermediary) does not match current runtime namespace (official)` ocorre em `FabricLoaderImpl.loadClassTweakers`, antes de `Knot.init`. É distinto do erro anterior `EntityType.PLAYER` e do gate de dependências.
+- Inspeção do diff do commit `8d59966`: corrige a deteção de recursos com BOM, reconhecendo `.classtweaker` / `.accesswidener` pelo nome e usando o cabeçalho como fallback; o parser remove o carácter UTF-8 BOM real. A causa anterior era a filtragem do conteúdo com uma sequência literal em vez do carácter BOM.
+- O teste de JAR aninhado existente foi reforçado com um BOM real no recurso `fabric-biome-api-v1.classtweaker` dentro de `META-INF/jars/fabric-biome-api-v1.jar`; verifica que o conteúdo staged passa a `official` e que o JAR original permanece byte a byte igual.
+- Ficheiros de código/teste alterados nesta correção já estão no commit `8d59966664216b659580d233bce0138fd084f0e1`: `src/main/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformer.java` e `src/test/java/dev/gafipro/gafiloader/LegacyClassTweakerRemapperTest.java`. Esta sessão não alterou esses ficheiros.
+- Validação nesta sessão: inspeção estática do commit/diff, código atual e teste; comparação confirma que o commit está em `main`. Não foi possível obter uma execução CI associada ao commit através das funções GitHub disponíveis (a consulta de runs devolveu lista vazia e os checks de commit não forneceram estados). Não foi executado Gradle localmente e não houve arranque Minecraft.
+- Nenhuma release/instalador novo foi obtido nesta sessão. O EXE `0.1.631` referido na entrada anterior não contém a correção BOM e não deve ser apresentado como build para validar este erro.
+- Próxima ação: confirmar CI do commit `8d59966`, obter o instalador dessa árvore e validar no preflight a contagem de ClassTweakers remapeados e o uso de `.gafiloader/compat-mods`. Runtime permanece não validado.
