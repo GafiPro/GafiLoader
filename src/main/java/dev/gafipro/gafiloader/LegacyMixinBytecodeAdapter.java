@@ -1,5 +1,10 @@
 package dev.gafipro.gafiloader;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -44,8 +49,117 @@ final class LegacyMixinBytecodeAdapter {
     private static final String INVOKER_ANNOTATION =
             "Lorg/spongepowered/asm/mixin/gen/Invoker;";
     private static final String DEFAULT_SHADOW_PREFIX = "shadow$";
+    private static final Gson REFMAP_GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private LegacyMixinBytecodeAdapter() {}
+
+    static List<String> targetOwners(byte[] classBytes) throws IOException {
+        try {
+            return inspectMixinMetadata(new ClassReader(classBytes)).targetOwners();
+        } catch (IllegalArgumentException exception) {
+            throw new IOException("Could not inspect a class while discovering Mixin refmap targets.", exception);
+        }
+    }
+
+    static RefmapResult remapRefmap(byte[] originalBytes,
+                                    Map<String, List<String>> mixinTargets,
+                                    LegacyClassTweakerMappings mappings) throws IOException {
+        final JsonElement parsed;
+        try {
+            parsed = JsonParser.parseString(new String(originalBytes, java.nio.charset.StandardCharsets.UTF_8));
+        } catch (RuntimeException exception) {
+            throw new IOException("Could not parse legacy Mixin reference map JSON.", exception);
+        }
+        if (!parsed.isJsonObject()) {
+            throw new IOException("Legacy Mixin reference map must contain a JSON object.");
+        }
+
+        JsonObject root = parsed.getAsJsonObject();
+        int[] changes = {0};
+        JsonElement defaultMappings = root.get("mappings");
+        if (defaultMappings != null && defaultMappings.isJsonObject()) {
+            remapRefmapScope(defaultMappings.getAsJsonObject(), mixinTargets, mappings, changes);
+        }
+        JsonElement contexts = root.get("data");
+        if (contexts != null && contexts.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> context : contexts.getAsJsonObject().entrySet()) {
+                if (context.getValue().isJsonObject()) {
+                    remapRefmapScope(context.getValue().getAsJsonObject(), mixinTargets, mappings, changes);
+                }
+            }
+        }
+        if (changes[0] == 0) return new RefmapResult(originalBytes, 0);
+        return new RefmapResult(REFMAP_GSON.toJson(root).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                changes[0]);
+    }
+
+    private static void remapRefmapScope(JsonObject scope, Map<String, List<String>> mixinTargets,
+                                         LegacyClassTweakerMappings mappings, int[] changes)
+            throws IOException {
+        for (Map.Entry<String, JsonElement> mixinEntry : scope.entrySet()) {
+            if (!mixinEntry.getValue().isJsonObject()) continue;
+            List<String> targets = findMixinTargets(mixinEntry.getKey(), mixinTargets);
+            if (targets.isEmpty()) continue;
+
+            JsonObject selectors = mixinEntry.getValue().getAsJsonObject();
+            Map<String, JsonElement> remapped = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> selector : selectors.entrySet()) {
+                String newKey = remapRefmapSelector(selector.getKey(), targets, mappings);
+                JsonElement newValue = selector.getValue().deepCopy();
+                if (newValue.isJsonPrimitive() && newValue.getAsJsonPrimitive().isString()) {
+                    String oldValue = newValue.getAsString();
+                    String mappedValue = remapRefmapSelector(oldValue, targets, mappings);
+                    if (!oldValue.equals(mappedValue)) {
+                        newValue = new com.google.gson.JsonPrimitive(mappedValue);
+                        changes[0]++;
+                    }
+                }
+                if (!newKey.equals(selector.getKey())) changes[0]++;
+                JsonElement previous = remapped.putIfAbsent(newKey, newValue);
+                if (previous != null && !previous.equals(newValue)) {
+                    throw new IOException("Mixin refmap selector collision for " + mixinEntry.getKey()
+                            + ": " + newKey);
+                }
+            }
+
+            if (changes[0] > 0) {
+                selectors.entrySet().clear();
+                remapped.forEach(selectors::add);
+            }
+        }
+    }
+
+    private static List<String> findMixinTargets(String mixinClass,
+                                                  Map<String, List<String>> mixinTargets) {
+        String normalized = mixinClass.replace('.', '/');
+        List<String> exact = mixinTargets.get(normalized);
+        if (exact != null) return exact;
+        return mixinTargets.getOrDefault(mixinClass, List.of());
+    }
+
+    private static String remapRefmapSelector(String selector, List<String> targetOwners,
+                                              LegacyClassTweakerMappings mappings) throws IOException {
+        if (selector == null || selector.isBlank()
+                || !(selector.contains("class_") || selector.contains("method_")
+                || selector.contains("field_"))) {
+            return selector;
+        }
+
+        String prefix = "";
+        String body = selector;
+        if (body.startsWith("METHOD:") || body.startsWith("FIELD:")) {
+            prefix = body.substring(0, body.indexOf(':') + 1);
+            body = body.substring(prefix.length());
+        }
+
+        String mapped;
+        if (body.startsWith("net.minecraft.") || body.startsWith("net/minecraft/")) {
+            mapped = mappings.mapClass(toInternalName(body)).replace('/', '.');
+        } else {
+            mapped = mapMemberSelector(body, targetOwners, mappings, true);
+        }
+        return prefix + mapped;
+    }
 
     static Result remap(byte[] originalBytes, LegacyClassTweakerMappings mappings) throws IOException {
         ClassReader reader;
@@ -721,6 +835,7 @@ final class LegacyMixinBytecodeAdapter {
     }
 
     record Result(byte[] bytes, boolean changed) {}
+    record RefmapResult(byte[] bytes, int remappedSelectors) {}
 
     private record MixinMetadata(String className, List<String> targetOwners,
                                  Set<String> shadowMethods, Set<String> shadowFields,
