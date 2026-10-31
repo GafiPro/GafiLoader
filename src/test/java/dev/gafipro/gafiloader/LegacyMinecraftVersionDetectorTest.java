@@ -41,6 +41,25 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void evaluatesLowerAndUpperBoundsAgainstMinecraft262() {
+        assertFalse(matches("""
+                {"id":"newer-floor","depends":{"minecraft":">=1.21.12"}}
+                """));
+        assertFalse(matches("""
+                {"id":"target-admitted","depends":{"minecraft":">=1.21.11 <27"}}
+                """));
+        assertTrue(matches("""
+                {"id":"legacy-ceiling","depends":{"minecraft":">=1.21.11 <1.22"}}
+                """));
+        assertFalse(matches("""
+                {"id":"above-target","depends":{"minecraft":">26.2"}}
+                """));
+        assertFalse(matches("""
+                {"id":"target-compatible","depends":{"minecraft":"~26.2"}}
+                """));
+    }
+
+    @Test
     void recognizesLegacyBytecodeEvenWhenTheDependencyIsAnUnboundedLowerBound() {
         var metadata = JsonParser.parseString("""
                 {"id":"legacy-binary","version":"0.1.0+1.21.11","depends":{"minecraft":">=1.21.11"}}
