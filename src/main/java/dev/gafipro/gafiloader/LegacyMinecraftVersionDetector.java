@@ -16,6 +16,8 @@ import java.util.regex.Pattern;
 final class LegacyMinecraftVersionDetector {
     private static final Pattern TARGET_LEGACY_VERSION =
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
+    private static final Pattern UNBOUNDED_LEGACY_LOWER_BOUND =
+            Pattern.compile("^\\s*(?:>=|>)\\s*1\\.21\\.11\\s*$");
     private static final Pattern LEGACY_ARTIFACT_SUFFIX =
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
     private static final Pattern NUMERIC_VERSION =
