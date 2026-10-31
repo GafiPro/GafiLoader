@@ -77,6 +77,61 @@ class GameApiComparatorTest {
                         && difference.owner().equals("com/example/Vanished")));
     }
 
+    @Test
+    void recognizesMembersMovedToAnImplementedTargetInterface() throws IOException {
+        Path legacyJar = temporaryDirectory.resolve("legacy-interface-move.jar");
+        Path targetJar = temporaryDirectory.resolve("target-interface-move.jar");
+        Path mappings = temporaryDirectory.resolve("interface-move-mappings.txt");
+
+        Files.writeString(mappings, String.join("\n",
+                "com.example.Foo -> a:",
+                "    void oldMethod() -> b",
+                "com.example.Api -> c:",
+                ""));
+        writeJar(legacyJar,
+                entry("a", legacyFooWithObfuscatedMethod()),
+                entry("c", emptyClass("c")));
+        writeJar(targetJar,
+                entry("com/example/Foo", targetFooImplementingApi()),
+                entry("com/example/Api", targetApiWithMethod()));
+
+        GameApiComparator.Report report = new GameApiComparator().compare(legacyJar, targetJar, mappings);
+
+        assertEquals(0, report.summary().missingClasses());
+        assertEquals(0, report.summary().missingMethods(),
+                "A method inherited from a target interface must count as available on the class.");
+    }
+
+    private static byte[] legacyFooWithObfuscatedMethod() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "a", null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "b", "()V", null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetFooImplementingApi() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "com/example/Foo", null,
+                "java/lang/Object", new String[] { "com/example/Api" });
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetApiWithMethod() {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                "com/example/Api", null, "java/lang/Object", null);
+        writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, "oldMethod", "()V", null, null)
+                .visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] legacyFooClass() {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "a", null, "java/lang/Object", null);
