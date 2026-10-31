@@ -99,7 +99,7 @@ final class LegacyMinecraftVersionDetector {
             return false;
         }
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
-        String[] alternatives = value.getAsString().split("\\\\|\\\\|");
+        String[] alternatives = value.getAsString().split("\\|\\|");
         for (String alternative : alternatives) {
             if (UNBOUNDED_LEGACY_LOWER_BOUND.matcher(alternative.trim()).matches()) return true;
         }
