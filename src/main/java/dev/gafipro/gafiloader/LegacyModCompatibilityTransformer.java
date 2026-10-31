@@ -348,7 +348,7 @@ final class LegacyModCompatibilityTransformer {
      * syntax, and custom resource names are valid. Looking at metadata avoids relying
      * solely on file extensions or a clean first byte.
      */
-    private static String declaredClassTweakerResource(byte[] archive) throws IOException {
+    static String declaredClassTweakerResource(byte[] archive) throws IOException {
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
