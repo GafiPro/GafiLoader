@@ -1,6 +1,6 @@
 package dev.gafipro.gafiloader;
 
-import org.objectweb.asm.ClassRemapper;
+import org.objectweb.asm.commons.ClassRemapper;
 
 import java.io.IOException;
 import java.util.Arrays;
