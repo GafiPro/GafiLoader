@@ -39,6 +39,8 @@ public final class CompatibilityScanner {
     private static final String FABRIC_API_PACKAGE = "net/fabricmc/fabric/api/";
     private static final long MAX_TOP_LEVEL_ARCHIVE_BYTES = 512L * 1024 * 1024;
     private static final long MAX_NESTED_ARCHIVE_BYTES = 128L * 1024 * 1024;
+    private static final long MAX_CLASS_ENTRY_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_TOTAL_SCANNED_CLASS_BYTES = 512L * 1024 * 1024;
 
     public Report scan(Path gameJar, Collection<Path> modJars) throws IOException {
         return scan(gameJar, modJars, null, null, null);
@@ -95,7 +97,7 @@ public final class CompatibilityScanner {
 
         Map<String, ClassInfo> gameClasses = indexGame(gameJar);
         for (Path targetApiJar : targetApiJars) {
-            indexTargetApiJar(targetApiJar, gameClasses, 0);
+            indexTargetApiJar(targetApiJar, gameClasses, 0, new ScanBudget(MAX_TOTAL_SCANNED_CLASS_BYTES));
         }
         List<Path> orderedMods = modJars.stream()
                 .map(path -> path.toAbsolutePath().normalize())
@@ -219,7 +221,13 @@ public final class CompatibilityScanner {
     }
 
     private Map<String, ClassInfo> indexGame(Path gameJar) throws IOException {
+        long archiveSize = Files.size(gameJar);
+        if (archiveSize > MAX_TOP_LEVEL_ARCHIVE_BYTES) {
+            throw new IOException("Target game archive exceeds the " + MAX_TOP_LEVEL_ARCHIVE_BYTES
+                    + "-byte safety limit: " + gameJar);
+        }
         Map<String, ClassInfo> classes = new HashMap<>();
+        ScanBudget budget = new ScanBudget(MAX_TOTAL_SCANNED_CLASS_BYTES);
         try (JarFile jar = new JarFile(gameJar.toFile())) {
             var entries = jar.entries();
             while (entries.hasMoreElements()) {
@@ -229,7 +237,10 @@ public final class CompatibilityScanner {
                     continue;
                 }
                 try (InputStream input = jar.getInputStream(entry)) {
-                    indexClass(input, entry.getName(), gameJar, classes);
+                    byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES,
+                            gameJar + "!/" + entry.getName());
+                    budget.consume(classBytes.length, gameJar + "!/" + entry.getName());
+                    indexClass(classBytes, entry.getName(), gameJar, classes);
                 }
             }
         }
@@ -243,7 +254,8 @@ public final class CompatibilityScanner {
      * Indexes a target Fabric API archive and its nested modules. The official Fabric API
      * distribution is an umbrella mod and stores most API classes in META-INF/jars/*.jar.
      */
-    private void indexTargetApiJar(Path apiJar, Map<String, ClassInfo> classes, int depth) throws IOException {
+    private void indexTargetApiJar(Path apiJar, Map<String, ClassInfo> classes, int depth,
+                                   ScanBudget budget) throws IOException {
         if (depth >= 8) {
             throw new IOException("Nested target API JAR depth exceeded the safety limit: " + apiJar);
         }
@@ -266,7 +278,9 @@ public final class CompatibilityScanner {
                 }
                 if (name.endsWith(".class")) {
                     try (InputStream input = jar.getInputStream(entry)) {
-                        indexClass(input, name, apiJar, classes);
+                        byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES, apiJar + "!/" + name);
+                        budget.consume(classBytes.length, apiJar + "!/" + name);
+                        indexClass(classBytes, name, apiJar, classes);
                     }
                 } else {
                     String lowerName = name.toLowerCase(java.util.Locale.ROOT);
@@ -279,7 +293,8 @@ public final class CompatibilityScanner {
                             copyBounded(input, nested, MAX_NESTED_ARCHIVE_BYTES,
                                     apiJar + "!/" + name);
                         }
-                        indexTargetApiJar(nested, classes, depth + 1);
+                        budget.consume(Files.size(nested), apiJar + "!/" + name);
+                        indexTargetApiJar(nested, classes, depth + 1, budget);
                     } finally {
                         Files.deleteIfExists(nested);
                     }
@@ -290,10 +305,10 @@ public final class CompatibilityScanner {
         }
     }
 
-    private static void indexClass(InputStream input, String entryName, Path sourceJar,
-                                   Map<String, ClassInfo> classes) throws IOException {
+    private static void indexClass(byte[] classBytes, String entryName, Path sourceJar,
+                                    Map<String, ClassInfo> classes) throws IOException {
         try {
-            ClassReader reader = new ClassReader(input);
+            ClassReader reader = new ClassReader(classBytes);
             reader.accept(new ClassVisitor(Opcodes.ASM9) {
                 private String className;
                 private String superName;
@@ -343,7 +358,8 @@ public final class CompatibilityScanner {
         }
         Set<Reference> references = new LinkedHashSet<>();
         int[] classCount = {0};
-        scanModArchive(modJar, modJar.toString(), references, classCount, 0);
+        ScanBudget budget = new ScanBudget(MAX_TOTAL_SCANNED_CLASS_BYTES);
+        scanModArchive(modJar, modJar.toString(), references, classCount, 0, budget);
         return new ModScan(classCount[0], Set.copyOf(references));
     }
 
@@ -352,7 +368,7 @@ public final class CompatibilityScanner {
      * Inspect those bytecode entries as part of the outer mod without modifying either archive.
      */
     private void scanModArchive(Path archive, String displaySource, Set<Reference> references,
-                                int[] classCount, int depth) throws IOException {
+                                int[] classCount, int depth, ScanBudget budget) throws IOException {
         if (depth >= 8) {
             throw new IOException("Nested mod JAR depth exceeded the safety limit: " + displaySource);
         }
@@ -373,7 +389,10 @@ public final class CompatibilityScanner {
                 if (name.endsWith(".class")) {
                     classCount[0]++;
                     try (InputStream input = jar.getInputStream(entry)) {
-                        ClassReader reader = new ClassReader(input);
+                        byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES,
+                                displaySource + "!/" + name);
+                        budget.consume(classBytes.length, displaySource + "!/" + name);
+                        ClassReader reader = new ClassReader(classBytes);
                         reader.accept(new ReferenceCollector(references), ClassReader.SKIP_DEBUG);
                     } catch (RuntimeException exception) {
                         throw new IOException("Could not inspect class " + name
@@ -392,13 +411,49 @@ public final class CompatibilityScanner {
                         copyBounded(input, nested, MAX_NESTED_ARCHIVE_BYTES,
                                 displaySource + "!/" + name);
                     }
-                    scanModArchive(nested, displaySource + "!/" + name, references, classCount, depth + 1);
+                    budget.consume(Files.size(nested), displaySource + "!/" + name);
+                    scanModArchive(nested, displaySource + "!/" + name,
+                            references, classCount, depth + 1, budget);
                 } finally {
                     Files.deleteIfExists(nested);
                 }
             }
         } catch (java.util.zip.ZipException exception) {
             throw new IOException("Mod archive is not a readable JAR: " + displaySource, exception);
+        }
+    }
+
+    private static byte[] readBounded(InputStream input, long maximumBytes,
+                                       String source) throws IOException {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maximumBytes) {
+                throw new IOException("Class entry exceeds the " + maximumBytes
+                        + "-byte safety limit: " + source);
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static final class ScanBudget {
+        private final long maximumBytes;
+        private long consumedBytes;
+
+        private ScanBudget(long maximumBytes) {
+            this.maximumBytes = maximumBytes;
+        }
+
+        private void consume(long bytes, String source) throws IOException {
+            consumedBytes += bytes;
+            if (consumedBytes > maximumBytes) {
+                throw new IOException("Total scanned class/archive content exceeds the "
+                        + maximumBytes + "-byte safety limit near " + source);
+            }
         }
     }
 
