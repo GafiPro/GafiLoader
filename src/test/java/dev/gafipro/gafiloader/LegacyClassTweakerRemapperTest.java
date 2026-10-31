@@ -96,15 +96,19 @@ class LegacyClassTweakerRemapperTest {
         LegacyClassTweakerMappings mappings = createMappings();
         String classTweaker = " \\uFEFFclassTweaker v1 intermediary\\n"
                 + "accessible class net/minecraft/class_1299\\n";
+        byte[] moduleMetadata = """
+                {"schemaVersion":1,"id":"fabric-biome-api-v1",
+                 "accessWidener":"compat/biome-tweaker.data"}
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] outerMetadata = """
+                {"schemaVersion":1,"id":"fabric-api",
+                 "jars":[{"file":"META-INF/jars/fabric-biome-api-v1.jar"}]}
+                """.getBytes(StandardCharsets.UTF_8);
         byte[] moduleJar = jar(Map.of(
-                "fabric.mod.json", ("{\\\"schemaVersion\\\":1,\\\"id\\\":\\\"fabric-biome-api-v1\\\","
-                        + "\\\"accessWidener\\\":\\\"compat/biome-tweaker.data\\\"}")
-                        .getBytes(StandardCharsets.UTF_8),
+                "fabric.mod.json", moduleMetadata,
                 "compat/biome-tweaker.data", classTweaker.getBytes(StandardCharsets.UTF_8)));
         byte[] outerJar = jar(Map.of(
-                "fabric.mod.json", ("{\\\"schemaVersion\\\":1,\\\"id\\\":\\\"fabric-api\\\","
-                        + "\\\"jars\\\":[{\\\"file\\\":\\\"META-INF/jars/fabric-biome-api-v1.jar\\\"}]}")
-                        .getBytes(StandardCharsets.UTF_8),
+                "fabric.mod.json", outerMetadata,
                 "META-INF/jars/fabric-biome-api-v1.jar", moduleJar));
 
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-custom-resource"));
