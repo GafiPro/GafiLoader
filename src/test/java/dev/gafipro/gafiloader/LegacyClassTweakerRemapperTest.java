@@ -164,12 +164,12 @@ class LegacyClassTweakerRemapperTest {
 
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-1.21.11-v2.jar");
-        byte[] tiny = ("tiny\\t2\\t0\\tofficial\\tintermediary\\n"
-                + "c\\ta\\tnet/minecraft/class_1299\\n"
-                + "f\\tI\\tb\\tfield_6097\\n"
-                + "m\\t(La;)V\\tc\\tmethod_42\\n"
-                + "c\\td\\tnet/minecraft/class_1959$class_5482\\n"
-                + "c\\te\\tnet/minecraft/class_1959$class_5484\\n")
+        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\tnet/minecraft/class_1299\n"
+                + "f\tI\tb\tfield_6097\n"
+                + "m\t(La;)V\tc\tmethod_42\n"
+                + "c\td\tnet/minecraft/class_1959$class_5482\n"
+                + "c\te\tnet/minecraft/class_1959$class_5484\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
