@@ -23,6 +23,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LegacyMixinBytecodeAdapterTest {
@@ -38,6 +39,22 @@ class LegacyMixinBytecodeAdapterTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void rejectsAnObfuscatedOfficialClassWithoutAMojangNameMapping() throws Exception {
+        Path intermediaryJar = temporaryDirectory.resolve("intermediary-missing-class-fixture.jar");
+        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\tnet/minecraft/class_7924\n")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
+
+        Path mojangMappings = temporaryDirectory.resolve("client-mappings-missing-class-fixture.txt");
+        Files.writeString(mojangMappings, "net.minecraft.core.Registry -> b:\n", StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class, () ->
+                LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings),
+                "An unresolved obfuscated class name must not leak into the 26.2 named namespace.");
+    }
 
     @Test
     void remapsMixinShadowDeclarationsAndInjectionSelectorsAgainstTheMixinTarget() throws Exception {
