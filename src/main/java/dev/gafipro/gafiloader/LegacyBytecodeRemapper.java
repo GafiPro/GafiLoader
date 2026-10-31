@@ -32,5 +32,14 @@ final class LegacyBytecodeRemapper {
         return new Result(mapped.bytes(), !Arrays.equals(originalBytes, mapped.bytes()));
     }
 
+    LegacyMixinBytecodeAdapter.RefmapResult remapRefmap(byte[] originalBytes,
+            java.util.Map<String, java.util.List<String>> mixinTargets) throws IOException {
+        return LegacyMixinBytecodeAdapter.remapRefmap(originalBytes, mixinTargets, mappings);
+    }
+
+    static java.util.List<String> mixinTargets(byte[] classBytes) throws IOException {
+        return LegacyMixinBytecodeAdapter.targetOwners(classBytes);
+    }
+
     record Result(byte[] bytes, boolean changed) {}
 }
