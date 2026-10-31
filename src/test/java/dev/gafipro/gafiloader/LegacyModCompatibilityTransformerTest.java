@@ -209,6 +209,29 @@ class LegacyModCompatibilityTransformerTest {
         assertArrayEquals(originalJar, Files.readAllBytes(modsDirectory.resolve("other-mod.jar")));
     }
 
+    @Test
+    void reportsWhenAClassCannotBeInspectedInsteadOfSilentlyTreatingItAsCompatible() throws Exception {
+        Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-unreadable-class"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+        byte[] originalJar = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"ordinary-mod","version":"1.0.0"}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "net/example/Broken.class", new byte[] { 0x01, 0x02, 0x03, 0x04 }
+        ));
+        Path source = modsDirectory.resolve("ordinary-mod.jar");
+        Files.write(source, originalJar);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer().prepare(modsDirectory, gameDirectory);
+
+        assertFalse(result.transformed());
+        assertTrue(result.warnings().stream().anyMatch(warning ->
+                warning.contains("Could not inspect class net/example/Broken.class")));
+        assertArrayEquals(originalJar, Files.readAllBytes(source),
+                "Inspection diagnostics must never modify the original mod archive.");
+    }
+
     private static byte[] classWithEntityTypeFieldReference(String fieldName) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/example/Generated", null, "java/lang/Object", null);
