@@ -173,6 +173,7 @@ final class LegacyClassTweakerMappings {
 
     MappedMember mapMember(String owner, String name, String descriptor, boolean method)
             throws IOException {
+        String mappedOwner = mapClass(owner);
         MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
         MemberKey requested = new MemberKey(owner, kind, name, descriptor);
         String unresolved = unresolvedMemberMappings.get(requested);
@@ -183,14 +184,14 @@ final class LegacyClassTweakerMappings {
         }
         MappedMember mapped = members.get(requested);
         if (mapped != null) {
-            return mapped;
+            return new MappedMember(mappedOwner, mapped.name(), mapped.descriptor());
         }
 
         // JVM constructor and class-initializer names are fixed by the class-file format.
         // Intermediary mapping files may omit them because their names never change. Their
         // descriptors still contain Intermediary class names and must be remapped.
         if (method && (name.equals("<init>") || name.equals("<clinit>"))) {
-            return new MappedMember(mapClass(owner), name, mapDescriptor(descriptor));
+            return new MappedMember(mappedOwner, name, mapDescriptor(descriptor));
         }
 
         // ClassTweaker may name a concrete class even when the target method is declared
@@ -201,7 +202,7 @@ final class LegacyClassTweakerMappings {
                 new MemberSignature(kind, name, descriptor));
         if (candidates != null && candidates.size() == 1) {
             MemberName candidate = candidates.iterator().next();
-            return new MappedMember(mapClass(owner), candidate.name(), candidate.descriptor());
+            return new MappedMember(mappedOwner, candidate.name(), candidate.descriptor());
         }
         if (candidates != null && candidates.size() > 1) {
             throw new IOException("Ambiguous 1.21.11 Intermediary mapping for ClassTweaker "
