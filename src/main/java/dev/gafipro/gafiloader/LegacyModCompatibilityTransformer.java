@@ -351,11 +351,22 @@ final class LegacyModCompatibilityTransformer {
 
                         // Apply narrow 26.2 API moves after namespace conversion, so the
                         // compatibility rule sees stable Mojang names, not class_ IDs.
-                        ClassTransform classTransform = transformClass(data);
-                        if (classTransform.rewrittenReferences() > 0) {
-                            data = classTransform.bytes();
-                            archiveChanged = true;
-                            rewrittenReferences += classTransform.rewrittenReferences();
+                        try {
+                            ClassTransform classTransform = transformClass(data);
+                            if (classTransform.rewrittenReferences() > 0) {
+                                data = classTransform.bytes();
+                                archiveChanged = true;
+                                rewrittenReferences += classTransform.rewrittenReferences();
+                            }
+                        } catch (IOException exception) {
+                            String message = "Could not inspect class " + entryName
+                                    + " in archive; it was not compatibility-transformed: "
+                                    + exception.getMessage();
+                            if (remapIntermediaryBytecode || adaptLegacyModelLoadingApi) {
+                                throw new IOException("Legacy archive contains a class that could not be "
+                                        + "safely inspected (" + entryName + ").", exception);
+                            }
+                            warnings.add(message);
                         }
                     } else if (lowerName.endsWith(".jar")) {
                         boolean nestedLegacy = remapIntermediaryBytecode
@@ -553,7 +564,7 @@ final class LegacyModCompatibilityTransformer {
                 && !header[2].isBlank();
     }
 
-    private static ClassTransform transformClass(byte[] originalBytes) {
+    private static ClassTransform transformClass(byte[] originalBytes) throws IOException {
         try {
             ClassReader reader = new ClassReader(originalBytes);
             ClassWriter writer = new ClassWriter(reader, 0);
@@ -598,9 +609,9 @@ final class LegacyModCompatibilityTransformer {
             return rewrites[0] == 0
                     ? new ClassTransform(originalBytes, 0)
                     : new ClassTransform(writer.toByteArray(), rewrites[0]);
-        } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
-            // An unrelated class that ASM cannot read is not modified. The original archive remains intact.
-            return new ClassTransform(originalBytes, 0);
+        } catch (RuntimeException exception) {
+            throw new IOException("ASM could not inspect a class file during compatibility preparation.",
+                    exception);
         }
     }
 
