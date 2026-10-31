@@ -19,6 +19,8 @@ final class LegacyMinecraftVersionDetector {
             Pattern.compile("^\\s*(?:>=|>)\\s*1\\.21\\.11\\s*$");
     private static final Pattern LEGACY_ARTIFACT_SUFFIX =
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
+    private static final Pattern TARGET_MINECRAFT_VERSION =
+            Pattern.compile("(?<![0-9])26\\.2(?![0-9])");
 
     private LegacyMinecraftVersionDetector() {}
 
@@ -29,6 +31,11 @@ final class LegacyMinecraftVersionDetector {
         if (depends != null && depends.isJsonObject()) {
             JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
             if (minecraft != null) {
+                // Fabric accepts any alternative in a dependency array / disjunction.
+                // If one alternative admits 26.2, removing the dependency is unnecessary.
+                if (containsTargetVersion(minecraft) || containsUnboundedLegacyLowerBound(minecraft)) {
+                    return false;
+                }
                 if (containsLegacyVersion(minecraft)) return true;
                 if (minecraft.isJsonArray()) {
                     JsonArray ranges = minecraft.getAsJsonArray();
@@ -69,6 +76,34 @@ final class LegacyMinecraftVersionDetector {
         return version != null && version.isJsonPrimitive()
                 && version.getAsJsonPrimitive().isString()
                 && LEGACY_ARTIFACT_SUFFIX.matcher(version.getAsString().trim()).find();
+    }
+
+    private static boolean containsTargetVersion(JsonElement value) {
+        if (value == null) return false;
+        if (value.isJsonArray()) {
+            for (JsonElement alternative : value.getAsJsonArray()) {
+                if (containsTargetVersion(alternative)) return true;
+            }
+            return false;
+        }
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
+        return TARGET_MINECRAFT_VERSION.matcher(value.getAsString()).find();
+    }
+
+    private static boolean containsUnboundedLegacyLowerBound(JsonElement value) {
+        if (value == null) return false;
+        if (value.isJsonArray()) {
+            for (JsonElement alternative : value.getAsJsonArray()) {
+                if (containsUnboundedLegacyLowerBound(alternative)) return true;
+            }
+            return false;
+        }
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
+        String[] alternatives = value.getAsString().split("\\\\|\\\\|");
+        for (String alternative : alternatives) {
+            if (UNBOUNDED_LEGACY_LOWER_BOUND.matcher(alternative.trim()).matches()) return true;
+        }
+        return false;
     }
 
     private static boolean containsLegacyVersionToken(JsonElement value) {
