@@ -18,6 +18,16 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void doesNotTreatAnUnboundedLegacyLowerBoundAsLegacyOnly() {
+        assertFalse(matches("""
+                {"id":"broad","depends":{"minecraft":">=1.21.11"}}
+                """));
+        assertFalse(matches("""
+                {"id":"broad","version":"0.1.0+1.21.11","depends":{"minecraft":">1.21.11"}}
+                """));
+    }
+
+    @Test
     void recognizesLegacyArtifactVersionWhenMinecraftRangeIsIndirect() {
         assertTrue(matches("""
                 {"id":"fabric-api","version":"0.141.6+1.21.11","depends":{"fabricloader":">=0.16.0"}}
