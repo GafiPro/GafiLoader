@@ -83,7 +83,21 @@ class LegacyMixinBytecodeAdapterTest {
 
         assertEquals(4, result.remappedSelectors(),
                 "Both selector keys and selector values should be translated in each refmap context.");
-        org.json? // marker
+                com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(
+                new String(result.bytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+        String mappedMethodKey =
+                "lookup(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
+        String mappedMethodValue =
+                "Lnet/minecraft/core/Registry;lookup(Lnet/minecraft/core/Registry;)Lnet/minecraft/core/Registry;";
+        assertEquals(mappedMethodValue, root.getAsJsonObject("mappings")
+                .getAsJsonObject(MIXIN_CLASS.replace('/', '.')).get(mappedMethodKey).getAsString());
+
+        String mappedFieldKey = "entry:Lnet/minecraft/core/Registry;";
+        String mappedFieldValue = "Lnet/minecraft/core/Registry;entry:Lnet/minecraft/core/Registry;";
+        assertEquals(mappedFieldValue, root.getAsJsonObject("data")
+                .getAsJsonObject("intermediary")
+                .getAsJsonObject(MIXIN_CLASS.replace('/', '.'))
+                .get(mappedFieldKey).getAsString());
     }
 
     @Test
