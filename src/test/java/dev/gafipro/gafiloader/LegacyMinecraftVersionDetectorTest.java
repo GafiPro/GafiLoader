@@ -28,6 +28,25 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void recognizesLegacyBytecodeEvenWhenTheDependencyIsAnUnboundedLowerBound() {
+        var metadata = JsonParser.parseString("""
+                {"id":"legacy-binary","version":"0.1.0+1.21.11","depends":{"minecraft":">=1.21.11"}}
+                """).getAsJsonObject();
+        assertFalse(LegacyMinecraftVersionDetector.matches(metadata),
+                "An unbounded lower bound does not need a Fabric version-gate override.");
+        assertTrue(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata),
+                "The build marker still identifies a 1.21.11 binary that needs namespace conversion.");
+    }
+
+    @Test
+    void recognizesLegacyBytecodeFromAnExactMinecraftDependency() {
+        var metadata = JsonParser.parseString("""
+                {"id":"legacy-binary","version":"1.0.0","depends":{"minecraft":"~1.21.11"}}
+                """).getAsJsonObject();
+        assertTrue(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+    }
+
+    @Test
     void recognizesLegacyArtifactVersionWhenMinecraftRangeIsIndirect() {
         assertTrue(matches("""
                 {"id":"fabric-api","version":"0.141.6+1.21.11","depends":{"fabricloader":">=0.16.0"}}
