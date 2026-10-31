@@ -16,12 +16,12 @@ import java.util.regex.Pattern;
 final class LegacyMinecraftVersionDetector {
     private static final Pattern TARGET_LEGACY_VERSION =
             Pattern.compile("(?<![0-9])1\\.21\\.11(?![0-9])");
-    private static final Pattern UNBOUNDED_LOWER_BOUND =
-            Pattern.compile("^\\s*(>=|>)\\s*([0-9]+(?:\\.[0-9]+)+)\\s*$");
     private static final Pattern LEGACY_ARTIFACT_SUFFIX =
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
     private static final Pattern TARGET_MINECRAFT_VERSION =
             Pattern.compile("(?<![0-9])26\\.2(?![0-9])");
+    private static final Pattern NUMERIC_VERSION =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+)*)(?:-[A-Za-z0-9.-]+)?$");
 
     private LegacyMinecraftVersionDetector() {}
 
@@ -32,11 +32,9 @@ final class LegacyMinecraftVersionDetector {
         if (depends != null && depends.isJsonObject()) {
             JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
             if (minecraft != null) {
-                // Fabric accepts any alternative in a dependency array / disjunction.
-                // If one alternative admits 26.2, removing the dependency is unnecessary.
-                if (containsTargetVersion(minecraft) || containsUnboundedLowerBoundAdmittingTarget(minecraft)) {
-                    return false;
-                }
+                // Dependency constraints may express multiple alternatives. Only add
+                // an override when none of them admits the exact Minecraft 26.2 target.
+                if (constraintAdmitsTarget(minecraft)) return false;
                 if (containsLegacyVersion(minecraft)) return true;
                 if (minecraft.isJsonArray()) {
                     JsonArray ranges = minecraft.getAsJsonArray();
@@ -79,37 +77,76 @@ final class LegacyMinecraftVersionDetector {
                 && LEGACY_ARTIFACT_SUFFIX.matcher(version.getAsString().trim()).find();
     }
 
-    private static boolean containsTargetVersion(JsonElement value) {
+    private static boolean constraintAdmitsTarget(JsonElement value) {
         if (value == null) return false;
         if (value.isJsonArray()) {
             for (JsonElement alternative : value.getAsJsonArray()) {
-                if (containsTargetVersion(alternative)) return true;
+                if (constraintAdmitsTarget(alternative)) return true;
             }
             return false;
         }
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
-        return TARGET_MINECRAFT_VERSION.matcher(value.getAsString()).find();
-    }
 
-    private static boolean containsUnboundedLowerBoundAdmittingTarget(JsonElement value) {
-        if (value == null) return false;
-        if (value.isJsonArray()) {
-            for (JsonElement alternative : value.getAsJsonArray()) {
-                if (containsUnboundedLowerBoundAdmittingTarget(alternative)) return true;
-            }
-            return false;
-        }
-        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) return false;
         String[] alternatives = value.getAsString().split(Pattern.quote("||"));
         for (String alternative : alternatives) {
-            Matcher matcher = UNBOUNDED_LOWER_BOUND.matcher(alternative.trim());
-            if (!matcher.matches()) continue;
-            int comparison = compareNumericVersions(matcher.group(2), "26.2");
-            if (comparison < 0 || (comparison == 0 && ">=".equals(matcher.group(1)))) {
-                return true;
-            }
+            if (constraintBranchAdmitsTarget(alternative)) return true;
         }
         return false;
+    }
+
+    private static boolean constraintBranchAdmitsTarget(String branch) {
+        String trimmed = branch.trim();
+        if (trimmed.isEmpty()) return false;
+        if ("*".equals(trimmed) || "x".equalsIgnoreCase(trimmed)) return true;
+
+        java.util.StringTokenizer tokens = new java.util.StringTokenizer(trimmed.replace(',', ' '));
+        while (tokens.hasMoreTokens()) {
+            String token = tokens.nextToken();
+            String operator = "";
+            for (String candidate : new String[] { ">=", "<=", "!=", ">", "<", "=", "~", "^" }) {
+                if (token.startsWith(candidate)) {
+                    operator = candidate;
+                    break;
+                }
+            }
+            String versionText = token.substring(operator.length());
+            Matcher matcher = NUMERIC_VERSION.matcher(versionText);
+            if (!matcher.matches()) return false;
+            String numericVersion = matcher.group(1);
+            int comparison = compareNumericVersions("26.2", numericVersion);
+
+            boolean accepted = switch (operator) {
+                case ">=" -> comparison >= 0;
+                case ">" -> comparison > 0;
+                case "<=" -> comparison <= 0;
+                case "<" -> comparison < 0;
+                case "!=" -> comparison != 0;
+                case "~" -> comparison >= 0
+                        && compareNumericVersions("26.2", tildeUpperBound(numericVersion)) < 0;
+                case "^" -> comparison >= 0
+                        && compareNumericVersions("26.2", caretUpperBound(numericVersion)) < 0;
+                case "", "=" -> comparison == 0;
+                default -> false;
+            };
+            if (!accepted) return false;
+        }
+        return true;
+    }
+
+    private static String tildeUpperBound(String version) {
+        String[] parts = version.split(Pattern.quote("."));
+        if (parts.length == 1) return (Integer.parseInt(parts[0]) + 1) + ".0";
+        return parts[0] + "." + (Integer.parseInt(parts[1]) + 1);
+    }
+
+    private static String caretUpperBound(String version) {
+        String[] parts = version.split(Pattern.quote("."));
+        int major = Integer.parseInt(parts[0]);
+        int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+        if (major > 0 || parts.length == 1) return (major + 1) + ".0";
+        if (minor > 0 || parts.length == 2) return "0." + (minor + 1);
+        int patch = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
+        return "0.0." + (patch + 1);
     }
 
     private static int compareNumericVersions(String left, String right) {
