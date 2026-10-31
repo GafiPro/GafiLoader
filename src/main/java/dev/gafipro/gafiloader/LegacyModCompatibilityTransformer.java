@@ -133,7 +133,7 @@ final class LegacyModCompatibilityTransformer {
                         + jarPath, exception);
             }
 
-            boolean remapIntermediaryBytecode = declaresLegacyMinecraft(originalBytes);
+            boolean remapIntermediaryBytecode = declaresLegacyBytecode(originalBytes);
             ArchiveTransform transformed = transformArchive(originalBytes, 0,
                     classTweakerRemapper, bytecodeRemapper, remapIntermediaryBytecode);
             warnings.addAll(transformed.warnings());
@@ -443,7 +443,7 @@ final class LegacyModCompatibilityTransformer {
                         }
                     } else if (lowerName.endsWith(".jar")) {
                         boolean nestedLegacy = remapIntermediaryBytecode
-                                || declaresLegacyMinecraft(data);
+                                || declaresLegacyBytecode(data);
                         ArchiveTransform nested = transformArchive(data, depth + 1,
                                 classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
@@ -502,12 +502,12 @@ final class LegacyModCompatibilityTransformer {
                 adaptedModelLoadingClasses, List.copyOf(warnings));
     }
 
-    private static boolean declaresLegacyMinecraft(byte[] archive) throws IOException {
+    private static boolean declaresLegacyBytecode(byte[] archive) throws IOException {
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
-                    return metadataDeclaresLegacyMinecraft(
+                    return metadataDeclaresLegacyBytecode(
                             readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json"));
                 }
                 input.closeEntry();
@@ -530,7 +530,7 @@ final class LegacyModCompatibilityTransformer {
                 }
                 String name = entry.getName();
                 if ("fabric.mod.json".equals(name)
-                        && metadataDeclaresLegacyMinecraft(
+                        && metadataDeclaresLegacyBytecode(
                                 readBounded(input, MAX_METADATA_BYTES, name))) {
                     return true;
                 }
@@ -568,12 +568,12 @@ final class LegacyModCompatibilityTransformer {
         return false;
     }
 
-    private static boolean metadataDeclaresLegacyMinecraft(byte[] metadataBytes) {
+    private static boolean metadataDeclaresLegacyBytecode(byte[] metadataBytes) {
         try {
             JsonElement parsed = JsonParser.parseString(
                     new String(metadataBytes, StandardCharsets.UTF_8));
             return parsed.isJsonObject()
-                    && LegacyMinecraftVersionDetector.matches(parsed.getAsJsonObject());
+                    && LegacyMinecraftVersionDetector.targetsLegacyBytecode(parsed.getAsJsonObject());
         } catch (RuntimeException ignored) {
             return false;
         }
