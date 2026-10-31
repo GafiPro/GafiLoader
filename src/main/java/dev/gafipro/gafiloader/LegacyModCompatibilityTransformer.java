@@ -128,8 +128,8 @@ final class LegacyModCompatibilityTransformer {
             try {
                 originalBytes = readFileBounded(jarPath, MAX_TOP_LEVEL_ARCHIVE_BYTES);
             } catch (IOException exception) {
-                warnings.add("Could not read mod archive " + jarPath + ": " + exception.getMessage());
-                continue;
+                throw new IOException("Could not safely read mod archive during compatibility preparation: "
+                        + jarPath, exception);
             }
 
             boolean remapIntermediaryBytecode = declaresLegacyMinecraft(originalBytes);
@@ -310,8 +310,8 @@ final class LegacyModCompatibilityTransformer {
             LegacyBytecodeRemapper bytecodeRemapper,
             boolean remapIntermediaryBytecode) throws IOException {
         if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
-            return new ArchiveTransform(originalBytes, 0, 0, 0, 0,
-                    List.of("Nested JAR depth limit reached; deeper archive was left unchanged."));
+            throw new IOException("Nested mod archive depth exceeds the safety limit of "
+                    + MAX_NESTED_ARCHIVE_DEPTH + "; refusing to launch with partially transformed mods.");
         }
 
         String declaredClassTweakerResource = declaredClassTweakerResource(originalBytes);
@@ -453,7 +453,10 @@ final class LegacyModCompatibilityTransformer {
     }
 
     private static boolean containsLegacyModMetadata(byte[] archive, int depth) throws IOException {
-        if (depth > MAX_NESTED_ARCHIVE_DEPTH) return false;
+        if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
+            throw new IOException("Nested mod archive depth exceeds the safety limit of "
+                    + MAX_NESTED_ARCHIVE_DEPTH + " while discovering legacy metadata.");
+        }
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
