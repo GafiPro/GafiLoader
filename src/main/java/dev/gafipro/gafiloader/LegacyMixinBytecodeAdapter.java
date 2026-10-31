@@ -341,8 +341,14 @@ final class LegacyMixinBytecodeAdapter {
         String prefix = method ? metadata.shadowMethodPrefixes().getOrDefault(
                 memberKey(originalName, descriptor), "") : "";
         String lookupName = originalName;
-        if (method && !prefix.isEmpty() && lookupName.startsWith(prefix)) {
-            lookupName = lookupName.substring(prefix.length());
+        if (method && !prefix.isEmpty()) {
+            if (lookupName.startsWith(prefix)) {
+                lookupName = lookupName.substring(prefix.length());
+            } else {
+                // Mixin also permits a shadow declaration without the configured prefix.
+                // Only restore a prefix when it was actually present in the source method name.
+                prefix = "";
+            }
         }
 
         if (!(method ? lookupName.startsWith("method_") : lookupName.startsWith("field_"))) {
