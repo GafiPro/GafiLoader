@@ -28,6 +28,19 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void doesNotOverrideWhenAnotherMinecraftDependencyAlternativeAdmitsTargetVersion() {
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":["~1.21.11","~26.2"]}}
+                """));
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":"~1.21.11 || ~26.2"}}
+                """));
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":"~1.21.11 || >=1.21.11"}}
+                """));
+    }
+
+    @Test
     void recognizesLegacyBytecodeEvenWhenTheDependencyIsAnUnboundedLowerBound() {
         var metadata = JsonParser.parseString("""
                 {"id":"legacy-binary","version":"0.1.0+1.21.11","depends":{"minecraft":">=1.21.11"}}
