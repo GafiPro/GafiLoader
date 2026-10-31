@@ -154,6 +154,10 @@ final class MojangMappings {
         return mapDescriptor(obfuscatedDescriptor, obfuscatedToNamedClasses);
     }
 
+    String toNamedDescriptorRequired(String obfuscatedDescriptor) throws IOException {
+        return mapDescriptorRequired(obfuscatedDescriptor, obfuscatedToNamedClasses);
+    }
+
     String toObfuscatedDescriptor(String namedDescriptor) {
         return mapDescriptor(namedDescriptor, namedToObfuscatedClasses);
     }
@@ -162,6 +166,23 @@ final class MojangMappings {
                          String namedDescriptor) {
         return obfuscatedToNamedMembers.getOrDefault(
                 new MemberKey(obfuscatedOwner, kind, obfuscatedName, namedDescriptor), obfuscatedName);
+    }
+
+    String toNamedMemberRequired(String obfuscatedOwner, SymbolKind kind, String obfuscatedName,
+                                 String namedDescriptor) throws IOException {
+        String mapped = obfuscatedToNamedMembers.get(
+                new MemberKey(obfuscatedOwner, kind, obfuscatedName, namedDescriptor));
+        if (mapped != null) return mapped;
+        if (looksLikeObfuscatedMemberName(obfuscatedName)) {
+            throw new IOException("No Mojang 1.21.11 client mapping exists for obfuscated "
+                    + kind.name().toLowerCase(java.util.Locale.ROOT) + " "
+                    + obfuscatedOwner + "#" + obfuscatedName + namedDescriptor + ".");
+        }
+        return obfuscatedName;
+    }
+
+    private static boolean looksLikeObfuscatedMemberName(String name) {
+        return name != null && name.matches("[a-zA-Z]{1,2}");
     }
 
     int mappedClassCount() {
@@ -196,6 +217,53 @@ final class MojangMappings {
         }
 
         return mapType(Type.getType(descriptor), classNameMap).getDescriptor();
+    }
+
+    private static String mapDescriptorRequired(String descriptor,
+                                                Map<String, String> classNameMap) throws IOException {
+        if (descriptor == null || descriptor.isEmpty()) return descriptor;
+        try {
+            if (descriptor.charAt(0) == '(') {
+                Type[] arguments = Type.getArgumentTypes(descriptor);
+                Type[] mappedArguments = new Type[arguments.length];
+                for (int i = 0; i < arguments.length; i++) {
+                    mappedArguments[i] = mapTypeRequired(arguments[i], classNameMap);
+                }
+                Type mappedReturn = mapTypeRequired(Type.getReturnType(descriptor), classNameMap);
+                return Type.getMethodDescriptor(mappedReturn, mappedArguments);
+            }
+            return mapTypeRequired(Type.getType(descriptor), classNameMap).getDescriptor();
+        } catch (IllegalArgumentException exception) {
+            throw new IOException("Invalid Mojang mapping descriptor: " + descriptor, exception);
+        }
+    }
+
+    private static Type mapTypeRequired(Type type, Map<String, String> classNameMap)
+            throws IOException {
+        return switch (type.getSort()) {
+            case Type.OBJECT -> {
+                String name = type.getInternalName();
+                String mapped = classNameMap.get(name);
+                if (mapped == null && looksLikeObfuscatedClassName(name)) {
+                    throw new IOException("No Mojang 1.21.11 client mapping exists for descriptor class "
+                            + name + ".");
+                }
+                yield Type.getObjectType(mapped == null ? name : mapped);
+            }
+            case Type.ARRAY -> {
+                Type element = mapTypeRequired(type.getElementType(), classNameMap);
+                yield Type.getType("[".repeat(type.getDimensions()) + element.getDescriptor());
+            }
+            case Type.METHOD -> {
+                Type[] arguments = type.getArgumentTypes();
+                for (int i = 0; i < arguments.length; i++) {
+                    arguments[i] = mapTypeRequired(arguments[i], classNameMap);
+                }
+                yield Type.getMethodType(Type.getMethodDescriptor(
+                        mapTypeRequired(type.getReturnType(), classNameMap), arguments));
+            }
+            default -> type;
+        };
     }
 
     private static Type mapType(Type type, Map<String, String> classNameMap) {
