@@ -182,7 +182,9 @@ final class MojangMappings {
     }
 
     private static boolean looksLikeObfuscatedMemberName(String name) {
-        return name != null && name.matches("[a-zA-Z]{1,2}");
+        // ProGuard's ordinary member obfuscation uses short lowercase identifiers.
+        // Avoid treating legitimate short Java-style names such as "of" as obfuscated.
+        return name != null && name.matches("[a-z]");
     }
 
     int mappedClassCount() {
