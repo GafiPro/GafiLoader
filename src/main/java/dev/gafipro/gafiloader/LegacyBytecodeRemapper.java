@@ -22,6 +22,16 @@ final class LegacyBytecodeRemapper {
         this.mappings = mappings;
     }
 
+    static void verifyRuntimeSupport() throws IOException {
+        try {
+            Class.forName("org.objectweb.asm.commons.ClassRemapper", false,
+                    LegacyBytecodeRemapper.class.getClassLoader());
+        } catch (ClassNotFoundException | LinkageError exception) {
+            throw new IOException("ASM Commons is not available on the Fabric launch classpath; "
+                    + "the legacy bytecode namespace conversion cannot run safely.", exception);
+        }
+    }
+
     Result remap(byte[] originalBytes) throws IOException {
         try {
             ClassReader reader = new ClassReader(originalBytes);
@@ -55,7 +65,7 @@ final class LegacyBytecodeRemapper {
                 }
             };
 
-            reader.accept(new ClassRemapper(Opcodes.ASM9, writer, namespaceMappings), 0);
+            reader.accept(new ClassRemapper(writer, namespaceMappings), 0);
             byte[] mapped = writer.toByteArray();
             return new Result(mapped, !Arrays.equals(originalBytes, mapped));
         } catch (UncheckedIOException exception) {

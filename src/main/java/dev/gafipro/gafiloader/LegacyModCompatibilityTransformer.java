@@ -57,7 +57,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
@@ -68,7 +68,7 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Refusing to create compatibility files outside the active game directory.");
         }
         if (source.startsWith(staging)) {
-            return new Result(false, source, 0, 0, 0,
+            return new Result(false, source, 0, 0, 0, 0,
                     List.of("The configured mods directory points inside GafiLoader's own compatibility cache; "
                             + "automatic compatibility rewrites were skipped."));
         }

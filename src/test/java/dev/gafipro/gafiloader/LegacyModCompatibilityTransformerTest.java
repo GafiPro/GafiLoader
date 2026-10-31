@@ -192,11 +192,10 @@ class LegacyModCompatibilityTransformerTest {
 
     private LegacyClassTweakerMappings createBytecodeMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-bytecode-fixture.jar");
-        byte[] tiny = ("tiny\\t2\\t0\\tofficial\\tintermediary\\n"
-                + "c\\ta\\tnet/minecraft/class_7924\\n"
-                + "\\tf\\tLa;\\tb\\tfield_1234\\n"
-                + "\\tm\\t(La;)La;\\tc\\tmethod_2345\\n")
-                .replace("\\\\t", "\\t").replace("\\\\n", "\\n")
+        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\tnet/minecraft/class_7924\n"
+                + "\tf\tLa;\tb\tfield_1234\n"
+                + "\tm\t(La;)La;\tc\tmethod_2345\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
