@@ -64,7 +64,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
@@ -75,7 +75,7 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Refusing to create compatibility files outside the active game directory.");
         }
         if (source.startsWith(staging)) {
-            return new Result(false, source, 0, 0, 0, 0, 0,
+            return new Result(false, source, 0, 0, 0, 0, 0, 0,
                     List.of("The configured mods directory points inside GafiLoader's own compatibility cache; "
                             + "automatic compatibility rewrites were skipped."));
         }
@@ -121,6 +121,7 @@ final class LegacyModCompatibilityTransformer {
         List<String> warnings = new ArrayList<>();
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
+        int rewrittenMixinRefmaps = 0;
         int remappedClasses = 0;
         int adaptedModelLoadingClasses = 0;
         for (Path jarPath : jarPaths) {
@@ -137,17 +138,19 @@ final class LegacyModCompatibilityTransformer {
                     classTweakerRemapper, bytecodeRemapper, remapIntermediaryBytecode);
             warnings.addAll(transformed.warnings());
             if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0
-                    || transformed.remappedClasses() > 0 || transformed.adaptedModelLoadingClasses() > 0) {
+                    || transformed.rewrittenMixinRefmaps() > 0 || transformed.remappedClasses() > 0
+                    || transformed.adaptedModelLoadingClasses() > 0) {
                 changedArchives.put(source.relativize(jarPath), transformed.bytes());
                 rewrittenReferences += transformed.rewrittenReferences();
                 rewrittenClassTweakerFiles += transformed.rewrittenClassTweakerFiles();
+                rewrittenMixinRefmaps += transformed.rewrittenMixinRefmaps();
                 remappedClasses += transformed.remappedClasses();
                 adaptedModelLoadingClasses += transformed.adaptedModelLoadingClasses();
             }
         }
 
         if (changedArchives.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, 0, List.copyOf(warnings));
+            return new Result(false, source, 0, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
 
         if (Files.isSymbolicLink(internalRoot)) {
@@ -234,7 +237,29 @@ final class LegacyModCompatibilityTransformer {
         }
 
         return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
-                remappedClasses, adaptedModelLoadingClasses, changedArchives.size(), List.copyOf(warnings));
+                rewrittenMixinRefmaps, remappedClasses, adaptedModelLoadingClasses,
+                changedArchives.size(), List.copyOf(warnings));
+    }
+
+    private static Map<String, List<String>> collectMixinTargets(byte[] archive) throws IOException {
+        Map<String, List<String>> targets = new LinkedHashMap<>();
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (entry.isDirectory() || !entry.getName().toLowerCase(Locale.ROOT).endsWith(".class")) {
+                    input.closeEntry();
+                    continue;
+                }
+                byte[] classBytes = readBounded(input, MAX_CLASS_ENTRY_BYTES, entry.getName());
+                List<String> classTargets = LegacyBytecodeRemapper.mixinTargets(classBytes);
+                if (!classTargets.isEmpty()) {
+                    String className = entry.getName().substring(0, entry.getName().length() - ".class".length());
+                    targets.put(className, classTargets);
+                }
+                input.closeEntry();
+            }
+        }
+        return Map.copyOf(targets);
     }
 
     private static void auditArchiveForIntermediaryClassTweakers(byte[] archive, int depth,
@@ -315,12 +340,15 @@ final class LegacyModCompatibilityTransformer {
         }
 
         String declaredClassTweakerResource = declaredClassTweakerResource(originalBytes);
+        Map<String, List<String>> mixinTargets = remapIntermediaryBytecode && bytecodeRemapper != null
+                ? collectMixinTargets(originalBytes) : Map.of();
         boolean adaptLegacyModelLoadingApi = remapIntermediaryBytecode
                 && declaresModId(originalBytes, LegacyFabricModelLoadingApiAdapter.MODULE_ID);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
         int rewrittenClassTweakerFiles = 0;
+        int rewrittenMixinRefmaps = 0;
         int remappedClasses = 0;
         int adaptedModelLoadingClasses = 0;
         List<String> warnings = new ArrayList<>();
@@ -399,11 +427,13 @@ final class LegacyModCompatibilityTransformer {
                                 classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
                         if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0
-                                || nested.remappedClasses() > 0 || nested.adaptedModelLoadingClasses() > 0) {
+                                || nested.rewrittenMixinRefmaps() > 0 || nested.remappedClasses() > 0
+                                || nested.adaptedModelLoadingClasses() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
                             rewrittenClassTweakerFiles += nested.rewrittenClassTweakerFiles();
+                            rewrittenMixinRefmaps += nested.rewrittenMixinRefmaps();
                             remappedClasses += nested.remappedClasses();
                             adaptedModelLoadingClasses += nested.adaptedModelLoadingClasses();
                         }
@@ -414,6 +444,18 @@ final class LegacyModCompatibilityTransformer {
                             data = remapped.contents().getBytes(StandardCharsets.UTF_8);
                             archiveChanged = true;
                             rewrittenClassTweakerFiles++;
+                        }
+                    } else if (remapIntermediaryBytecode && lowerName.endsWith(".refmap.json")) {
+                        if (bytecodeRemapper == null) {
+                            throw new IOException("A legacy Mixin refmap was found but the 1.21.11 mappings "
+                                    + "were not initialized.");
+                        }
+                        LegacyMixinBytecodeAdapter.RefmapResult remapped =
+                                bytecodeRemapper.remapRefmap(data, mixinTargets);
+                        if (remapped.remappedSelectors() > 0) {
+                            data = remapped.bytes();
+                            archiveChanged = true;
+                            rewrittenMixinRefmaps++;
                         }
                     }
                 }
@@ -432,10 +474,11 @@ final class LegacyModCompatibilityTransformer {
         }
 
         if (!archiveChanged) {
-            return new ArchiveTransform(originalBytes, 0, 0, 0, 0, List.copyOf(warnings));
+            return new ArchiveTransform(originalBytes, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
         return new ArchiveTransform(output.toByteArray(), rewrittenReferences,
-                rewrittenClassTweakerFiles, remappedClasses, adaptedModelLoadingClasses, List.copyOf(warnings));
+                rewrittenClassTweakerFiles, rewrittenMixinRefmaps, remappedClasses,
+                adaptedModelLoadingClasses, List.copyOf(warnings));
     }
 
     private static boolean declaresLegacyMinecraft(byte[] archive) throws IOException {
@@ -758,14 +801,15 @@ final class LegacyModCompatibilityTransformer {
     }
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
-                  int rewrittenClassTweakerFiles, int remappedClasses,
+                  int rewrittenClassTweakerFiles, int rewrittenMixinRefmaps, int remappedClasses,
                   int adaptedModelLoadingClasses, int modifiedJars, List<String> warnings) {}
 
     private record FieldReference(String owner, String name) {}
 
     private record ArchiveTransform(byte[] bytes, int rewrittenReferences,
-                                    int rewrittenClassTweakerFiles, int remappedClasses,
-                                    int adaptedModelLoadingClasses, List<String> warnings) {}
+                                    int rewrittenClassTweakerFiles, int rewrittenMixinRefmaps,
+                                    int remappedClasses, int adaptedModelLoadingClasses,
+                                    List<String> warnings) {}
 
     private record ClassTransform(byte[] bytes, int rewrittenReferences) {}
 }
