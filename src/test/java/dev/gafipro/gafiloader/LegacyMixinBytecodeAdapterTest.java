@@ -55,6 +55,9 @@ class LegacyMixinBytecodeAdapterTest {
                 LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
         assertThrows(IOException.class, () -> mappings.mapClass(TARGET_OWNER),
                 "An unresolved obfuscated class must fail when a mod actually references it.");
+        assertThrows(IOException.class, () -> mappings.mapMember(TARGET_OWNER, "field_1234",
+                        "Ljava/lang/Object;", false),
+                "ClassTweaker member remapping must validate the owner before returning a member mapping.");
     }
 
     @Test
