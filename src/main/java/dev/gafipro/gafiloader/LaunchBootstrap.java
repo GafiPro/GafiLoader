@@ -92,6 +92,12 @@ public final class LaunchBootstrap {
                     log(logPath, "Legacy bytecode compatibility: remapped "
                             + compatibilityResult.remappedClasses()
                             + " class file(s) from Intermediary to the 26.2 named namespace.", false);
+                    if (compatibilityResult.adaptedModelLoadingClasses() > 0) {
+                        log(logPath, "Fabric model-loading compatibility: adapted "
+                                + compatibilityResult.adaptedModelLoadingClasses()
+                                + " legacy class file(s) from BlockModel to the 26.2 CuboidModel implementation.",
+                                false);
+                    }
                     log(logPath, "ClassTweaker compatibility: remapped "
                             + compatibilityResult.rewrittenClassTweakerFiles()
                             + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",
