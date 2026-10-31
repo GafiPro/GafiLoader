@@ -148,7 +148,7 @@ public final class LegacyModRemapper {
                 var metadata = com.google.gson.JsonParser.parseString(
                         new String(metadataBytes, java.nio.charset.StandardCharsets.UTF_8));
                 return metadata.isJsonObject()
-                        && LegacyMinecraftVersionDetector.matches(metadata.getAsJsonObject());
+                        && LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata.getAsJsonObject());
             }
         }
     }
