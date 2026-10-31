@@ -207,13 +207,12 @@ final class LegacyClassTweakerMappings {
      */
     String mapMixinMemberName(String targetOwner, String name, String descriptor, boolean method)
             throws IOException {
-        mapClass(targetOwner);
         String prefix = method ? "method_" : "field_";
         if (name == null || !name.startsWith(prefix)) return name;
-        if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) {
-            throw new IOException("Cannot map legacy mixin member " + name
-                    + " because its @Mixin target is not an Intermediary Minecraft class: " + targetOwner);
-        }
+        // Mixin targets may belong to another mod or library. This bridge only remaps
+        // Minecraft's Intermediary namespace; names on external targets are not ours to change.
+        if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) return name;
+        mapClass(targetOwner);
         return mapMember(targetOwner, name, descriptor, method).name();
     }
 
@@ -223,12 +222,14 @@ final class LegacyClassTweakerMappings {
      */
     String mapMixinSelectorName(String targetOwner, String name, String descriptor, boolean method)
             throws IOException {
+        String prefix = method ? "method_" : "field_";
+        if (name == null || !name.startsWith(prefix)) return name;
+        // External named targets retain their own member naming conventions.
+        if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) return name;
         mapClass(targetOwner);
         if (descriptor != null && !descriptor.isBlank()) {
             return mapMixinMemberName(targetOwner, name, descriptor, method);
         }
-        String prefix = method ? "method_" : "field_";
-        if (name == null || !name.startsWith(prefix)) return name;
 
         MemberKind kind = method ? MemberKind.METHOD : MemberKind.FIELD;
         Set<MemberName> candidates = new HashSet<>();
