@@ -86,7 +86,7 @@ final class LegacyMixinBytecodeAdapter {
                         if (owner.equals(currentClass)) {
                             String key = memberKey(name, descriptor);
                             if (metadata.shadowMethods().contains(key)) {
-                                return mapMixinDeclarationName(metadata, name, descriptor, mappings);
+                                return mapMixinDeclarationName(metadata, name, descriptor, true, mappings);
                             }
                             if (metadata.inferredAccessors().containsKey(key)) {
                                 return mapInferredAccessorName(metadata, name, descriptor, mappings);
@@ -336,16 +336,16 @@ final class LegacyMixinBytecodeAdapter {
     }
 
     private static String mapMixinDeclarationName(MixinMetadata metadata, String originalName,
-                                                   String descriptor,
+                                                   String descriptor, boolean method,
                                                    LegacyClassTweakerMappings mappings) throws IOException {
-        String prefix = metadata.shadowMethodPrefixes().getOrDefault(
-                memberKey(originalName, descriptor), "");
+        String prefix = method ? metadata.shadowMethodPrefixes().getOrDefault(
+                memberKey(originalName, descriptor), "") : "";
         String lookupName = originalName;
-        if (!prefix.isEmpty() && lookupName.startsWith(prefix)) {
+        if (method && !prefix.isEmpty() && lookupName.startsWith(prefix)) {
             lookupName = lookupName.substring(prefix.length());
         }
 
-        if (!lookupName.startsWith("method_")) {
+        if (!(method ? lookupName.startsWith("method_") : lookupName.startsWith("field_"))) {
             return originalName;
         }
         if (metadata.targetOwners().isEmpty()) {
@@ -357,7 +357,7 @@ final class LegacyMixinBytecodeAdapter {
         List<String> failures = new ArrayList<>();
         for (String targetOwner : metadata.targetOwners()) {
             try {
-                mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, true));
+                mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, method));
             } catch (IOException exception) {
                 failures.add(exception.getMessage());
             }
