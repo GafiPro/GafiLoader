@@ -29,11 +29,22 @@ final class LegacyClassTweakerRemapper {
 
     Result remap(String text) throws IOException {
         if (text == null || text.isEmpty()) return new Result(text, false);
-        if (text.charAt(0) == '\uFEFF') text = text.substring(1);
         String[] lines = text.split("\\R", -1);
         if (lines.length == 0) return new Result(text, false);
 
-        String[] header = lines[0].trim().split("\\s+");
+        // Be tolerant of a UTF-8 BOM preceded by whitespace. Some tools prepend
+        // indentation before the BOM, so checking only charAt(0) is insufficient.
+        String firstLine = lines[0];
+        int headerStart = 0;
+        while (headerStart < firstLine.length()) {
+            char character = firstLine.charAt(headerStart);
+            if (character == (char) 0xFEFF || Character.isWhitespace(character)) {
+                headerStart++;
+            } else {
+                break;
+            }
+        }
+        String[] header = firstLine.substring(headerStart).trim().split("\\s+");
         if (header.length != 3
                 || !(header[0].equals("classTweaker") || header[0].equals("accessWidener"))) {
             return new Result(text, false);
