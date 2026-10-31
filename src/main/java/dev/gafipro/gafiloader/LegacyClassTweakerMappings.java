@@ -189,12 +189,12 @@ final class LegacyClassTweakerMappings {
      */
     String mapMixinMemberName(String targetOwner, String name, String descriptor, boolean method)
             throws IOException {
+        String prefix = method ? "method_" : "field_";
+        if (name == null || !name.startsWith(prefix)) return name;
         if (targetOwner == null || !targetOwner.startsWith("net/minecraft/class_")) {
             throw new IOException("Cannot map legacy mixin member " + name
                     + " because its @Mixin target is not an Intermediary Minecraft class: " + targetOwner);
         }
-        String prefix = method ? "method_" : "field_";
-        if (name == null || !name.startsWith(prefix)) return name;
         return mapMember(targetOwner, name, descriptor, method).name();
     }
 
