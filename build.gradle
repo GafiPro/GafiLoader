@@ -64,8 +64,8 @@ def bootstrapJarTask = tasks.register('bootstrapJar', Jar) {
     destinationDirectory = layout.buildDirectory.dir('bootstrap')
     from(sourceSets.main.output.classesDirs) {
         include 'dev/gafipro/gafiloader/LaunchBootstrap.class'
-        include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class'
-        include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class'
+        // Keep every nested helper/exception/record: the bootstrap runs without the full app JAR.
+        include 'dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator*.class'
         include 'dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class'
         include 'dev/gafipro/gafiloader/LegacyModCompatibilityTransformer*.class'
         include 'dev/gafipro/gafiloader/LegacyFabricModelLoadingApiAdapter*.class'

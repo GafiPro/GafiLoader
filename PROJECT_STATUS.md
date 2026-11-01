@@ -299,3 +299,13 @@ Em cada sessão de trabalho:
 - Clarificação operacional: instalar o EXE da aplicação GafiLoader apenas atualiza a aplicação. É necessário voltar a executar GafiLoader a partir do menu Iniciar para que a aplicação copie o novo JAR e atualize o `gafiloader-26.2.json`; depois fechar/reabrir o Launcher. A versão `0.1.745` reportada pelo Launcher indica que o perfil em disco continua a referenciar essa build, e não prova que a aplicação `0.1.751` já tenha reparado o perfil.
 - Estado: alteração preparada; aguarda CI Linux/Windows e novo instalador. A remoção da URL externa corrige a configuração incorreta, mas não substitui a necessidade de executar a aplicação para instalar o JAR local e atualizar a referência de versão.
 - Próximo passo: instalar o novo EXE da aplicação, executar GafiLoader uma vez com o Minecraft Launcher completamente fechado, confirmar no `versions/gafiloader-26.2/gafiloader-26.2.json` que a library coordinate corresponde à nova versão e que o respetivo JAR existe em `libraries/dev/gafipro/gafiloader-bootstrap/<version>/`.
+
+
+### 2026-11-01 — Incluir a classe interna UnsafeArchiveException no bootstrap
+
+- Log real do utilizador com bootstrap 0.1.752: falha em `generating Fabric dependency overrides` com `NoClassDefFoundError: dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$UnsafeArchiveException`.
+- Causa confirmada: `build.gradle` incluía apenas `LegacyDependencyOverrideGenerator.class` e `LegacyDependencyOverrideGenerator$Result.class` no JAR mínimo de bootstrap. A classe privada aninhada `UnsafeArchiveException` foi compilada, mas ficou fora do artefacto inserido no classpath Minecraft.
+- Correção: alterar o filtro do Gradle para `LegacyDependencyOverrideGenerator*.class`, incluindo todas as classes internas do gerador, e exigir `LegacyDependencyOverrideGenerator$UnsafeArchiveException.class` na validação do JAR no instalador.
+- Regressões: `BootstrapJarPackagingTest` verifica a presença da exceção interna no JAR realmente embutido; `ProfileBootstrapInstallerTest` verifica que um JAR que omite essa classe é rejeitado antes de alterar o perfil ou registar a biblioteca.
+- A falha é de empacotamento do GafiLoader, não dos mods do utilizador. A versão 0.1.752 não deve ser usada para validar o arranque; é necessário o novo instalador depois da CI Linux/Windows passar.
+- Próximo passo: executar CI, descarregar o novo instalador e testar. A primeira confirmação esperada no novo preflight é ultrapassar a etapa `generating Fabric dependency overrides`.

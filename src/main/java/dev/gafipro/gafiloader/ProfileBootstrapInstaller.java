@@ -522,6 +522,7 @@ public final class ProfileBootstrapInstaller {
                     "dev/gafipro/gafiloader/LaunchBootstrap.class",
                     "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
                     "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                    "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$UnsafeArchiveException.class",
                     "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
                     "com/google/gson/Gson.class",
                     "com/google/gson/GsonBuilder.class",

@@ -341,6 +341,37 @@ class ProfileBootstrapInstallerTest {
     }
 
     @Test
+    void refusesBootstrapMissingDependencyGeneratorNestedExceptionBeforePatchingProfile() throws Exception {
+        Path minecraft = Files.createDirectory(temporaryDirectory.resolve("missing-nested-bootstrap-minecraft"));
+        Path profileDirectory = Files.createDirectories(minecraft.resolve("versions/gafiloader-26.2"));
+        Path profile = profileDirectory.resolve("gafiloader-26.2.json");
+        String original = """
+                {
+                  "id": "gafiloader-26.2",
+                  "inheritsFrom": "26.2",
+                  "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                  "libraries": [{"name": "net.fabricmc:fabric-loader:0.20.1"}]
+                }
+                """;
+        Files.writeString(profile, original, StandardCharsets.UTF_8);
+        Path launcherProfiles = minecraft.resolve("launcher_profiles.json");
+        String launcherOriginal = "{\"profiles\":{},\"settings\":{}}";
+        Files.writeString(launcherProfiles, launcherOriginal, StandardCharsets.UTF_8);
+
+        String missingEntry = "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$UnsafeArchiveException.class";
+        byte[] incompleteJar = createBootstrapJar("0.1.590", null, missingEntry);
+        IOException failure = assertThrows(IOException.class, () -> new ProfileBootstrapInstaller().install(
+                minecraft, new ByteArrayInputStream(incompleteJar), "0.1.590"));
+        assertTrue(failure.getMessage().contains("missing required entry: " + missingEntry));
+
+        assertEquals(original, Files.readString(profile, StandardCharsets.UTF_8));
+        assertEquals(launcherOriginal, Files.readString(launcherProfiles, StandardCharsets.UTF_8));
+        assertFalse(Files.exists(profile.resolveSibling("gafiloader-26.2.json.gafiloader-backup")));
+        assertFalse(Files.exists(minecraft.resolve(
+                "libraries/dev/gafipro/gafiloader-bootstrap/0.1.590/gafiloader-bootstrap-0.1.590.jar")));
+    }
+
+    @Test
     void refusesToPatchProfilesWithAnUnexpectedEntrypoint() throws Exception {
         Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft"));
         Path profileDirectory = Files.createDirectories(
@@ -446,6 +477,11 @@ class ProfileBootstrapInstallerTest {
     }
 
     private static byte[] createBootstrapJar(String version, String invalidClassEntry) throws IOException {
+        return createBootstrapJar(version, invalidClassEntry, null);
+    }
+
+    private static byte[] createBootstrapJar(String version, String invalidClassEntry,
+                                             String omittedClassEntry) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         Manifest manifest = new Manifest();
         Attributes attributes = manifest.getMainAttributes();
@@ -457,6 +493,7 @@ class ProfileBootstrapInstallerTest {
                 "dev/gafipro/gafiloader/LaunchBootstrap.class",
                 "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class",
                 "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class",
+                "dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$UnsafeArchiveException.class",
                 "dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.class",
                 "com/google/gson/Gson.class",
                 "com/google/gson/GsonBuilder.class",
@@ -468,6 +505,7 @@ class ProfileBootstrapInstallerTest {
         };
         try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
             for (String name : entries) {
+                if (name.equals(omittedClassEntry)) continue;
                 jar.putNextEntry(new JarEntry(name));
                 if (name.equals(invalidClassEntry)) {
                     jar.write(new byte[] {0, 0, 0, 0, 0, 0, 0, 0});

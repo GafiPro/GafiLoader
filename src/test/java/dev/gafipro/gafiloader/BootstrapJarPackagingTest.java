@@ -28,6 +28,10 @@ class BootstrapJarPackagingTest {
         }
 
         assertTrue(entries.contains("dev/gafipro/gafiloader/LaunchBootstrap.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$Result.class"));
+        assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyDependencyOverrideGenerator$UnsafeArchiveException.class"),
+                "All nested dependency-generator exceptions required by the bootstrap must be packaged.");
         assertTrue(entries.contains("dev/gafipro/gafiloader/LegacyModCompatibilityTransformer.class"));
         assertTrue(entries.contains("com/google/gson/Gson.class"),
                 "The bootstrap keeps its pinned Gson dependency.");
