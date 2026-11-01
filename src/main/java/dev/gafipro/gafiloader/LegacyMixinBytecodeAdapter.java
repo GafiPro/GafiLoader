@@ -49,6 +49,11 @@ final class LegacyMixinBytecodeAdapter {
     private static final String INVOKER_ANNOTATION =
             "Lorg/spongepowered/asm/mixin/gen/Invoker;";
     private static final String DEFAULT_SHADOW_PREFIX = "shadow$";
+    private static final String SYSTEM_REPORT_TARGET = "net/minecraft/SystemReport";
+    private static final String SUPPLIER_INTERNAL_NAME = "java/util/function/Supplier";
+    private static final String CRASH_REPORT_DETAIL_INTERNAL_NAME = "net/minecraft/CrashReportDetail";
+    private static final String LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR =
+            "(Ljava/lang/String;Ljava/util/function/Supplier;)V";
     private static final Gson REFMAP_GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private LegacyMixinBytecodeAdapter() {}
@@ -197,16 +202,31 @@ final class LegacyMixinBytecodeAdapter {
 
         MixinMetadata metadata = inspectMixinMetadata(reader);
         String currentClass = reader.getClassName();
+        boolean adaptSystemReportDetail = requiresSystemReportDetailAdapter(metadata, mappings);
         try {
             ClassWriter writer = new ClassWriter(reader, 0);
             Remapper namespaceMappings = new Remapper() {
                 @Override
                 public String map(String internalName) {
+                    if (adaptSystemReportDetail && SUPPLIER_INTERNAL_NAME.equals(internalName)) {
+                        return CRASH_REPORT_DETAIL_INTERNAL_NAME;
+                    }
                     try {
                         return mappings.mapClass(internalName);
                     } catch (IOException exception) {
                         throw new UncheckedIOException(exception);
                     }
+                }
+
+                @Override
+                public String mapInvokeDynamicMethodName(String name, String descriptor) {
+                    // CrashReportDetail implements Callable, whose SAM is call(), rather than
+                    // Supplier.get(). Keep the existing lambda body and retarget its call site.
+                    if (adaptSystemReportDetail && "get".equals(name)
+                            && ("()L" + SUPPLIER_INTERNAL_NAME + ";").equals(descriptor)) {
+                        return "call";
+                    }
+                    return super.mapInvokeDynamicMethodName(name, descriptor);
                 }
 
                 @Override
@@ -474,6 +494,21 @@ final class LegacyMixinBytecodeAdapter {
         return new MixinMetadata(reader.getClassName(), List.copyOf(targets),
                 Set.copyOf(shadowMethods), Set.copyOf(shadowFields),
                 Map.copyOf(shadowMethodPrefixes), Map.copyOf(inferredAccessors));
+    }
+
+    private static boolean requiresSystemReportDetailAdapter(MixinMetadata metadata,
+            LegacyClassTweakerMappings mappings) throws IOException {
+        String legacyDetailKeySuffix = memberKey("", LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR);
+        boolean hasLegacyDetailShadow = metadata.shadowMethods().stream()
+                .anyMatch(key -> key.endsWith(legacyDetailKeySuffix));
+        if (!hasLegacyDetailShadow) return false;
+
+        for (String targetOwner : metadata.targetOwners()) {
+            if (SYSTEM_REPORT_TARGET.equals(mappings.mapClass(targetOwner))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String mapMixinDeclarationName(MixinMetadata metadata, String originalName,
