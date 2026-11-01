@@ -46,6 +46,9 @@ class LegacyMinecraftVersionDetectorTest {
                 {"id":"multi","depends":{"minecraft":["~1.21.11","26.2.x"]}}
                 """));
         assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":["~1.21.11","26.2.X"]}}
+                """));
+        assertFalse(matches("""
                 {"id":"multi","depends":{"minecraft":["~1.21.11","26.x"]}}
                 """));
         assertFalse(matches("""
