@@ -22,6 +22,8 @@ final class LegacyMinecraftVersionDetector {
             Pattern.compile("(?:^|\\+)1\\.21\\.11$");
     private static final Pattern NUMERIC_VERSION =
             Pattern.compile("^([0-9]+(?:\\.[0-9]+)*)(?:-[A-Za-z0-9.-]+)?$");
+    private static final Pattern WILDCARD_VERSION =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+)*)\\.(?:x|X|\\*)$");
 
     private LegacyMinecraftVersionDetector() {}
 
@@ -110,6 +112,13 @@ final class LegacyMinecraftVersionDetector {
                 }
             }
             String versionText = token.substring(operator.length());
+            if (operator.isEmpty()) {
+                Matcher wildcard = WILDCARD_VERSION.matcher(versionText);
+                if (wildcard.matches()) {
+                    if (!wildcardPrefixMatchesTarget(wildcard.group(1))) return false;
+                    continue;
+                }
+            }
             Matcher matcher = NUMERIC_VERSION.matcher(versionText);
             if (!matcher.matches()) return false;
             String numericVersion = matcher.group(1);
@@ -129,6 +138,16 @@ final class LegacyMinecraftVersionDetector {
                 default -> false;
             };
             if (!accepted) return false;
+        }
+        return true;
+    }
+
+    private static boolean wildcardPrefixMatchesTarget(String prefix) {
+        String[] prefixParts = prefix.split(Pattern.quote("."));
+        String[] targetParts = "26.2".split(Pattern.quote("."));
+        for (int i = 0; i < prefixParts.length; i++) {
+            int targetPart = i < targetParts.length ? Integer.parseInt(targetParts[i]) : 0;
+            if (Integer.parseInt(prefixParts[i]) != targetPart) return false;
         }
         return true;
     }
