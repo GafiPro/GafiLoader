@@ -7,6 +7,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -36,9 +37,68 @@ class LegacyMixinBytecodeAdapterTest {
     private static final String MODIFY_RETURN_VALUE =
             "Lcom/llamalad7/mixinextras/injector/ModifyReturnValue;";
     private static final String AT = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String SYSTEM_REPORT_TARGET_OWNER = "net/minecraft/class_9001";
+    private static final String SYSTEM_REPORT_MIXIN_CLASS =
+            "net/fabricmc/fabric/mixin/crash/report/info/SystemReportMixin";
+    private static final String LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR =
+            "(Ljava/lang/String;Ljava/util/function/Supplier;)V";
+    private static final String TARGET_SYSTEM_REPORT_DETAIL_DESCRIPTOR =
+            "(Ljava/lang/String;Lnet/minecraft/CrashReportDetail;)V";
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void adaptsLegacySystemReportSupplierShadowToCrashReportDetailCallable() throws Exception {
+        LegacyClassTweakerMappings mappings = createSystemReportMappings();
+        LegacyMixinBytecodeAdapter.Result result = LegacyMixinBytecodeAdapter.remap(
+                legacySystemReportMixin(), mappings);
+
+        AtomicReference<String> shadowName = new AtomicReference<>();
+        AtomicReference<String> shadowDescriptor = new AtomicReference<>();
+        AtomicReference<String> callSiteName = new AtomicReference<>();
+        AtomicReference<String> callSiteDescriptor = new AtomicReference<>();
+        AtomicReference<String> invocationName = new AtomicReference<>();
+        AtomicReference<String> invocationDescriptor = new AtomicReference<>();
+
+        new ClassReader(result.bytes()).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if ("setDetail".equals(name)) {
+                    shadowName.set(name);
+                    shadowDescriptor.set(descriptor);
+                }
+                if (!"fillSystemDetails".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitInvokeDynamicInsn(String indyName, String indyDescriptor,
+                            Handle bootstrapMethodHandle, Object... bootstrapMethodArguments) {
+                        callSiteName.set(indyName);
+                        callSiteDescriptor.set(indyDescriptor);
+                    }
+
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        if ("setDetail".equals(methodName)) {
+                            invocationName.set(methodName);
+                            invocationDescriptor.set(methodDescriptor);
+                        }
+                    }
+                };
+            }
+        }, 0);
+
+        assertTrue(result.changed());
+        assertEquals("setDetail", shadowName.get());
+        assertEquals(TARGET_SYSTEM_REPORT_DETAIL_DESCRIPTOR, shadowDescriptor.get());
+        assertEquals("call", callSiteName.get(),
+                "CrashReportDetail inherits Callable.call(), not Supplier.get().");
+        assertEquals("()Lnet/minecraft/CrashReportDetail;", callSiteDescriptor.get());
+        assertEquals("setDetail", invocationName.get());
+        assertEquals(TARGET_SYSTEM_REPORT_DETAIL_DESCRIPTOR, invocationDescriptor.get());
+    }
 
     @Test
     void rejectsAnObfuscatedOfficialClassWithoutAMojangNameMapping() throws Exception {
@@ -421,6 +481,22 @@ class LegacyMixinBytecodeAdapterTest {
         return writer.toByteArray();
     }
 
+    private LegacyClassTweakerMappings createSystemReportMappings() throws IOException {
+        Path intermediaryJar = temporaryDirectory.resolve("intermediary-system-report-fixture.jar");
+        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
+                + "c\ta\t" + SYSTEM_REPORT_TARGET_OWNER + "\n"
+                + "\tm\t(Ljava/lang/String;Ljava/util/function/Supplier;)V\tb\tmethod_9002\n")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
+
+        Path mojangMappings = temporaryDirectory.resolve("client-mappings-system-report-fixture.txt");
+        Files.writeString(mojangMappings, """
+                net.minecraft.SystemReport -> a:
+                    void setDetail(java.lang.String, java.util.function.Supplier) -> b
+                """, StandardCharsets.UTF_8);
+        return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+    }
+
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-mixin-fixture.jar");
         byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
@@ -437,6 +513,52 @@ class LegacyMixinBytecodeAdapterTest {
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+    }
+
+    private static byte[] legacySystemReportMixin() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                SYSTEM_REPORT_MIXIN_CLASS, null, "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
+        mixin.visit("value", Type.getObjectType(SYSTEM_REPORT_TARGET_OWNER));
+        mixin.visitEnd();
+
+        MethodVisitor shadow = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "method_9002", LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR, null, null);
+        shadow.visitAnnotation(SHADOW, true).visitEnd();
+        shadow.visitEnd();
+
+        MethodVisitor fill = writer.visitMethod(Opcodes.ACC_PRIVATE, "fillSystemDetails", "()V", null, null);
+        fill.visitCode();
+        fill.visitVarInsn(Opcodes.ALOAD, 0);
+        fill.visitLdcInsn("Fabric Mods");
+        fill.visitInvokeDynamicInsn("get", "()Ljava/util/function/Supplier;",
+                new Handle(Opcodes.H_INVOKESTATIC, "java/lang/invoke/LambdaMetafactory", "metafactory",
+                        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                                + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                                + "Ljava/lang/invoke/CallSite;", false),
+                Type.getMethodType("()Ljava/lang/Object;"),
+                new Handle(Opcodes.H_INVOKESTATIC, SYSTEM_REPORT_MIXIN_CLASS,
+                        "lambda$fillSystemDetails$0", "()Ljava/lang/String;", false),
+                Type.getMethodType("()Ljava/lang/String;"));
+        fill.visitMethodInsn(Opcodes.INVOKEVIRTUAL, SYSTEM_REPORT_MIXIN_CLASS,
+                "method_9002", LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR, false);
+        fill.visitInsn(Opcodes.RETURN);
+        fill.visitMaxs(3, 1);
+        fill.visitEnd();
+
+        MethodVisitor lambda = writer.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+                "lambda$fillSystemDetails$0", "()Ljava/lang/String;", null, null);
+        lambda.visitCode();
+        lambda.visitLdcInsn("Fabric Mods");
+        lambda.visitInsn(Opcodes.ARETURN);
+        lambda.visitMaxs(1, 0);
+        lambda.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] legacyMixinClass() {
