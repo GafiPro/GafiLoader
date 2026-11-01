@@ -32,11 +32,15 @@ public final class LaunchBootstrap {
     private LaunchBootstrap() {}
 
     public static void main(String[] args) throws Exception {
-        Path gameDirectory = resolveGameDirectory(args);
-        Path modsDirectory = resolveModsDirectory(gameDirectory);
-        Path configPath = gameDirectory.resolve("config").resolve("fabric_loader_dependencies.json");
-        Path logPath = gameDirectory.resolve("logs").resolve("gafiloader-preflight.log");
-        initializeLog(logPath);
+        Path logPath = null;
+        String stage = "resolving the Minecraft game directory";
+        try {
+            Path gameDirectory = resolveGameDirectory(args);
+            Path modsDirectory = resolveModsDirectory(gameDirectory);
+            Path configPath = gameDirectory.resolve("config").resolve("fabric_loader_dependencies.json");
+            logPath = gameDirectory.resolve("logs").resolve("gafiloader-preflight.log");
+            stage = "initializing the preflight log";
+            initializeLog(logPath);
         String bootstrapVersion = LaunchBootstrap.class.getPackage().getImplementationVersion();
         log(logPath, "Pre-launch bootstrap active.", false);
         log(logPath, "GafiLoader bootstrap version: "
@@ -46,17 +50,25 @@ public final class LaunchBootstrap {
         log(logPath, "Dependency override config: " + configPath, false);
         log(logPath, "Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")", false);
 
+        stage = "reading the existing Fabric dependency override config";
+        log(logPath, "Reading existing dependency override config.", false);
         byte[] originalConfig = Files.isRegularFile(configPath) ? Files.readAllBytes(configPath) : null;
+        log(logPath, "Existing dependency override config read successfully.", false);
         byte[] generatedConfig = null;
         boolean configWasPrepared = false;
         String originalFabricModsFolder = System.getProperty("fabric.modsFolder");
 
+        stage = "scanning the mods directory for JAR archives";
+        log(logPath, "Scanning mods directory for JAR archives.", false);
         if (Files.isDirectory(modsDirectory) && containsJar(modsDirectory)) {
             try {
+                stage = "generating Fabric dependency overrides";
                 LegacyDependencyOverrideGenerator.Result result =
                         new LegacyDependencyOverrideGenerator().generate(modsDirectory, configPath);
+                stage = "reading the generated dependency override config";
                 generatedConfig = Files.readAllBytes(configPath);
                 configWasPrepared = true;
+                stage = "validating the generated dependency override config";
                 verifyGeneratedOverrides(configPath, result.overriddenModIds());
                 log(logPath, "JARs scanned: " + result.jarsScanned(), false);
                 log(logPath, "Legacy mod IDs prepared: " + result.modIdsOverridden(), false);
@@ -71,6 +83,7 @@ public final class LaunchBootstrap {
                     log(logPath, "Warning: " + warning, true);
                 }
 
+                stage = "transforming legacy mod archives for Minecraft 26.2";
                 LegacyModCompatibilityTransformer.Result compatibilityResult =
                         new LegacyModCompatibilityTransformer().prepare(modsDirectory, gameDirectory);
                 for (String warning : compatibilityResult.warnings()) {
@@ -128,16 +141,9 @@ public final class LaunchBootstrap {
         }
 
         if (!configWasPrepared) {
-            try {
-                log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
-                launchFabric(args);
-            } catch (Exception exception) {
-                logFailure(logPath, "Fabric launch failed: " + exception, exception);
-                throw exception;
-            } catch (Error error) {
-                logFailure(logPath, "Fabric launch failed: " + error, error);
-                throw error;
-            }
+            stage = "handing off to Fabric Loader";
+            log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
+            launchFabric(args);
             return;
         }
 
@@ -154,14 +160,9 @@ public final class LaunchBootstrap {
         }, "GafiLoader-dependency-config-restore");
         Runtime.getRuntime().addShutdownHook(shutdownHook);
         try {
+            stage = "handing off to Fabric Loader";
             log(logPath, "Preflight complete; handing off to Fabric Loader.", false);
             launchFabric(args);
-        } catch (Exception exception) {
-            logFailure(logPath, "Fabric launch failed: " + exception, exception);
-            throw exception;
-        } catch (Error error) {
-            logFailure(logPath, "Fabric launch failed: " + error, error);
-            throw error;
         } finally {
             if (restored.compareAndSet(false, true)) {
                 restoreDependencyConfigSafely(configPath, prior, prepared);
@@ -172,6 +173,15 @@ public final class LaunchBootstrap {
                 // JVM shutdown is already underway; the shutdown hook handles restoration.
             }
             restoreSystemProperty("fabric.modsFolder", originalFabricModsFolder);
+        }
+        } catch (Exception | Error failure) {
+            if (logPath != null) {
+                logBootstrapFailure(logPath, stage, failure);
+            } else {
+                System.err.println("[GafiLoader] Bootstrap failed during stage: " + stage);
+                failure.printStackTrace(System.err);
+            }
+            throw failure;
         }
     }
 
@@ -458,6 +468,10 @@ public final class LaunchBootstrap {
      * Writes the complete launch failure, including nested causes, to the persistent preflight log.
      * Fabric can fail before Minecraft initializes Log4j, so latest.log may not exist yet.
      */
+    static void logBootstrapFailure(Path logPath, String stage, Throwable failure) {
+        logFailure(logPath, "Bootstrap failed during stage: " + stage, failure);
+    }
+
     static void logFailure(Path logPath, String message, Throwable failure) {
         StringWriter trace = new StringWriter();
         try (PrintWriter writer = new PrintWriter(trace)) {

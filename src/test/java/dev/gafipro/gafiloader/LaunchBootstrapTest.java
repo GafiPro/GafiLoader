@@ -21,6 +21,18 @@ class LaunchBootstrapTest {
 
 
     @Test
+    void persistsUncaughtBootstrapStageAndFailureStackTrace() throws IOException {
+        Path log = temporaryDirectory.resolve("logs/gafiloader-preflight.log");
+        Throwable failure = new IOException("dependency config is not readable");
+
+        LaunchBootstrap.logBootstrapFailure(log, "reading the existing Fabric dependency override config", failure);
+
+        String contents = Files.readString(log, StandardCharsets.UTF_8);
+        assertTrue(contents.contains("Bootstrap failed during stage: reading the existing Fabric dependency override config"));
+        assertTrue(contents.contains("java.io.IOException: dependency config is not readable"));
+    }
+
+    @Test
     void persistsTheFullFabricFailureStackTraceIncludingNestedInitializerCause() throws IOException {
         Path log = temporaryDirectory.resolve("logs/gafiloader-preflight.log");
         Throwable failure = new ExceptionInInitializerError(

@@ -279,3 +279,13 @@ Em cada sessão de trabalho:
 - Validação local: não foi executado Gradle localmente; o ambiente de trabalho não tem checkout/Java 25. Os testes/build/packaging acima são resultados da GitHub Actions. O EXE foi descarregado e o hash/estrutura ZIP verificados, mas não foi executado em Windows neste ambiente.
 - Estado do runtime: não há ainda logs posteriores ao erro ClassTweaker de 2026-10-31. O erro tem agora uma correção específica integrada e testada; a confirmação no Minecraft real continua pendente.
 - Próximos passos: instalar/testar o EXE 0.1.749 no perfil dedicado, recolher `gafiloader-preflight.log` e `latest.log`, confirmar que a transformação de ClassTweaker conclui e investigar o primeiro erro seguinte, se existir.
+
+
+### 2026-11-01 — Registo de falhas em todo o bootstrap
+
+- Teste real no PC do utilizador com GafiLoader 0.1.745: o ficheiro logs/gafiloader-preflight.log termina imediatamente após a linha que identifica Java 25.0.1 (Microsoft); o utilizador confirma que o Minecraft não abre e que não existe qualquer linha adicional.
+- Auditoria estática de LaunchBootstrap.main: depois de escrever a versão Java, o bootstrap lia config/fabric_loader_dependencies.json e percorria a pasta mods antes de entrar em caminhos que registavam falhas. Uma exceção de I/O/permissões nessa zona podia terminar o processo sem stack trace no preflight. Esta é uma lacuna de diagnóstico confirmada; não é ainda a causa raiz confirmada do bloqueio do utilizador.
+- Correção preparada em LaunchBootstrap.java: envolver toda a execução do bootstrap num handler de Exception | Error, registar a etapa exata, escrever a stack trace completa no preflight e no stderr, e acrescentar mensagens antes/depois da leitura da configuração e antes da análise dos JARs. Removido o registo duplicado de falhas no handoff para Fabric; o handler global passa a ser o único responsável pela stack trace.
+- Regressão em LaunchBootstrapTest: verifica que uma falha não tratada regista tanto a etapa como a exceção completa.
+- Estado desta atualização: alterações preparadas para um único commit; a validação de CI ainda tem de terminar. Não afirmar que o Minecraft já arranca.
+- Próximo passo após CI verde: gerar e instalar o novo instalador, repetir o arranque uma vez e recolher o preflight atualizado. O novo log deverá identificar a etapa e a stack trace se o bootstrap terminar por uma exceção Java; se continuar a terminar exatamente após Java, investigar encerramento externo da JVM/launcher ou falha nativa antes do handler.
