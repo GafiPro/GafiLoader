@@ -410,7 +410,7 @@ class ProfileBootstrapInstallerTest {
         assertFalse(launcherRoot.getAsJsonObject("profiles").has("gafiloader-26.2"));
     }
     @Test
-    void removesOnlyUnreferencedOldBootstrapFoldersAndKeepsReferencedOrUnrelatedFiles() throws Exception {
+    void preservesPreviousBootstrapVersionsForLaunchersWithCachedProfileData() throws Exception {
         Path minecraft = Files.createDirectory(temporaryDirectory.resolve("minecraft-cleanup"));
         Path versionsRoot = Files.createDirectories(minecraft.resolve("versions"));
         Path sourceDirectory = Files.createDirectories(versionsRoot.resolve("fabric-loader-0.20.1-26.2"));
@@ -463,13 +463,14 @@ class ProfileBootstrapInstallerTest {
                 minecraft, new ByteArrayInputStream(createBootstrapJar("0.1.617")), "0.1.617");
 
         assertTrue(result.installed(), result.message());
-        assertFalse(Files.exists(orphanedOld), "Unreferenced stale bootstrap directories should be removed.");
+        assertTrue(Files.isRegularFile(orphanedOld.resolve("gafiloader-bootstrap-0.1.591.jar")),
+                "Even an unreferenced prior bootstrap must remain available to a launcher with cached profile data.");
         assertTrue(Files.isRegularFile(referencedOld.resolve("gafiloader-bootstrap-0.1.590.jar")),
                 "An old library still referenced by a profile backup must be kept.");
         assertTrue(Files.isRegularFile(unrelated.resolve("keep.txt")),
                 "The cleanup must not touch libraries outside GafiLoader's own artifact directory.");
         assertTrue(Files.isRegularFile(bootstrapRoot.resolve("0.1.617/gafiloader-bootstrap-0.1.617.jar")));
-        assertTrue(result.message().contains("Removed 1 unreferenced old GafiLoader bootstrap folder(s)."));
+        assertTrue(result.message().contains("Previous GafiLoader bootstrap versions were retained"));
     }
 
     private static byte[] createBootstrapJar(String version) throws IOException {

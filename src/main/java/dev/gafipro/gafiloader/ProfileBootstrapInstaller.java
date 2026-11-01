@@ -186,10 +186,11 @@ public final class ProfileBootstrapInstaller {
             writeJsonAtomically(update.path(), update.updatedRoot());
         }
 
-        CleanupResult cleanup = cleanupOrphanedBootstrapArtifacts(minecraft, version);
-        String cleanupMessage = cleanup.warning() == null
-                ? " Removed " + cleanup.removedDirectories() + " unreferenced old GafiLoader bootstrap folder(s)."
-                : " Warning: old GafiLoader bootstrap cleanup was skipped/partial: " + cleanup.warning();
+        // Do not delete prior bootstrap versions during an application update. A running
+        // Minecraft Launcher can retain a previously parsed version JSON in memory and still
+        // request that coordinate after setup has updated the on-disk profile. Keeping the
+        // previous small JARs avoids turning that stale-but-valid reference into a missing library.
+        String cleanupMessage = " Previous GafiLoader bootstrap versions were retained for launcher cache safety.";
 
         String registeredIn = String.join(", ", launcherFiles.stream()
                 .map(path -> path.getFileName().toString()).toList());
@@ -381,87 +382,6 @@ public final class ProfileBootstrapInstaller {
      * path. It never traverses symlinks and never deletes a library still referenced by any version
      * JSON or by the saved GafiLoader version backup.
      */
-    private static CleanupResult cleanupOrphanedBootstrapArtifacts(Path minecraft, String currentVersion) {
-        Path libraryRoot = minecraft.resolve("libraries/dev/gafipro/gafiloader-bootstrap").normalize();
-        if (!Files.isDirectory(libraryRoot) || Files.isSymbolicLink(libraryRoot)) {
-            return new CleanupResult(0, null);
-        }
-
-        try {
-            java.util.Set<String> referencedVersions = collectReferencedBootstrapVersions(minecraft);
-            referencedVersions.add(currentVersion);
-            int removed = 0;
-            try (Stream<Path> children = Files.list(libraryRoot)) {
-                for (Path directory : children.toList()) {
-                    if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory)) continue;
-                    String version = directory.getFileName().toString();
-                    if (!version.matches("[0-9]+(?:\\.[A-Za-z0-9_-]+){2,}")
-                            || referencedVersions.contains(version)) continue;
-
-                    String expectedJar = "gafiloader-bootstrap-" + version + ".jar";
-                    String expectedTemp = expectedJar + ".tmp";
-                    List<Path> contents;
-                    try (Stream<Path> entries = Files.list(directory)) {
-                        contents = entries.toList();
-                    }
-                    if (contents.isEmpty() || contents.stream().anyMatch(path ->
-                            Files.isSymbolicLink(path)
-                                    || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                                    || !(path.getFileName().toString().equals(expectedJar)
-                                    || path.getFileName().toString().equals(expectedTemp)))) {
-                        continue;
-                    }
-                    for (Path content : contents) Files.deleteIfExists(content);
-                    Files.deleteIfExists(directory);
-                    removed++;
-                }
-            }
-            return new CleanupResult(removed, null);
-        } catch (IOException exception) {
-            return new CleanupResult(0, exception.getMessage());
-        }
-    }
-
-    private static java.util.Set<String> collectReferencedBootstrapVersions(Path minecraft) throws IOException {
-        java.util.Set<String> referenced = new java.util.HashSet<>();
-        Path versionsRoot = minecraft.resolve("versions");
-        if (!Files.isDirectory(versionsRoot)) return referenced;
-        String coordinatePrefix = LIBRARY_GROUP + ":" + LIBRARY_ARTIFACT + ":";
-        try (Stream<Path> directories = Files.list(versionsRoot)) {
-            for (Path directory : directories.toList()) {
-                if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory)) continue;
-                try (Stream<Path> entries = Files.list(directory)) {
-                    for (Path file : entries.toList()) {
-                        String name = file.getFileName().toString();
-                        if (Files.isSymbolicLink(file)
-                                || !(name.endsWith(".json") || name.endsWith(".json.gafiloader-backup"))
-                                || !Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
-                        JsonObject root;
-                        try {
-                            root = parseObject(Files.readAllBytes(file), "version JSON " + file);
-                        } catch (IOException exception) {
-                            // If a profile/backup cannot be inspected, avoid deleting a library that
-                            // the unreadable file may still reference.
-                            throw new IOException("could not safely inspect " + file + ": " + exception.getMessage(),
-                                    exception);
-                        }
-                        JsonElement librariesElement = root.get("libraries");
-                        if (librariesElement == null || !librariesElement.isJsonArray()) continue;
-                        for (JsonElement library : librariesElement.getAsJsonArray()) {
-                            if (!library.isJsonObject()) continue;
-                            String libraryName = stringValue(library.getAsJsonObject().get("name"));
-                            if (libraryName != null && libraryName.startsWith(coordinatePrefix)) {
-                                String referencedVersion = libraryName.substring(coordinatePrefix.length());
-                                if (!referencedVersion.isBlank()) referenced.add(referencedVersion);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return referenced;
-    }
-
     private static JsonObject parseObject(byte[] bytes, String description) throws IOException {
         try {
             JsonElement parsed = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
@@ -557,5 +477,4 @@ public final class ProfileBootstrapInstaller {
     public record Result(boolean installed, String message, Path profileJson, Path bootstrapJar) {}
     private record FabricSource(Path path, JsonObject profile) {}
     private record LauncherProfileUpdate(Path path, byte[] originalBytes, JsonObject updatedRoot) {}
-    private record CleanupResult(int removedDirectories, String warning) {}
 }

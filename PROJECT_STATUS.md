@@ -309,3 +309,13 @@ Em cada sessão de trabalho:
 - Regressões: `BootstrapJarPackagingTest` verifica a presença da exceção interna no JAR realmente embutido; `ProfileBootstrapInstallerTest` verifica que um JAR que omite essa classe é rejeitado antes de alterar o perfil ou registar a biblioteca.
 - A falha é de empacotamento do GafiLoader, não dos mods do utilizador. A versão 0.1.752 não deve ser usada para validar o arranque; é necessário o novo instalador depois da CI Linux/Windows passar.
 - Próximo passo: executar CI, descarregar o novo instalador e testar. A primeira confirmação esperada no novo preflight é ultrapassar a etapa `generating Fabric dependency overrides`.
+
+
+### 2026-11-01 — Preservar JARs de bootstrap antigos durante atualizações
+
+- O utilizador recebeu um erro de download para `gafiloader-bootstrap-0.1.752.jar` através do repositório Maven padrão `libraries.minecraft.net`, depois de a aplicação ter sido atualizada para a série 0.1.753.
+- A causa provável foi identificada no ciclo de instalação: depois de escrever o perfil com a coordinate nova, `ProfileBootstrapInstaller` apagava as versões antigas não referenciadas no JSON em disco. Um Minecraft Launcher que já estivesse aberto podia continuar a usar a versão anterior em memória (0.1.752) e pedir exatamente o JAR que a atualização acabara de apagar.
+- Correção: deixar de eliminar automaticamente versões anteriores do bootstrap. O instalador conserva os pequenos JARs históricos para que coordenadas antigas ainda mantidas em memória continuem resolúveis durante uma atualização. O log de setup explicita agora que as versões anteriores foram preservadas.
+- Regressão: o teste anteriormente destinado à limpeza passa a confirmar que uma versão antiga não referenciada continua presente depois da atualização, reproduzindo o cenário de cache do Launcher.
+- Esta é uma correção preventiva para a falha da biblioteca em falta; não altera o código do bootstrap nem afirma que a etapa de compatibilidade dos mods já passou.
+- Próximo teste: instalar a nova aplicação, executá-la com o Launcher fechado, confirmar setup success e reabrir o Launcher completamente. Confirmar que a coordinate no JSON aponta para a nova versão e que o JAR correspondente existe localmente.
