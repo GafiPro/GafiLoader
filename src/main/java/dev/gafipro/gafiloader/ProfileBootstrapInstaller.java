@@ -150,7 +150,9 @@ public final class ProfileBootstrapInstaller {
         }
         JsonObject bootstrapLibrary = new JsonObject();
         bootstrapLibrary.addProperty("name", coordinate);
-        bootstrapLibrary.addProperty("url", "https://maven.fabricmc.net/");
+        // The bootstrap JAR is installed from the signed application bundle directly into
+        // the local Minecraft libraries directory. It is not published on Fabric Maven;
+        // declaring that repository makes the launcher attempt a download from the wrong host.
         updatedLibraries.add(bootstrapLibrary);
 
         profileRoot.add("libraries", updatedLibraries);

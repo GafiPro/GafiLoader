@@ -289,3 +289,13 @@ Em cada sessão de trabalho:
 - Regressão em LaunchBootstrapTest: verifica que uma falha não tratada regista tanto a etapa como a exceção completa.
 - Estado desta atualização: alterações preparadas para um único commit; a validação de CI ainda tem de terminar. Não afirmar que o Minecraft já arranca.
 - Próximo passo após CI verde: gerar e instalar o novo instalador, repetir o arranque uma vez e recolher o preflight atualizado. O novo log deverá identificar a etapa e a stack trace se o bootstrap terminar por uma exceção Java; se continuar a terminar exatamente após Java, investigar encerramento externo da JVM/launcher ou falha nativa antes do handler.
+
+
+### 2026-11-01 — Corrigir a referência Maven da biblioteca bootstrap
+
+- Erro reportado no Launcher: tentou descarregar `dev/gafipro/gafiloader-bootstrap/0.1.745/gafiloader-bootstrap-0.1.745.jar` de `https://maven.fabricmc.net/`, com `Exists: Nonexistent`.
+- Causa de configuração confirmada no código: `ProfileBootstrapInstaller` copia o bootstrap embutido localmente para `.minecraft/libraries/dev/gafipro/gafiloader-bootstrap/<version>/`, mas também acrescentava `url=https://maven.fabricmc.net/` ao objeto library. O projeto não publica esse artefacto no Maven do Fabric; a URL era incorreta.
+- Correção: deixar de definir URL Maven para a biblioteca GafiLoader. O ficheiro é um artefacto local, instalado pela aplicação GafiLoader no diretório `.minecraft/libraries`; a versão JSON referencia a coordinate correspondente. Foi acrescentado teste que verifica que a biblioteca bootstrap não tem `url` externa.
+- Clarificação operacional: instalar o EXE da aplicação GafiLoader apenas atualiza a aplicação. É necessário voltar a executar GafiLoader a partir do menu Iniciar para que a aplicação copie o novo JAR e atualize o `gafiloader-26.2.json`; depois fechar/reabrir o Launcher. A versão `0.1.745` reportada pelo Launcher indica que o perfil em disco continua a referenciar essa build, e não prova que a aplicação `0.1.751` já tenha reparado o perfil.
+- Estado: alteração preparada; aguarda CI Linux/Windows e novo instalador. A remoção da URL externa corrige a configuração incorreta, mas não substitui a necessidade de executar a aplicação para instalar o JAR local e atualizar a referência de versão.
+- Próximo passo: instalar o novo EXE da aplicação, executar GafiLoader uma vez com o Minecraft Launcher completamente fechado, confirmar no `versions/gafiloader-26.2/gafiloader-26.2.json` que a library coordinate corresponde à nova versão e que o respetivo JAR existe em `libraries/dev/gafipro/gafiloader-bootstrap/<version>/`.

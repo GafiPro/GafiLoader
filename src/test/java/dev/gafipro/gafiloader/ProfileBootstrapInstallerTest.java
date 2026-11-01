@@ -88,6 +88,8 @@ class ProfileBootstrapInstallerTest {
                 libraries.get(0).getAsJsonObject().get("name").getAsString());
         assertEquals("dev.gafipro:gafiloader-bootstrap:0.1.586",
                 libraries.get(1).getAsJsonObject().get("name").getAsString());
+        org.junit.jupiter.api.Assertions.assertFalse(libraries.get(1).getAsJsonObject().has("url"),
+                "The locally installed bootstrap must not point at an external Maven repository.");
 
         byte[] updatedBootstrapBytes = createBootstrapJar("0.1.587");
         installer.install(minecraft, new ByteArrayInputStream(updatedBootstrapBytes), "0.1.587");

@@ -135,6 +135,8 @@ public final class Main {
         if (installed) {
             System.out.println("Success: the " + ProfileBootstrapInstaller.PROFILE_NAME
                     + " installation has been registered. Reopen Minecraft Launcher and select it under Installations.");
+            System.out.println("After every GafiLoader application update, run GafiLoader once before launching the game; "
+                    + "this installs the matching bootstrap JAR locally and updates the profile reference.");
             System.out.println("If setup says no Fabric 26.2 profile exists, install Fabric for Minecraft 26.2 once and rerun GafiLoader.");
             System.out.println("Compatibility with every legacy mod is not guaranteed; keep the original mod JARs.");
         } else {
