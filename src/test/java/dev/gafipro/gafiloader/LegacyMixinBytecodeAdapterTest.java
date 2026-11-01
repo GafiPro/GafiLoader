@@ -50,7 +50,7 @@ class LegacyMixinBytecodeAdapterTest {
 
     @Test
     void adaptsLegacySystemReportSupplierShadowToCrashReportDetailCallable() throws Exception {
-        LegacyClassTweakerMappings mappings = createSystemReportMappings();
+        LegacyClassTweakerMappings mappings = createMappings();
         LegacyMixinBytecodeAdapter.Result result = LegacyMixinBytecodeAdapter.remap(
                 legacySystemReportMixin(), mappings);
 
@@ -481,28 +481,13 @@ class LegacyMixinBytecodeAdapterTest {
         return writer.toByteArray();
     }
 
-    private LegacyClassTweakerMappings createSystemReportMappings() throws IOException {
-        Path intermediaryJar = temporaryDirectory.resolve("intermediary-system-report-fixture.jar");
-        byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
-                + "c\ta\t" + SYSTEM_REPORT_TARGET_OWNER + "\n"
-                + "\tm\t(Ljava/lang/String;Ljava/util/function/Supplier;)V\tb\tmethod_9002\n")
-                .getBytes(StandardCharsets.UTF_8);
-        Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
-
-        Path mojangMappings = temporaryDirectory.resolve("client-mappings-system-report-fixture.txt");
-        Files.writeString(mojangMappings, """
-                net.minecraft.SystemReport -> a:
-                    void setDetail(java.lang.String, java.util.function.Supplier) -> b
-                """, StandardCharsets.UTF_8);
-        return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
-    }
-
     private LegacyClassTweakerMappings createMappings() throws IOException {
         Path intermediaryJar = temporaryDirectory.resolve("intermediary-mixin-fixture.jar");
         byte[] tiny = ("tiny\t2\t0\tofficial\tintermediary\n"
                 + "c\ta\tnet/minecraft/class_7924\n"
                 + "\tf\tLa;\tb\tfield_1234\n"
-                + "\tm\t(La;)La;\tc\tmethod_2345\n")
+                + "\tm\t(La;)La;\tc\tmethod_2345\n"
+                + "c\tb\tnet/minecraft/class_9001\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -511,6 +496,7 @@ class LegacyMixinBytecodeAdapterTest {
                 net.minecraft.core.Registry -> a:
                     net.minecraft.core.Registry entry -> b
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
+                net.minecraft.SystemReport -> b:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
