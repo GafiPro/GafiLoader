@@ -319,3 +319,14 @@ Em cada sessão de trabalho:
 - Regressão: o teste anteriormente destinado à limpeza passa a confirmar que uma versão antiga não referenciada continua presente depois da atualização, reproduzindo o cenário de cache do Launcher.
 - Esta é uma correção preventiva para a falha da biblioteca em falta; não altera o código do bootstrap nem afirma que a etapa de compatibilidade dos mods já passou.
 - Próximo teste: instalar a nova aplicação, executá-la com o Launcher fechado, confirmar setup success e reabrir o Launcher completamente. Confirmar que a coordinate no JSON aponta para a nova versão e que o JAR correspondente existe localmente.
+
+
+### 2026-11-01 — Diagnosticar e adaptar o Mixin de SystemReport da Fabric API
+
+- Novo latest.log fornecido pelo utilizador mostra que Minecraft 26.2 passou a resolução de dependências e carregou 48 mods, mas caiu ao aplicar fabric-crash-report-info-v1.mixins.json:SystemReportMixin.
+- A falha concreta é @Shadow setDetail(String, Supplier) não encontrado em net.minecraft.SystemReport. O log confirma o descritor legado (Ljava/lang/String;Ljava/util/function/Supplier;)V e que o target existe, mas não tem esse método/descritor.
+- Comparação do código oficial Fabric API: o ramo 1.21.11 declara SystemReport#setDetail(String, Supplier<String>); o ramo 26.2 declara SystemReport#setDetail(String, CrashReportDetail<Object>). A mudança é incompatibilidade de descritor, não falha de download, nem falha do gerador de dependency overrides.
+- CrashReportDetail é baseado em Callable; por isso, a lambda do código legado também tem de mudar do call-site Supplier.get() para CrashReportDetail.call().
+- Alteração preparada em LegacyMixinBytecodeAdapter: detetar mixins que apontam para net.minecraft.SystemReport e contêm o @Shadow legado; remapear Supplier para net.minecraft.CrashReportDetail e o nome SAM do invokedynamic de get para call. O âmbito é target-aware para não mudar Suppliers noutros mixins.
+- Teste de regressão preparado com um fixture bytecode que reproduz o shadow antigo e a lambda, verificando descritor da declaração, descritor da invocação, tipo de retorno do call-site e nome call.
+- Estado: alteração integrada em main; CI ainda pendente. Não afirmar que o crash está resolvido no jogo real. Próximo passo: validar a CI Windows/Linux e gerar o artefacto; depois verificar no novo preflight que a Fabric API usa os JARs staged e volta a avançar para o próximo erro (se existir).
