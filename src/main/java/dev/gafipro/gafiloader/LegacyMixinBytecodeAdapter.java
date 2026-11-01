@@ -219,17 +219,14 @@ final class LegacyMixinBytecodeAdapter {
                 }
 
                 @Override
-                public String mapInvokeDynamicMethodName(String name, String descriptor,
-                        org.objectweb.asm.Handle bootstrapMethodHandle, Object... bootstrapMethodArguments) {
-                    // ASM 9.9+ routes invokedynamic remapping through this overload.
+                public String mapInvokeDynamicMethodName(String name, String descriptor) {
                     // CrashReportDetail implements Callable, whose SAM is call(), rather than
                     // Supplier.get(). Keep the existing lambda body and retarget its call site.
                     if (adaptSystemReportDetail && "get".equals(name)
                             && ("()L" + SUPPLIER_INTERNAL_NAME + ";").equals(descriptor)) {
                         return "call";
                     }
-                    return super.mapInvokeDynamicMethodName(
-                            name, descriptor, bootstrapMethodHandle, bootstrapMethodArguments);
+                    return super.mapInvokeDynamicMethodName(name, descriptor);
                 }
 
                 @Override
