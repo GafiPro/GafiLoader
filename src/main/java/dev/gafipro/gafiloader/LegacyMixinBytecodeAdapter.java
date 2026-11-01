@@ -542,7 +542,14 @@ final class LegacyMixinBytecodeAdapter {
         List<String> failures = new ArrayList<>();
         for (String targetOwner : metadata.targetOwners()) {
             try {
-                mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, method));
+                String mappedTargetOwner = mappings.mapClass(targetOwner);
+                if (method && SYSTEM_REPORT_TARGET.equals(mappedTargetOwner)
+                        && LEGACY_SYSTEM_REPORT_DETAIL_DESCRIPTOR.equals(descriptor)) {
+                    // This exact legacy member was renamed/reshaped by the 26.2 SystemReport API.
+                    mappedNames.add("setDetail");
+                } else {
+                    mappedNames.add(mappings.mapMixinMemberName(targetOwner, lookupName, descriptor, method));
+                }
             } catch (IOException exception) {
                 failures.add(exception.getMessage());
             }
