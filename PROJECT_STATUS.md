@@ -17,23 +17,24 @@
 
 ## Estado atual — 2026-11-01
 
-- A cabeça atual de `main` é `72c4215349d43402505eb454aa83bfa19bfa7eeb` (confirmada pela API de branches do GitHub). A referência anterior a `8d599666...` ficou desatualizada depois de vários commits de 2026-10-31.
+- A cabeça atual de `main` é `583ef113d93f35bb0a662dddb07b6350f4175c1b`, merge commit da PR #27.
 - **Erro de preflight mais recente fornecido pelo utilizador:** em 2026-10-31 às 13:10:08 UTC, `ClassTweaker line 9: No 1.21.11 Intermediary mapping exists for ClassTweaker method net/minecraft/class_1959$class_5482#<init>(ZFLnet/minecraft/class_1959$class_5484;F)V`.
 - **Causa confirmada no código:** `LegacyClassTweakerMappings.mapMember` exigia uma entrada Tiny para todos os métodos. O nome JVM `<init>` é invariável e pode não aparecer nas mappings Intermediary; o remapper falhava antes de remapear o proprietário e o descritor.
-- **Correção integrada em `main`:** PR [#26](https://github.com/GafiPro/GafiLoader/pull/26), merge em 2026-10-31 às 13:17:22 UTC, merge commit `4c56e694471698415d4a07d9ba0a7cb8b501ea89`. Para `<init>` e `<clinit>`, o código preserva o nome JVM, remapeia o proprietário para o namespace `official` e remapeia todos os tipos do descritor. Não inventa um nome de método.
-- **Regressão específica:** `LegacyClassTweakerRemapperTest.remapsConstructorOwnerAndDescriptorWhenIntermediaryMappingsOmitInit` usa o proprietário e o descritor do erro real e verifica os nomes Mojang das duas classes aninhadas. O fixture Tiny também foi corrigido para manter os membros indentados sob a classe proprietária.
-- **Validação da árvore atual:** `main` avançou até `72c4215`, que inclui a correção acima e as alterações subsequentes ao detetor de ranges. GitHub Actions run [41225852403](https://github.com/GafiPro/GafiLoader/actions/runs/41225852403) terminou com sucesso: Ubuntu `clean test build` e Windows `clean test installDist`; os dois jobs mostram `BUILD SUCCESSFUL`. No Windows também passaram a criação da app image, a criação do instalador e os uploads.
-- **Instalador correspondente à árvore atual:** artefacto Actions `13051838211`, `GafiLoader-0.1.745.exe`, 51 475 456 bytes. O ZIP descarregado corresponde ao digest publicado `sha256:343f04fd3dc366841944ddc7c439d8da59eca9eb86844b535333fbba0fccd1b5`; SHA-256 do EXE extraído: `40dd956c0404bb9767d03b38cfe7022ea067fad8a2f0cd27c13bccfa75828099`. O artefacto expira em 2026-11-03 às 17:44:06 UTC.
-- **Runtime continua por validar:** não existe ainda um novo `gafiloader-preflight.log` / `latest.log` produzido pelo EXE 0.1.745 no computador do utilizador. A correção está integrada e testada na CI, mas ainda não há prova de que o preflight ultrapassa esta linha no jogo real.
-- **Trabalho seguinte em revisão:** PR [#27](https://github.com/GafiPro/GafiLoader/pull/27) acrescenta reconhecimento de wildcards de versão Fabric (`26.x`, `26.2.x`, `26.2.*`) para não remover a dependência Minecraft quando uma alternativa já admite 26.2. A CI do PR estava em execução quando esta atualização foi preparada; não tratar como validada nem integrada até os dois jobs terminarem e o PR ser revisto.
+- **Correção integrada em `main`:** PR [#26](https://github.com/GafiPro/GafiLoader/pull/26), merge commit `4c56e694471698415d4a07d9ba0a7cb8b501ea89`. Para `<init>` e `<clinit>`, o código preserva o nome JVM, remapeia o proprietário para `official` e remapeia os tipos do descritor. Não inventa um nome de método.
+- **Regressão específica:** `LegacyClassTweakerRemapperTest.remapsConstructorOwnerAndDescriptorWhenIntermediaryMappingsOmitInit` usa o proprietário e o descritor do erro real e verifica os nomes Mojang das duas classes aninhadas.
+- **Correção adicional integrada em `main`:** PR [#27](https://github.com/GafiPro/GafiLoader/pull/27), merged em 2026-11-01 às 10:44:56 UTC, merge commit `583ef113d93f35bb0a662dddb07b6350f4175c1b`. `LegacyMinecraftVersionDetector` reconhece wildcards Fabric por componente (`26.x`, `26.2.x`, `26.2.*` e `X` maiúsculo) ao decidir se uma alternativa de dependência admite 26.2. Isto evita remover a dependência Minecraft quando um array OR já contém uma alternativa compatível com 26.2.
+- **Testes dos wildcards:** `LegacyMinecraftVersionDetectorTest.evaluatesFabricWildcardAlternativesAgainstMinecraft262` cobre `26.2.x`, `26.2.X`, `26.x`, `26.2.*` e `26.1.x` (que não deve admitir 26.2). A decisão segue a especificação oficial de `fabric.mod.json`: arrays representam alternativas OR e wildcards `.x` / `.*` são suportados.
+- **Validação da PR #27:** GitHub Actions run [41298700072](https://github.com/GafiPro/GafiLoader/actions/runs/41298700072) terminou com sucesso em Ubuntu e Windows. Ambos executaram os testes/build; o Windows também criou a app image e o instalador.
+- **Validação da `main` após merge:** GitHub Actions run [41298829441](https://github.com/GafiPro/GafiLoader/actions/runs/41298829441) terminou com sucesso. Ubuntu `clean test build` — sucesso; Windows `clean test installDist` — sucesso. No Windows passaram também a criação da app image, a criação do instalador e os uploads.
+- **Instalador correspondente à `main` atual:** artefacto Actions `13080158094`, `GafiLoader-0.1.749.exe`, 51 475 456 bytes. O ZIP descarregado corresponde ao digest publicado `sha256:319be4591e977c467fdb9185aab75b82a451ed8010ae7be54d7f28bd4c4ff0f0`; SHA-256 do EXE extraído: `d7d1f6f25da573c1ec0c06676f1debcd0fc39b9e4ff5636fe61a0fc3b7f096ca`. O artefacto expira em 2026-11-04 às 10:46:23 UTC.
+- **Runtime continua por validar:** não existe ainda um novo `gafiloader-preflight.log` / `latest.log` produzido pelo EXE 0.1.749 no computador do utilizador. A CI demonstra compilação, testes e empacotamento; não demonstra que Minecraft 26.2 inicia ou que a Fabric API 0.141.6+1.21.11 funciona em jogo real.
 
 ## Próximos passos — ordem recomendada
 
-1. Testar `GafiLoader-0.1.745.exe` no perfil dedicado `gafiloader-26.2`; confirmar no `logs/gafiloader-preflight.log` que o ClassTweaker da Fabric API é reescrito para `official` e que o preflight continua para além da linha 9.
-2. Recolher o novo `logs/gafiloader-preflight.log` e o primeiro erro relevante de `logs/latest.log` caso o arranque ainda falhe. Distinguir erro de ClassTweaker, linkage, Mixin e API em vez de adicionar regras especulativas.
-3. Confirmar a CI Linux/Windows do PR #27; rever os resultados e integrar apenas se os testes passarem.
-4. Depois de resolver o primeiro erro real seguinte, testar a Fabric API 0.141.6+1.21.11 e pelo menos um mod legado representativo até ao menu/jogo; não confundir preflight com compatibilidade funcional.
-5. Manter os JAR originais byte a byte intactos e confirmar que apenas as cópias em `.gafiloader/compat-mods` são carregadas quando existe transformação.
+1. Testar `GafiLoader-0.1.749.exe` no perfil dedicado `gafiloader-26.2`; confirmar no `logs/gafiloader-preflight.log` que o ClassTweaker da Fabric API passa a namespace `official` e que o preflight continua para além da linha 9.
+2. Se o arranque ainda falhar, recolher o novo `logs/gafiloader-preflight.log` e o primeiro erro relevante de `logs/latest.log`; diagnosticar a próxima falha sem misturar erros de ClassTweaker, linkage, Mixin e API.
+3. Confirmar que Fabric carrega as cópias staged em `.gafiloader/compat-mods` quando há transformação e que os JAR originais permanecem byte a byte intactos.
+4. Testar a Fabric API 0.141.6+1.21.11 e pelo menos um mod legado representativo até ao menu/jogo; manter compatibilidade funcional geral como não validada até haver essa evidência.
 
 ## Estado conhecido em 2026-10-27
 
@@ -265,3 +266,16 @@ Em cada sessão de trabalho:
 - Validação desta alteração: não foi executado Gradle localmente (ambiente de trabalho remoto sem checkout/Java 25). A CI da PR #27 foi iniciada em 2026-11-01 às 10:41 UTC; estava `in_progress` no último check. Não integrar nem afirmar sucesso até ambos os jobs concluírem.
 - Limitação: não foi feito arranque Minecraft real com o instalador 0.1.745; a correção ClassTweaker continua por confirmar no runtime do utilizador.
 - Próximos passos: (1) verificar a CI da PR #27 e corrigir qualquer falha; (2) integrar se ambos os jobs passarem; (3) disponibilizar o instalador mais recente e validar o preflight real; (4) investigar o primeiro erro seguinte, se existir.
+
+
+### 2026-11-01 — Wildcard Fabric integrado após CI
+
+- PR [#27](https://github.com/GafiPro/GafiLoader/pull/27) foi integrada em `main` às 10:44:56 UTC; merge commit `583ef113d93f35bb0a662dddb07b6350f4175c1b`.
+- Alterações: `src/main/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.java` reconhece wildcards de componente ao verificar se uma alternativa admite Minecraft 26.2; `src/test/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetectorTest.java` acrescenta regressões para `26.2.x`, `26.2.X`, `26.x`, `26.2.*` e `26.1.x`.
+- Motivação: a especificação oficial Fabric (https://docs.fabricmc.net/develop/loader/fabric-mod-json, secção Semantic Versioning) define arrays de ranges como OR e suporta wildcards por componente. Antes da correção, o detetor não reconhecia `26.2.x` dentro de um array e podia remover desnecessariamente a dependência Minecraft quando outra alternativa já admitia 26.2.
+- CI da PR: run [41298700072](https://github.com/GafiPro/GafiLoader/actions/runs/41298700072), sucesso em Ubuntu e Windows; testes/build passaram nos dois sistemas e o Windows criou app image e instalador.
+- CI após merge em `main`: run [41298829441](https://github.com/GafiPro/GafiLoader/actions/runs/41298829441), conclusão `success`; Ubuntu `clean test build`, Windows `clean test installDist`, app image e instalador passaram.
+- Artefacto Windows da `main`: `GafiLoader-0.1.749.exe`, 51 475 456 bytes, SHA-256 `d7d1f6f25da573c1ec0c06676f1debcd0fc39b9e4ff5636fe61a0fc3b7f096ca`. Digest ZIP Actions `319be4591e977c467fdb9185aab75b82a451ed8010ae7be54d7f28bd4c4ff0f0` verificado localmente.
+- Validação local: não foi executado Gradle localmente; o ambiente de trabalho não tem checkout/Java 25. Os testes/build/packaging acima são resultados da GitHub Actions. O EXE foi descarregado e o hash/estrutura ZIP verificados, mas não foi executado em Windows neste ambiente.
+- Estado do runtime: não há ainda logs posteriores ao erro ClassTweaker de 2026-10-31. O erro tem agora uma correção específica integrada e testada; a confirmação no Minecraft real continua pendente.
+- Próximos passos: instalar/testar o EXE 0.1.749 no perfil dedicado, recolher `gafiloader-preflight.log` e `latest.log`, confirmar que a transformação de ClassTweaker conclui e investigar o primeiro erro seguinte, se existir.
