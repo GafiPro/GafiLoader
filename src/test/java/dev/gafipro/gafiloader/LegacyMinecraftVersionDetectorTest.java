@@ -41,6 +41,22 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void evaluatesFabricWildcardAlternativesAgainstMinecraft262() {
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":["~1.21.11","26.2.x"]}}
+                """));
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":["~1.21.11","26.x"]}}
+                """));
+        assertFalse(matches("""
+                {"id":"multi","depends":{"minecraft":["~1.21.11","26.2.*"]}}
+                """));
+        assertTrue(matches("""
+                {"id":"legacy","depends":{"minecraft":["~1.21.11","26.1.x"]}}
+                """));
+    }
+
+    @Test
     void evaluatesLowerAndUpperBoundsAgainstMinecraft262() {
         assertFalse(matches("""
                 {"id":"newer-floor","depends":{"minecraft":">=1.21.12"}}
