@@ -748,22 +748,28 @@ final class LegacyMixinBytecodeAdapter {
 
     private static String mapAnnotationString(String annotationDescriptor, String propertyName,
             String value, MixinMetadata metadata, LegacyClassTweakerMappings mappings) throws IOException {
+        String mapped = value;
         if (MIXIN_ANNOTATION.equals(annotationDescriptor) && "targets".equals(propertyName)) {
-            return mapClassSelector(value, mappings);
-        }
-        if (AT_ANNOTATION.equals(annotationDescriptor) && "target".equals(propertyName)) {
-            return mapMemberSelector(value, metadata.targetOwners(), mappings, true);
-        }
-        if (isInjectionAnnotation(annotationDescriptor) && "method".equals(propertyName)) {
-            return mapMethodSelectorList(value, metadata.targetOwners(), mappings);
-        }
-        if ((ACCESSOR_ANNOTATION.equals(annotationDescriptor)
+            mapped = mapClassSelector(value, mappings);
+        } else if (AT_ANNOTATION.equals(annotationDescriptor) && "target".equals(propertyName)) {
+            mapped = mapMemberSelector(value, metadata.targetOwners(), mappings, true);
+        } else if (isInjectionAnnotation(annotationDescriptor) && "method".equals(propertyName)) {
+            mapped = mapMethodSelectorList(value, metadata.targetOwners(), mappings);
+        } else if ((ACCESSOR_ANNOTATION.equals(annotationDescriptor)
                 || INVOKER_ANNOTATION.equals(annotationDescriptor))
                 && "value".equals(propertyName) && !value.isBlank()) {
             boolean method = INVOKER_ANNOTATION.equals(annotationDescriptor);
-            return mapSelectorNameOnly(value, metadata.targetOwners(), mappings, method);
+            mapped = mapSelectorNameOnly(value, metadata.targetOwners(), mappings, method);
         }
-        return value;
+        return mapCurrentClassAliases(mapped);
+    }
+
+    private static String mapCurrentClassAliases(String selector) {
+        return selector
+                .replace("Lnet/minecraft/client/Minecraft;",
+                        "Lnet/minecraft/client/MinecraftClient;")
+                .replace("Lnet/minecraft/client/gui/screens/Screen;",
+                        "Lnet/minecraft/client/gui/screen/Screen;");
     }
 
     private static boolean isInjectionAnnotation(String descriptor) {
