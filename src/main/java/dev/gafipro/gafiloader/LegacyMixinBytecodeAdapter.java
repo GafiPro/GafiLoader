@@ -337,7 +337,11 @@ final class LegacyMixinBytecodeAdapter {
 
             reader.accept(mixinMetadataAdapter, 0);
             byte[] mapped = writer.toByteArray();
-            return new Result(mapped, !Arrays.equals(originalBytes, mapped));
+            LegacyFabricScreenApiAdapter.Result screenApi =
+                    LegacyFabricScreenApiAdapter.adapt(mapped);
+            byte[] adaptedBytes = screenApi.bytes();
+            return new Result(adaptedBytes, !Arrays.equals(originalBytes, adaptedBytes),
+                    screenApi.generatedClasses());
         } catch (UncheckedIOException exception) {
             throw exception.getCause();
         } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
@@ -906,7 +910,7 @@ final class LegacyMixinBytecodeAdapter {
         return name + "\u0000" + descriptor;
     }
 
-    record Result(byte[] bytes, boolean changed) {}
+    record Result(byte[] bytes, boolean changed, Map<String, byte[]> generatedClasses) {}
     record RefmapResult(byte[] bytes, int remappedSelectors) {}
 
     private record MixinMetadata(String className, List<String> targetOwners,
