@@ -45,7 +45,6 @@ final class LegacyFabricScreenApiAdapter {
             Set.of("onScreenRemove", "beforeScreenTick", "afterScreenTick");
     private static final Set<String> REMOVED_METHODS = Set.of(
             "checkThreadOnDev",
-            "onScreenRemoveBecauseStopping",
             "onScreenRemove",
             "beforeScreenTick",
             "afterScreenTick",
@@ -188,7 +187,8 @@ final class LegacyFabricScreenApiAdapter {
                 if (REMOVED_METHODS.contains(name)) return null;
                 MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
                 if (delegate == null || !("beforeLoadingScreenTick".equals(name)
-                        || "afterLoadingScreenTick".equals(name))) {
+                        || "afterLoadingScreenTick".equals(name)
+                        || "onScreenRemoveBecauseStopping".equals(name))) {
                     return delegate;
                 }
                 return new MethodVisitor(Opcodes.ASM9, delegate) {
