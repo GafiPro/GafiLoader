@@ -769,7 +769,11 @@ final class LegacyMixinBytecodeAdapter {
                 .replace("Lnet/minecraft/client/Minecraft;",
                         "Lnet/minecraft/client/MinecraftClient;")
                 .replace("Lnet/minecraft/client/gui/screens/Screen;",
-                        "Lnet/minecraft/client/gui/screen/Screen;");
+                        "Lnet/minecraft/client/gui/screen/Screen;")
+                .replace("net.minecraft.client.Minecraft",
+                        "net.minecraft.client.MinecraftClient")
+                .replace("net.minecraft.client.gui.screens.Screen",
+                        "net.minecraft.client.gui.screen.Screen");
     }
 
     private static boolean isInjectionAnnotation(String descriptor) {
