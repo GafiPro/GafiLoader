@@ -211,6 +211,11 @@ final class LegacyMixinBytecodeAdapter {
                     if (adaptSystemReportDetail && SUPPLIER_INTERNAL_NAME.equals(internalName)) {
                         return CRASH_REPORT_DETAIL_INTERNAL_NAME;
                     }
+                    String currentClientName =
+                            LegacyFabricScreenApiAdapter.mapLegacyClassName(internalName);
+                    if (!currentClientName.equals(internalName)) {
+                        return currentClientName;
+                    }
                     try {
                         return mappings.mapClass(internalName);
                     } catch (IOException exception) {
