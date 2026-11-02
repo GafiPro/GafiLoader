@@ -218,12 +218,9 @@ class LegacyModCompatibilityTransformerTest {
         byte[] stagedCrashModule = readEntry(
                 Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
                 "META-INF/jars/fabric-crash-report-info-v1.jar");
-        assertArrayEquals(originalCrashModule, jar(Map.of(
-                "fabric.mod.json", """
-                        {"schemaVersion":1,"id":"fabric-crash-report-info-v1","version":"1.0.0+1.21.11"}
-                        """.getBytes(StandardCharsets.UTF_8),
-                SYSTEM_REPORT_MIXIN_CLASS + ".class", originalMixin)),
-                "The test fixture must retain the exact original nested module bytes.");
+        assertArrayEquals(originalCrashModule,
+                readEntry(originalApi, "META-INF/jars/fabric-crash-report-info-v1.jar"),
+                "The original outer JAR must contain the exact original nested module bytes.");
         byte[] stagedMixin = readEntry(stagedCrashModule, SYSTEM_REPORT_MIXIN_CLASS + ".class");
 
         AtomicReference<String> mappedTarget = new AtomicReference<>();
