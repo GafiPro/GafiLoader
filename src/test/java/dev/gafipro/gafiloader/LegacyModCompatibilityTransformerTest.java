@@ -243,6 +243,10 @@ class LegacyModCompatibilityTransformerTest {
                 minecraftMixinReader.getClassName());
         assertEquals("net/minecraft/client/MinecraftClient", LegacyBytecodeRemapper.mixinTargets(stagedMinecraftMixin)
                 .get(0));
+        assertEquals("Lnet/minecraft/client/gui/screen/Screen;removed()V",
+                atTargetForMethod(readEntry(stagedModule,
+                        LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY), "onScreenRemove"),
+                "The @At selector must use the singular 26.2 Screen package.");
     }
 
     @Test
@@ -516,6 +520,43 @@ class LegacyModCompatibilityTransformerTest {
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
 
+    private static String atTargetForMethod(byte[] classBytes, String requestedMethod) {
+        AtomicReference<String> target = new AtomicReference<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!requestedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(annotationDescriptor)) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                if (!"at".equals(property)
+                                        || !"Lorg/spongepowered/asm/mixin/injection/At;".equals(nestedDescriptor)) {
+                                    return null;
+                                }
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String propertyName, Object value) {
+                                        if ("target".equals(propertyName) && value instanceof String selector) {
+                                            target.set(selector);
+                                        }
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, 0);
+        return target.get();
+    }
+
     private static byte[] classWithLegacyScreenApiMixin() {
         String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
         String callbackInfo = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
@@ -570,6 +611,13 @@ class LegacyModCompatibilityTransformerTest {
             AnnotationVisitor targets = inject.visitArray("method");
             targets.visit(null, target);
             targets.visitEnd();
+            if ("onScreenRemove".equals(name)) {
+                AnnotationVisitor at = inject.visitAnnotation("at",
+                        "Lorg/spongepowered/asm/mixin/injection/At;");
+                at.visit("value", "INVOKE");
+                at.visit("target", "Lnet/minecraft/client/gui/screens/Screen;removed()V");
+                at.visitEnd();
+            }
             inject.visitEnd();
         }
         method.visitCode();
