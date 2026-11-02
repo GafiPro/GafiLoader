@@ -393,3 +393,20 @@ Em cada sessão de trabalho:
 - Limitação: o endpoint de workflows disponível não devolveu runs associados ao push do merge commit `32ec10d`; a evidência de CI é a execução PR verde sobre o mesmo código de runtime, antes do squash. O merge acrescentou apenas o teste e o registo.
 - Estado de runtime: não há ainda um novo log do utilizador após a adaptação SystemReport. A CI demonstra compilação, testes, transformação em fixture e empacotamento, não demonstra que Minecraft 26.2 chega ao menu com a Fabric API real.
 - Próximos passos: (1) testar o instalador 0.1.767 no perfil dedicado; (2) verificar o preflight e o primeiro erro de `latest.log`; (3) confirmar a pasta staged e a preservação dos originais; (4) só então avaliar a próxima incompatibilidade.
+
+
+### 2026-11-02 — Adaptar o Mixin Screen API ao modelo de GUI do Minecraft 26.2
+
+- Diagnóstico de origem: o log real do utilizador falhava em `fabric-screen-api-v1.mixins.json:MinecraftMixin`, porque o `@Shadow screen` já não existe no target legado `Minecraft`. A análise dos mappings 26.2 confirmou a separação entre `MinecraftClient.gui` e `GuiManager.screen()`; `GuiManager` expõe `screen()`, `setScreen(Screen)` e `tick()`.
+- A branch `fix/fabric-screen-api-26-2` e a PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) implementam uma adaptação específica para o Mixin `net/fabricmc/fabric/mixin/screen/MinecraftMixin`.
+- O target Intermediary/nomes antigos `Minecraft` é convertido para `MinecraftClient`; o Screen antigo `net.minecraft.client.gui.screens.Screen` é convertido para o nome atual `net.minecraft.client.gui.screen.Screen`. Os aliases são aplicados depois da resolução dos mappings e também aos selectors textuais `@At.target`.
+- O Mixin antigo é dividido em dois:
+  - o Mixin associado a `MinecraftClient` conserva as injeções de carregamento de mundo e lê o ecrã através do shadow `gui` seguido de `GuiManager.screen()`;
+  - um Mixin gerado `GafiLoaderGuiManagerMixin` recebe `onScreenRemove`, `beforeScreenTick` e `afterScreenTick`, com shadows para `GuiManager.screen` e um campo `tickingScreen` próprio.
+- O ficheiro `fabric-screen-api-v1.mixins.json` do módulo aninhado é atualizado para registar a classe gerada. A transformação continua limitada a cópias staged; o JAR exterior e o módulo aninhado de origem são verificados byte a byte no teste de integração.
+- Limitações deliberadas: o aviso de desenvolvimento `checkThreadOnDev` e a injeção antiga `destroy` não são transportados, porque o target original mudou e não foi estabelecida uma equivalência runtime suficientemente segura. Os eventos normais de remoção de ecrã, tick e loading-screen permanecem cobertos; o evento específico de shutdown continua por validar/substituir.
+- Testes adicionados: divisão estrutural do Mixin; registo idempotente do Mixin gerado na configuração; integração num `fabric-api.jar` com módulo `fabric-screen-api-v1.jar` aninhado; verificação do selector `@At` para `Screen.removed()`; preservação byte a byte dos JARs originais.
+- CI da PR: run [41485709403](https://github.com/GafiPro/GafiLoader/actions/runs/41485709403), run 781. O job Ubuntu concluiu com sucesso os testes e build (83 testes no total); o job Windows ainda estava em execução no momento deste registo. As execuções anteriores falharam primeiro numa asserção do teste, depois numa asserção de compilação do teste e, por fim, na resolução dos aliases após os mappings; essas correções foram integradas na cabeça atual.
+- Não foram executados testes Gradle localmente nesta sessão. A validação de CI demonstra compilação, testes de fixture e build; não demonstra o arranque real de Minecraft 26.2.
+- Estado da branch no momento do registo: cabeça `d2b7995ff15747b2a5257f99550f0c20fe1ab020`. Não integrar nem publicar um instalador como corrigido até a CI Windows terminar com sucesso e existir um novo log de runtime do utilizador.
+- Próximos passos: (1) confirmar CI Windows e corrigir eventuais falhas; (2) rever o diff final e manter a PR aberta até estar verde; (3) gerar/obter o instalador apenas após CI completa; (4) testar o perfil dedicado e analisar o próximo erro de runtime, se surgir.
