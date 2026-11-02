@@ -511,7 +511,7 @@ class LegacyModCompatibilityTransformerTest {
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 net.minecraft.SystemReport -> b:
                 net.minecraft.client.Minecraft -> c:
-                net.minecraft.client.gui.screen.Screen -> d:
+                net.minecraft.client.gui.screens.Screen -> d:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
