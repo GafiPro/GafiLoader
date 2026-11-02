@@ -217,7 +217,8 @@ final class LegacyMixinBytecodeAdapter {
                         return currentClientName;
                     }
                     try {
-                        return mappings.mapClass(internalName);
+                        String mappedName = mappings.mapClass(internalName);
+                        return LegacyFabricScreenApiAdapter.mapLegacyClassName(mappedName);
                     } catch (IOException exception) {
                         throw new UncheckedIOException(exception);
                     }
