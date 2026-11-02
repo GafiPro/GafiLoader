@@ -241,7 +241,7 @@ class LegacyModCompatibilityTransformerTest {
         ClassReader minecraftMixinReader = new ClassReader(stagedMinecraftMixin);
         assertEquals("net/fabricmc/fabric/mixin/screen/MinecraftMixin",
                 minecraftMixinReader.getClassName());
-        assertEquals("net/minecraft/client/Minecraft", LegacyBytecodeRemapper.mixinTargets(stagedMinecraftMixin)
+        assertEquals("net/minecraft/client/MinecraftClient", LegacyBytecodeRemapper.mixinTargets(stagedMinecraftMixin)
                 .get(0));
     }
 
