@@ -28,7 +28,10 @@ final class LegacyFabricScreenApiAdapter {
     static final String GENERATED_MIXIN_ENTRY = GENERATED_MIXIN + ".class";
     static final String MIXIN_CONFIG = "fabric-screen-api-v1.mixins.json";
 
-    private static final String MINECRAFT = "net/minecraft/client/Minecraft";
+    private static final String LEGACY_MINECRAFT = "net/minecraft/client/Minecraft";
+    private static final String MINECRAFT = "net/minecraft/client/MinecraftClient";
+    private static final String LEGACY_SCREEN = "net/minecraft/client/gui/screens/Screen";
+    private static final String CURRENT_SCREEN = "net/minecraft/client/gui/screen/Screen";
     private static final String GUI_MANAGER = "net/minecraft/client/gui/GuiManager";
     private static final String MIXIN_ANNOTATION =
             "Lorg/spongepowered/asm/mixin/Mixin;";
@@ -45,12 +48,19 @@ final class LegacyFabricScreenApiAdapter {
             Set.of("onScreenRemove", "beforeScreenTick", "afterScreenTick");
     private static final Set<String> REMOVED_METHODS = Set.of(
             "checkThreadOnDev",
+            "onScreenRemoveBecauseStopping",
             "onScreenRemove",
             "beforeScreenTick",
             "afterScreenTick",
             "<clinit>");
 
     private LegacyFabricScreenApiAdapter() {}
+
+    static String mapLegacyClassName(String internalName) {
+        if (LEGACY_MINECRAFT.equals(internalName)) return MINECRAFT;
+        if (LEGACY_SCREEN.equals(internalName)) return CURRENT_SCREEN;
+        return internalName;
+    }
 
     static Result adapt(byte[] remappedClass) throws IOException {
         final ClassReader reader;
@@ -187,8 +197,7 @@ final class LegacyFabricScreenApiAdapter {
                 if (REMOVED_METHODS.contains(name)) return null;
                 MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
                 if (delegate == null || !("beforeLoadingScreenTick".equals(name)
-                        || "afterLoadingScreenTick".equals(name)
-                        || "onScreenRemoveBecauseStopping".equals(name))) {
+                        || "afterLoadingScreenTick".equals(name))) {
                     return delegate;
                 }
                 return new MethodVisitor(Opcodes.ASM9, delegate) {
