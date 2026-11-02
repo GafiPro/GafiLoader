@@ -187,6 +187,65 @@ class LegacyModCompatibilityTransformerTest {
     }
 
     @Test
+    void adaptsLegacyScreenApiMixinInsideNestedFabricApiModuleWithoutChangingOriginals() throws Exception {
+        LegacyClassTweakerMappings mappings = createBytecodeMappings();
+        Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-screen-api"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+
+        byte[] originalMixin = classWithLegacyScreenApiMixin();
+        byte[] originalScreenModule = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"fabric-screen-api-v1","version":"1.0.0+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "fabric-screen-api-v1.mixins.json", """
+                        {"required":true,"package":"net.fabricmc.fabric.mixin.screen",
+                         "client":["GameRendererMixin","MinecraftMixin","ScreenMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin.class", originalMixin));
+        byte[] originalApi = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"fabric-api","version":"0.141.6+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "META-INF/jars/fabric-screen-api-v1.jar", originalScreenModule));
+        Path source = modsDirectory.resolve("fabric-api.jar");
+        Files.write(source, originalApi);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
+
+        assertTrue(result.transformed());
+        assertEquals(1, result.adaptedScreenApiMixins());
+        assertEquals(1, result.remappedClasses());
+        assertArrayEquals(originalApi, Files.readAllBytes(source),
+                "The original Fabric API outer JAR must remain byte-for-byte unchanged.");
+        assertArrayEquals(originalScreenModule, readEntry(originalApi,
+                "META-INF/jars/fabric-screen-api-v1.jar"),
+                "The original nested Screen API module must remain byte-for-byte unchanged.");
+
+        byte[] stagedModule = readEntry(Files.readAllBytes(result.modsDirectory().resolve("fabric-api.jar")),
+                "META-INF/jars/fabric-screen-api-v1.jar");
+        assertTrue(hasEntry(stagedModule, LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY),
+                "The generated GuiManager mixin must be placed in the staged nested module.");
+
+        byte[] stagedConfig = readEntry(stagedModule, LegacyFabricScreenApiAdapter.MIXIN_CONFIG);
+        com.google.gson.JsonArray clientMixins = com.google.gson.JsonParser.parseString(
+                new String(stagedConfig, StandardCharsets.UTF_8))
+                .getAsJsonObject().getAsJsonArray("client");
+        assertTrue(clientMixins.asList().stream().anyMatch(value ->
+                "GafiLoaderGuiManagerMixin".equals(value.getAsString())));
+
+        byte[] stagedMinecraftMixin = readEntry(stagedModule,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin.class");
+        ClassReader minecraftMixinReader = new ClassReader(stagedMinecraftMixin);
+        assertEquals("net/fabricmc/fabric/mixin/screen/MinecraftMixin",
+                minecraftMixinReader.getClassName());
+        assertEquals("net/minecraft/client/Minecraft", LegacyBytecodeRemapper.mixinTargets(stagedMinecraftMixin)
+                .get(0));
+    }
+
+    @Test
     void adaptsSystemReportMixinInsideNestedFabricApiModuleWithoutChangingOriginals() throws Exception {
         LegacyClassTweakerMappings mappings = createBytecodeMappings();
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-system-report"));
@@ -439,7 +498,9 @@ class LegacyModCompatibilityTransformerTest {
                 + "c\ta\tnet/minecraft/class_7924\n"
                 + "\tf\tLa;\tb\tfield_1234\n"
                 + "\tm\t(La;)La;\tc\tmethod_2345\n"
-                + "c\tb\tnet/minecraft/class_9001\n")
+                + "c\tb\tnet/minecraft/class_9001\n"
+                + "c\tc\tnet/minecraft/class_310\n"
+                + "c\td\tnet/minecraft/class_437\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -449,8 +510,75 @@ class LegacyModCompatibilityTransformerTest {
                     net.minecraft.core.Registry entry -> b
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 net.minecraft.SystemReport -> b:
+                net.minecraft.client.Minecraft -> c:
+                net.minecraft.client.gui.screen.Screen -> d:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+    }
+
+    private static byte[] classWithLegacyScreenApiMixin() {
+        String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
+        String callbackInfo = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
+        String screenDescriptor = "Lnet/minecraft/class_437;";
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                mixinClass, null, "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);
+        mixin.visit("value", Type.getObjectType("net/minecraft/class_310"));
+        mixin.visitEnd();
+
+        FieldVisitor screen = writer.visitField(Opcodes.ACC_PUBLIC, "screen",
+                screenDescriptor, null, null);
+        screen.visitAnnotation(SHADOW_ANNOTATION, true).visitEnd();
+        screen.visitEnd();
+
+        FieldVisitor gameThread = writer.visitField(Opcodes.ACC_PRIVATE, "gameThread",
+                "Ljava/lang/Thread;", null, null);
+        gameThread.visitAnnotation(SHADOW_ANNOTATION, true).visitEnd();
+        gameThread.visitEnd();
+
+        FieldVisitor tickingScreen = writer.visitField(Opcodes.ACC_PRIVATE, "tickingScreen",
+                screenDescriptor, null, null);
+        tickingScreen.visitEnd();
+
+        addScreenApiHandler(writer, mixinClass, "checkThreadOnDev",
+                "(" + screenDescriptor + callbackInfo + ")V", null, screenDescriptor, "screen");
+        addScreenApiHandler(writer, mixinClass, "onScreenRemove",
+                "(" + screenDescriptor + callbackInfo + ")V", "setScreen", screenDescriptor, "screen");
+        addScreenApiHandler(writer, mixinClass, "onScreenRemoveBecauseStopping",
+                "(" + callbackInfo + ")V", "destroy", screenDescriptor, "screen");
+        addScreenApiHandler(writer, mixinClass, "beforeScreenTick",
+                "(" + callbackInfo + ")V", "tick", screenDescriptor, "screen");
+        addScreenApiHandler(writer, mixinClass, "afterScreenTick",
+                "(" + callbackInfo + ")V", "tick", screenDescriptor, "tickingScreen");
+        addScreenApiHandler(writer, mixinClass, "beforeLoadingScreenTick",
+                "(" + callbackInfo + ")V", "doWorldLoad", screenDescriptor, "screen");
+        addScreenApiHandler(writer, mixinClass, "afterLoadingScreenTick",
+                "(" + callbackInfo + ")V", "doWorldLoad", screenDescriptor, "tickingScreen");
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addScreenApiHandler(ClassWriter writer, String mixinClass, String name,
+            String descriptor, String target, String screenDescriptor, String fieldName) {
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, name, descriptor, null, null);
+        if (target != null) {
+            AnnotationVisitor inject = method.visitAnnotation(
+                    "Lorg/spongepowered/asm/mixin/injection/Inject;", true);
+            AnnotationVisitor targets = inject.visitArray("method");
+            targets.visit(null, target);
+            targets.visitEnd();
+            inject.visitEnd();
+        }
+        method.visitCode();
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitFieldInsn(Opcodes.GETFIELD, mixinClass, fieldName, screenDescriptor);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(1, 1);
+        method.visitEnd();
     }
 
     private static byte[] classWithLegacySystemReportMixin() {
