@@ -17,7 +17,7 @@
 
 ## Estado atual — 2026-11-02
 
-- A cabeça atual de `main` é `32ec10dde616e4423a6e20714faeeba753036025`, merge squash da PR #28. A adaptação de runtime SystemReport continua no commit de código `78538d8ea6df5eb639b5ad9db73d2932e67d2f81`; a PR acrescentou cobertura de integração e documentação, sem alterar o código de runtime.
+- A PR #28 foi integrada em `main` pelo merge squash `32ec10dde616e4423a6e20714faeeba753036025`. A adaptação de runtime SystemReport continua no commit de código `78538d8ea6df5eb639b5ad9db73d2932e67d2f81`; a PR acrescentou cobertura de integração e documentação, sem alterar o código de runtime.
 - **Erro de preflight mais recente fornecido pelo utilizador:** em 2026-10-31 às 13:10:08 UTC, `ClassTweaker line 9: No 1.21.11 Intermediary mapping exists for ClassTweaker method net/minecraft/class_1959$class_5482#<init>(ZFLnet/minecraft/class_1959$class_5484;F)V`.
 - **Causa confirmada no código:** `LegacyClassTweakerMappings.mapMember` exigia uma entrada Tiny para todos os métodos. O nome JVM `<init>` é invariável e pode não aparecer nas mappings Intermediary; o remapper falhava antes de remapear o proprietário e o descritor.
 - **Correção integrada em `main`:** PR [#26](https://github.com/GafiPro/GafiLoader/pull/26), merge commit `4c56e694471698415d4a07d9ba0a7cb8b501ea89`. Para `<init>` e `<clinit>`, o código preserva o nome JVM, remapeia o proprietário para `official` e remapeia os tipos do descritor. Não inventa um nome de método.
