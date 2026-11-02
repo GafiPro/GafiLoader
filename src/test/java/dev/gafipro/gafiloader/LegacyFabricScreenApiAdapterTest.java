@@ -33,7 +33,7 @@ class LegacyFabricScreenApiAdapterTest {
             "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
     private static final String MINECRAFT = "net/minecraft/client/Minecraft";
     private static final String GUI_MANAGER = "net/minecraft/client/gui/GuiManager";
-    private static final String SCREEN = "net/minecraft/client/gui/screen/Screen";
+    private static final String SCREEN = "net/minecraft/client/gui/screens/Screen";
     private static final String SCREEN_DESCRIPTOR = "L" + SCREEN + ";";
 
     @Test
@@ -55,16 +55,18 @@ class LegacyFabricScreenApiAdapterTest {
         assertTrue(minecraftMixin.fields().containsKey("tickingScreen"));
         assertFalse(minecraftMixin.methods().contains("checkThreadOnDev"));
         assertFalse(minecraftMixin.methods().contains("onScreenRemove"));
-        assertFalse(minecraftMixin.methods().contains("onScreenRemoveBecauseStopping"));
+        assertTrue(minecraftMixin.methods().contains("onScreenRemoveBecauseStopping"));
         assertFalse(minecraftMixin.methods().contains("beforeScreenTick"));
         assertFalse(minecraftMixin.methods().contains("afterScreenTick"));
         assertTrue(minecraftMixin.methods().contains("beforeLoadingScreenTick"));
         assertTrue(minecraftMixin.methods().contains("afterLoadingScreenTick"));
+        assertTrue(inspectInstructions(result.bytes(), "onScreenRemoveBecauseStopping").stream()
+                .contains("METHOD:" + GUI_MANAGER + "#screen()" + SCREEN_DESCRIPTOR));
 
         List<String> loadingScreenInstructions =
                 inspectInstructions(result.bytes(), "beforeLoadingScreenTick");
         assertTrue(loadingScreenInstructions.contains(
-                "FIELD:" + MINECRAFT + "#gui:L" + GUI_MANAGER + ";"));
+                "FIELD:" + LegacyFabricScreenApiAdapter.LEGACY_MIXIN + "#gui:L" + GUI_MANAGER + ";"));
         assertTrue(loadingScreenInstructions.contains(
                 "METHOD:" + GUI_MANAGER + "#screen()"+ SCREEN_DESCRIPTOR));
         assertFalse(loadingScreenInstructions.stream().anyMatch(value ->
