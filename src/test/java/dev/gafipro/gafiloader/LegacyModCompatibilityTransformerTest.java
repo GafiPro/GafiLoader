@@ -439,8 +439,7 @@ class LegacyModCompatibilityTransformerTest {
                 + "c\ta\tnet/minecraft/class_7924\n"
                 + "\tf\tLa;\tb\tfield_1234\n"
                 + "\tm\t(La;)La;\tc\tmethod_2345\n"
-                + "c\tb\tnet/minecraft/class_9001\n"
-                + "\tm\t(Ljava/lang/String;Ljava/util/function/Supplier;)V\td\tmethod_9002\n")
+                + "c\tb\tnet/minecraft/class_9001\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -450,7 +449,6 @@ class LegacyModCompatibilityTransformerTest {
                     net.minecraft.core.Registry entry -> b
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 net.minecraft.SystemReport -> b:
-                    void setDetail(java.lang.String, java.util.function.Supplier) -> d
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
