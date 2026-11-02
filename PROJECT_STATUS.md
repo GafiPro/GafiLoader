@@ -1,7 +1,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-10-31
+> Última atualização: 2026-11-02
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -15,9 +15,9 @@
 - A experiência final deve ser simples no Windows: instalador e perfil `gafiloader-26.2`, sem exigir JDK de desenvolvimento ao utilizador final.
 - Atualizações não podem duplicar instalações/perfis nem apagar mundos, saves ou mods.
 
-## Estado atual — 2026-11-01
+## Estado atual — 2026-11-02
 
-- A cabeça atual de `main` é `583ef113d93f35bb0a662dddb07b6350f4175c1b`, merge commit da PR #27.
+- A cabeça atual de `main` observada nesta sessão é `e7d71fb09cb38a1abada168b5fd7a2d39daabf1a`; o último commit de código da adaptação SystemReport é `78538d8ea6df5eb639b5ad9db73d2932e67d2f81`. A branch de trabalho `test/system-report-nested-fabric-api` acrescenta agora um teste de integração, ainda não integrado.
 - **Erro de preflight mais recente fornecido pelo utilizador:** em 2026-10-31 às 13:10:08 UTC, `ClassTweaker line 9: No 1.21.11 Intermediary mapping exists for ClassTweaker method net/minecraft/class_1959$class_5482#<init>(ZFLnet/minecraft/class_1959$class_5484;F)V`.
 - **Causa confirmada no código:** `LegacyClassTweakerMappings.mapMember` exigia uma entrada Tiny para todos os métodos. O nome JVM `<init>` é invariável e pode não aparecer nas mappings Intermediary; o remapper falhava antes de remapear o proprietário e o descritor.
 - **Correção integrada em `main`:** PR [#26](https://github.com/GafiPro/GafiLoader/pull/26), merge commit `4c56e694471698415d4a07d9ba0a7cb8b501ea89`. Para `<init>` e `<clinit>`, o código preserva o nome JVM, remapeia o proprietário para `official` e remapeia os tipos do descritor. Não inventa um nome de método.
@@ -27,14 +27,21 @@
 - **Validação da PR #27:** GitHub Actions run [41298700072](https://github.com/GafiPro/GafiLoader/actions/runs/41298700072) terminou com sucesso em Ubuntu e Windows. Ambos executaram os testes/build; o Windows também criou a app image e o instalador.
 - **Validação da `main` após merge:** GitHub Actions run [41298829441](https://github.com/GafiPro/GafiLoader/actions/runs/41298829441) terminou com sucesso. Ubuntu `clean test build` — sucesso; Windows `clean test installDist` — sucesso. No Windows passaram também a criação da app image, a criação do instalador e os uploads.
 - **Instalador correspondente à `main` atual:** artefacto Actions `13080158094`, `GafiLoader-0.1.749.exe`, 51 475 456 bytes. O ZIP descarregado corresponde ao digest publicado `sha256:319be4591e977c467fdb9185aab75b82a451ed8010ae7be54d7f28bd4c4ff0f0`; SHA-256 do EXE extraído: `d7d1f6f25da573c1ec0c06676f1debcd0fc39b9e4ff5636fe61a0fc3b7f096ca`. O artefacto expira em 2026-11-04 às 10:46:23 UTC.
-- **Runtime continua por validar:** não existe ainda um novo `gafiloader-preflight.log` / `latest.log` produzido pelo EXE 0.1.749 no computador do utilizador. A CI demonstra compilação, testes e empacotamento; não demonstra que Minecraft 26.2 inicia ou que a Fabric API 0.141.6+1.21.11 funciona em jogo real.
+- **Erro de runtime mais recente registado após o preflight:** Minecraft 26.2 passou a resolução de dependências e carregou 48 mods, mas falhou ao aplicar `fabric-crash-report-info-v1.mixins.json:SystemReportMixin`; o `@Shadow` legado declara `SystemReport#setDetail(String, Supplier)`, assinatura que já não existe no alvo 26.2.
+- **Causa da incompatibilidade:** a API 1.21.11 usa `SystemReport#setDetail(String, Supplier)`; a API 26.2 usa `SystemReport#setDetail(String, CrashReportDetail<Object>)`. `CrashReportDetail` usa `Callable.call()`, pelo que a lambda de `Supplier.get()` também tem de ser adaptada. Isto é incompatibilidade de descritor/SAM no Mixin, não uma falha do dependency override.
+- **Adaptação integrada em main:** `LegacyMixinBytecodeAdapter` deteta o target `net/minecraft/SystemReport` e o shadow legado exato, converte o tipo `Supplier` para `CrashReportDetail`, remapeia o shadow/invocação para `setDetail` e muda o nome do call-site invokedynamic de `get` para `call`. A regra é ativada apenas quando o Mixin contém o shadow legado com o descritor exato e aponta para SystemReport.
+- **Histórico de implementação:** commits `2757e626` (mapeamento especial do shadow), `f4048f12` (teste unitário inicial), `722c176c` (fixture partilhado), `756eef66` (tentativa de hook ASM 9.9), `78538d8e` (hook efetivamente chamado por ClassRemapper, de dois argumentos), `cb16bb86` (estado documental) e `e7d71fb0` (registo da falha da asserção invokedynamic e da correção).
+- **Falha de CI detetada e corrigida durante a sequência:** a primeira implementação tentou substituir a sobrecarga de quatro argumentos de `mapInvokeDynamicMethodName`; a asserção mostrou que o call-site continuava `get`. A implementação foi corrigida para a sobrecarga de dois argumentos e o teste exige agora explicitamente `call`. Não há nesta sessão confirmação verificável do workflow de push da main: o endpoint de runs disponível só devolve execuções acionadas por pull request e não retornou runs para o commit direto.
+- **Novo teste de integração em PR:** `LegacyModCompatibilityTransformerTest.adaptsSystemReportMixinInsideNestedFabricApiModuleWithoutChangingOriginals` percorre a cadeia real outer JAR `fabric-api.jar` → `META-INF/jars/fabric-crash-report-info-v1.jar` → classe Mixin. Verifica target/descritores/SAM remapeados e preservação byte a byte do JAR original. PR [#28](https://github.com/GafiPro/GafiLoader/pull/28), branch `test/system-report-nested-fabric-api`.
+- **Artefacto anterior:** `GafiLoader-0.1.749.exe` foi construído antes da adaptação SystemReport e não contém esta correção. Não o usar para validar o crash atual.
+- **Runtime continua por validar:** ainda não existe um novo `gafiloader-preflight.log` / `latest.log` produzido por um instalador que inclua a adaptação SystemReport. A passagem da resolução de dependências e os testes de bytecode não demonstram que Minecraft 26.2 chega ao menu ou funciona em jogo.
 
 ## Próximos passos — ordem recomendada
 
-1. Testar `GafiLoader-0.1.749.exe` no perfil dedicado `gafiloader-26.2`; confirmar no `logs/gafiloader-preflight.log` que o ClassTweaker da Fabric API passa a namespace `official` e que o preflight continua para além da linha 9.
-2. Se o arranque ainda falhar, recolher o novo `logs/gafiloader-preflight.log` e o primeiro erro relevante de `logs/latest.log`; diagnosticar a próxima falha sem misturar erros de ClassTweaker, linkage, Mixin e API.
-3. Confirmar que Fabric carrega as cópias staged em `.gafiloader/compat-mods` quando há transformação e que os JAR originais permanecem byte a byte intactos.
-4. Testar a Fabric API 0.141.6+1.21.11 e pelo menos um mod legado representativo até ao menu/jogo; manter compatibilidade funcional geral como não validada até haver essa evidência.
+1. Reexecutar CI da PR #28 depois de simplificar o fixture SystemReport para mapear apenas a classe; confirmar os testes em Ubuntu e Windows antes de integrar.
+2. Depois da CI aprovada, gerar/obter um instalador que inclua os commits SystemReport e validar no Windows o novo `logs/gafiloader-preflight.log` e `logs/latest.log`.
+3. Confirmar que a classe SystemReportMixin transformada está dentro da cópia staged em `.gafiloader/compat-mods`, enquanto o JAR original continua byte a byte intacto.
+4. Testar a Fabric API 0.141.6+1.21.11 até ao menu e, se possível, uma funcionalidade representativa; manter compatibilidade funcional geral como não validada até haver essa evidência.
 
 ## Estado conhecido em 2026-10-27
 
@@ -336,3 +343,27 @@ Em cada sessão de trabalho:
 - A primeira CI da adaptação `SystemReport` revelou que o fixture de mappings isolado do novo teste falhava ao carregar. Simplifiquei o teste para reutilizar o fixture Tiny/ProGuard já usado pelos testes existentes, acrescentando apenas uma classe `SystemReport` ao mesmo fixture; a regra de nome `setDetail` é agora explicitamente limitada ao target e descritor antigos exatos. A CI desta revisão ainda tem de confirmar o teste.
 
 - A CI da revisão de fixture passou a falhar numa asserção mais tardia: o nome do call-site invokedynamic ainda era `get`. Confirmei pelo comportamento de `ClassRemapper` que a sobrecarga chamada pelo remapeador é `mapInvokeDynamicMethodName(String, String)`; a alteração anterior para a sobrecarga com `Handle` não era invocada pelo caminho efetivo e foi revertida. O teste de regressão exige agora `call` explicitamente.
+
+
+### 2026-11-02 — Cobrir a adaptação SystemReport no pipeline de JARs aninhados
+
+- Estado inicial: a adaptação SystemReport estava implementada em `LegacyMixinBytecodeAdapter` e tinha um teste unitário isolado. A cadeia de transformação real da Fabric API — JAR exterior, módulo aninhado e classe Mixin — ainda não tinha uma regressão de integração dedicada.
+- Inspecionados novamente `PROJECT_STATUS.md`, `README.md`, `build.gradle`, `settings.gradle`, `LaunchBootstrap`, `LegacyDependencyOverrideGenerator`, `LegacyMinecraftVersionDetector`, `LegacyModCompatibilityTransformer`, `LegacyBytecodeRemapper`, `LegacyMixinBytecodeAdapter` e os testes relevantes. Confirmada a branch principal `main`; a cabeça observada era `e7d71fb09cb38a1abada168b5fd7a2d39daabf1a`.
+- Criada a branch `test/system-report-nested-fabric-api` a partir da cabeça observada de `main`.
+- Alterado `src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java`: novo teste `adaptsSystemReportMixinInsideNestedFabricApiModuleWithoutChangingOriginals`, com fixture de Fabric API 0.141.6+1.21.11 e módulo aninhado `fabric-crash-report-info-v1`. Verifica o target Mojang `net/minecraft/SystemReport`, descritor `CrashReportDetail`, invokedynamic `call`, invocação `setDetail` e preservação dos bytes do JAR original.
+- O fixture Tiny/ProGuard foi ampliado com uma entrada independente para `class_9001` / `SystemReport` e o membro legado `method_9002`; os mappings existentes de Registry foram mantidos.
+- Commits da branch: `e22ce8c518e4dc52b74f3f28f79423afdeb6c0bd` (teste inicial) e `4dd4db159f4b509899617d7ee470e1f7148936a5` (comparar os bytes do módulo original diretamente, sem reconstruir ZIPs e introduzir diferenças de timestamp).
+- Revisão estática do diff: imports ASM `Handle` e `Type` corretos; a fixture usa o formato Tiny v2 já usado pelos testes; a comparação do JAR exterior e do módulo interno é feita sobre os bytes originais efetivamente escritos.
+- Testes executados nesta sessão: nenhum comando Gradle. O ambiente de acesso remoto ao GitHub permite inspecionar e editar os ficheiros, mas não disponibiliza checkout local/JDK 25 para executar os testes. A CI da PR ainda é a validação necessária.
+- Limitações: não foi possível obter o estado da execução GitHub Actions de push associada aos commits diretos da main; o endpoint de workflow disponível só retorna runs de PR. Também não há novo log de runtime do utilizador após a adaptação SystemReport.
+- Próximos passos: (1) abrir PR desta branch e aguardar/consultar CI Windows/Linux; (2) corrigir qualquer falha de compilação/fixture; (3) só depois integrar e gerar novo instalador; (4) validar no computador do utilizador e recolher os dois logs se surgir nova falha.
+
+### 2026-11-02 — Corrigir a primeira falha CI do teste de integração SystemReport
+
+- PR [#28](https://github.com/GafiPro/GafiLoader/pull/28) criada a partir da cabeça `e7d71fb09cb38a1abada168b5fd7a2d39daabf1a`; comparação com `main` confirmou três commits e apenas dois ficheiros alterados: o teste de integração e este registo.
+- GitHub Actions run [41431412488](https://github.com/GafiPro/GafiLoader/actions/runs/41431412488), run number 766: Ubuntu e Windows falharam em `:test`. Em ambos, 80 testes foram executados e três falharam no mesmo ponto, `LegacyModCompatibilityTransformerTest.java:455`, dentro de `LegacyClassTweakerMappings.load`. A compilação Java e dos testes passou.
+- Os três testes afetados partilham `createBytecodeMappings()`, pelo que a falha não estava limitada ao novo teste. A inspeção do adapter mostrou que o alias `setDetail` é aplicado diretamente para o target `SystemReport` e o descritor legado exato; não necessita de uma entrada Tiny/ProGuard para o membro.
+- Correção na branch: removida a entrada de método `method_9002` e a linha ProGuard `setDetail(...)` do fixture comum; mantida apenas a associação de classe `class_9001` → `net/minecraft/SystemReport`, que é a informação exigida para ativar a regra target-aware. Isto reduz o fixture ao mínimo e evita interferir com os mappings Registry já existentes.
+- Commit de correção: `db7f182de814049cad6ddd7c736feb8382d446b0`.
+- A causa exata da IOException não foi impressa pelo logger Gradle, pelo que a relação com a entrada adicional do membro é uma inferência sustentada pelo ponto comum de falha e pela remoção da informação desnecessária; a nova CI terá de confirmar.
+- Validação após a correção: ainda pendente nesta atualização. Não executar merge enquanto a nova CI Windows/Linux não estiver verde.
