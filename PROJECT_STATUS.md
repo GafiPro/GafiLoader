@@ -5,6 +5,19 @@
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
+## Atualização de diagnóstico — 2026-11-02 (Fabric Screen API)
+
+- **Objetivo:** investigar o novo crash reportado pelo utilizador após o instalador 0.1.767, distinguindo a falha de dependências de uma incompatibilidade Mixin em runtime.
+- **Estado inicial:** o log `Texto colado(8).txt` começa com Minecraft 26.2, Fabric Loader 0.19.5 e Fabric API 0.141.6+1.21.11. Fabric regista `Dependencies overridden for fabric-api` e carrega 48 mods; portanto, neste arranque, o gate de versão/dependências foi ultrapassado.
+- **Erro fatal observado:** `fabric-screen-api-v1.mixins.json:MinecraftMixin` falha ao aplicar em `net.minecraft.client.Minecraft`, porque `@Shadow field screen` não existe nesse target. A exceção é `InvalidMixinException`, não um erro de resolução de dependências.
+- **Fonte da Mixin legada consultada:** o ficheiro `fabric-screen-api-v1/.../MinecraftMixin.java` da mirror pública `coredex-source/FabricAPI`, branch `1.21.11`, confirma `@Mixin(Minecraft.class)`, `@Shadow public Screen screen`, `@Shadow private Thread gameThread` e injeções em `Minecraft.setScreen`, `destroy`, `tick` e `doWorldLoad`. A Mixin lê `this.screen` em callbacks de remoção e tick; não é seguro simplesmente apagar o shadow.
+- **Evidência do alvo 26.2:** a tabela de mappings 26.2 consultada para `net.minecraft.client.gui.GuiManager` identifica a classe Mojang anterior `net.minecraft.client.gui.Gui`, com campo privado `screen`, getter público `screen()` e método `setScreen(Screen)`; também lista `tick()`. Isto confirma que o estado de ecrã foi movido de `Minecraft` para o gestor GUI, em vez de ter sido simplesmente renomeado dentro de `Minecraft`.
+- **Conclusão técnica:** a correção não deve ser um alias cego de `screen` para `gui`: os tipos são diferentes (`Screen` vs. `GuiManager`). Uma adaptação correta terá de reorientar a Mixin para o target que agora possui o estado de ecrã e rever separadamente os callbacks cujo método proprietário permaneça em `Minecraft` (nomeadamente `destroy` / `doWorldLoad`) e o acesso a `gameThread`. É uma migração de target/injeções, não apenas um remapeamento de nome de campo.
+- **Ficheiros do repositório alterados nesta investigação:** nenhum ficheiro de código. Foram inspecionados `PROJECT_STATUS.md`, `README.md`, `build.gradle`, `settings.gradle`, `LaunchBootstrap`, `LegacyModCompatibilityTransformer`, `LegacyMixinBytecodeAdapter`, testes correspondentes e workflow. Branch por defeito: `main`; commits mais recentes observados: `8d1eeacf`, `49e47723`, `32ec10dd`.
+- **Validação:** análise estática do log real fornecido e comparação com a fonte da Mixin legada e mappings publicados para 26.2. Não foi executado Gradle nesta sessão remota; não foi realizado teste de runtime nem alterado código.
+- **Limitações / dados em falta:** o utilizador forneceu o log de runtime, mas não o JAR original `fabric-api-0.141.6+1.21.11`, o JAR staged em `.minecraft/.gafiloader/compat-mods`, o `fabric-screen-api-v1.mixins.json` efetivamente carregado, nem o `gafiloader-preflight.log` correspondente. A lista completa de métodos/owners no bytecode 26.2 ainda precisa de validação direta.
+- **Próximos passos:** (1) obter/inspecionar o módulo `fabric-screen-api-v1` dentro do JAR real e a cópia staged; (2) confirmar owners/descritores 26.2 de `setScreen`, `tick`, `destroy`, `doWorldLoad` e do campo `gameThread`; (3) desenhar adaptação ASM específica que preserve os eventos de remoção/tick, com Mixin(s) dirigidas aos targets corretos; (4) acrescentar teste de integração sobre JAR aninhado e preservar o original byte a byte; (5) executar CI e só depois pedir novo arranque de runtime.
+
 ## Objetivo e decisões que não podem ser esquecidas
 
 - O jogo efetivamente executado é Minecraft Java Edition **26.2**.
