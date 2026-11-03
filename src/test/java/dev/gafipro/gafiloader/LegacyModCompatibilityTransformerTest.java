@@ -243,10 +243,21 @@ class LegacyModCompatibilityTransformerTest {
                 minecraftMixinReader.getClassName());
         assertEquals("net/minecraft/client/MinecraftClient", LegacyBytecodeRemapper.mixinTargets(stagedMinecraftMixin)
                 .get(0));
+        byte[] stagedGuiManagerMixin = readEntry(stagedModule,
+                LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY);
         assertEquals("Lnet/minecraft/client/gui/screen/Screen;removed()V",
-                atTargetForMethod(readEntry(stagedModule,
-                        LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY), "onScreenRemove"),
+                atTargetForMethod(stagedGuiManagerMixin, "onScreenRemove"),
                 "The @At selector must use the singular 26.2 Screen package.");
+        assertEquals("Lnet/minecraft/client/gui/screen/Screen;tick()V",
+                atTargetForMethod(stagedGuiManagerMixin, "beforeScreenTick"));
+        assertEquals("Lnet/minecraft/client/gui/screen/Screen;tick()V",
+                atTargetForMethod(stagedGuiManagerMixin, "afterScreenTick"));
+        assertEquals("Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V",
+                atTargetForMethod(stagedMinecraftMixin, "beforeLoadingScreenTick"),
+                "LevelLoadingScreen retains its plural package in 26.2.");
+        assertEquals("Lnet/minecraft/client/MinecraftClient;runTick(Z)V",
+                atTargetForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"),
+                "The old Minecraft runTick selector must target MinecraftClient in 26.2.");
     }
 
     @Test
@@ -611,11 +622,22 @@ class LegacyModCompatibilityTransformerTest {
             AnnotationVisitor targets = inject.visitArray("method");
             targets.visit(null, target);
             targets.visitEnd();
-            if ("onScreenRemove".equals(name)) {
+            String atTarget = switch (name) {
+                case "onScreenRemove" ->
+                        "Lnet/minecraft/client/gui/screens/Screen;removed()V";
+                case "beforeScreenTick", "afterScreenTick" ->
+                        "Lnet/minecraft/client/gui/screens/Screen;tick()V";
+                case "beforeLoadingScreenTick" ->
+                        "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
+                case "afterLoadingScreenTick" ->
+                        "Lnet/minecraft/client/Minecraft;runTick(Z)V";
+                default -> null;
+            };
+            if (atTarget != null) {
                 AnnotationVisitor at = inject.visitAnnotation("at",
                         "Lorg/spongepowered/asm/mixin/injection/At;");
                 at.visit("value", "INVOKE");
-                at.visit("target", "Lnet/minecraft/client/gui/screens/Screen;removed()V");
+                at.visit("target", atTarget);
                 at.visitEnd();
             }
             inject.visitEnd();
