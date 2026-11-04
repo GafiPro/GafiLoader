@@ -7,7 +7,7 @@
 
 ## Estado atual — 2026-11-04
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`, agora na cabeça `ca376cf6388da8e40f6d7c5f4f66c0d49c81b64a`; não foi integrada porque falta validação de runtime.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`; o último commit de código/testes é `ca376cf6388da8e40f6d7c5f4f66c0d49c81b64a` e a atualização documental desta sessão é `4871f5662383d0f22b341f5de9590f45cc1fe213`. Não foi integrada porque falta validação de runtime.
 - O diagnóstico do último arranque real continua a separar duas fases: o Fabric ultrapassou o gate de dependências (o log registou `Dependencies overridden for fabric-api` e carregou 48 mods); a falha fatal seguinte foi a Mixin `fabric-screen-api-v1:MinecraftMixin`, não uma nova rejeição inicial da Fabric API.
 - O adaptador Screen API foi endurecido: só transforma o Mixin legado quando o campo `screen` é efetivamente `@Shadow` e o descritor já foi normalizado para `Lnet/minecraft/client/gui/screen/Screen;`. Estruturas inesperadas falham explicitamente em vez de receberem uma transformação parcial.
 - GitHub Actions run [788](https://github.com/GafiPro/GafiLoader/actions/runs/41815987544), para a cabeça de código/testes `ca376cf6`, terminou com sucesso em Ubuntu e Windows. Ubuntu executou `clean test build`; Windows executou `clean test installDist`, criou a app image, construiu o instalador WiX e publicou ambos os artefactos. A run 787, sobre o commit de implementação anterior, também passou nos dois sistemas.
