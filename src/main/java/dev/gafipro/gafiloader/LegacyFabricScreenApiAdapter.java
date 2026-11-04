@@ -77,7 +77,8 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         MixinShape shape = inspect(reader);
-        if (!shape.targetsMinecraft() || shape.screenDescriptor() == null
+        if (!shape.targetsMinecraft() || !shape.hasScreenShadow()
+                || !("L" + CURRENT_SCREEN + ";").equals(shape.screenDescriptor())
                 || !shape.hasGameThreadShadow()
                 || !shape.hasMethod("onScreenRemove")
                 || !shape.hasMethod("beforeScreenTick")
@@ -128,6 +129,7 @@ final class LegacyFabricScreenApiAdapter {
 
     private static MixinShape inspect(ClassReader reader) {
         boolean[] targetMinecraft = {false};
+        boolean[] screenShadow = {false};
         boolean[] gameThreadShadow = {false};
         String[] screenDescriptor = {null};
         Set<String> methods = new java.util.LinkedHashSet<>();
@@ -151,12 +153,13 @@ final class LegacyFabricScreenApiAdapter {
             public FieldVisitor visitField(int access, String name, String descriptor,
                                            String signature, Object value) {
                 if (SCREEN_FIELD.equals(name)) screenDescriptor[0] = descriptor;
-                if (!"gameThread".equals(name)) return null;
+                if (!SCREEN_FIELD.equals(name) && !"gameThread".equals(name)) return null;
                 return new FieldVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         if (SHADOW_ANNOTATION.equals(annotationDescriptor)) {
-                            gameThreadShadow[0] = true;
+                            if (SCREEN_FIELD.equals(name)) screenShadow[0] = true;
+                            if ("gameThread".equals(name)) gameThreadShadow[0] = true;
                         }
                         return null;
                     }
@@ -171,7 +174,7 @@ final class LegacyFabricScreenApiAdapter {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-        return new MixinShape(targetMinecraft[0], gameThreadShadow[0],
+        return new MixinShape(targetMinecraft[0], screenShadow[0], gameThreadShadow[0],
                 screenDescriptor[0], Set.copyOf(methods));
     }
 
@@ -303,8 +306,8 @@ final class LegacyFabricScreenApiAdapter {
 
     record Result(byte[] bytes, Map<String, byte[]> generatedClasses, boolean adapted) {}
 
-    private record MixinShape(boolean targetsMinecraft, boolean hasGameThreadShadow,
-                              String screenDescriptor, Set<String> methods) {
+    private record MixinShape(boolean targetsMinecraft, boolean hasScreenShadow,
+                              boolean hasGameThreadShadow, String screenDescriptor, Set<String> methods) {
         boolean hasMethod(String name) {
             return methods.contains(name);
         }
