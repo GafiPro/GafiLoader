@@ -10,6 +10,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LegacyFabricScreenApiAdapterTest {
     private static final String MIXIN = "Lorg/spongepowered/asm/mixin/Mixin;";
@@ -93,6 +95,17 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsUnexpectedScreenShadowOrDescriptor() {
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(false)),
+                "A field named screen without @Shadow must not be treated as the target's screen field.");
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(
+                        legacyMinecraftMixin("Lnet/minecraft/client/gui/screens/Screen;", true)),
+                "The legacy plural Screen package must be remapped before this adapter runs.");
+    }
+
+    @Test
     void registersGeneratedMixinInClientArrayExactlyOnce() throws Exception {
         byte[] original = """
                 {
@@ -114,6 +127,14 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     private static byte[] legacyMinecraftMixin() {
+        return legacyMinecraftMixin(SCREEN_DESCRIPTOR, true);
+    }
+
+    private static byte[] legacyMinecraftMixin(boolean shadowScreen) {
+        return legacyMinecraftMixin(SCREEN_DESCRIPTOR, shadowScreen);
+    }
+
+    private static byte[] legacyMinecraftMixin(String screenDescriptor, boolean shadowScreen) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
                 LegacyFabricScreenApiAdapter.LEGACY_MIXIN, null, "java/lang/Object", null);
@@ -123,8 +144,8 @@ class LegacyFabricScreenApiAdapterTest {
         mixin.visitEnd();
 
         FieldVisitor screen = writer.visitField(Opcodes.ACC_PUBLIC, "screen",
-                SCREEN_DESCRIPTOR, null, null);
-        screen.visitAnnotation(SHADOW, true).visitEnd();
+                screenDescriptor, null, null);
+        if (shadowScreen) screen.visitAnnotation(SHADOW, true).visitEnd();
         screen.visitEnd();
 
         FieldVisitor gameThread = writer.visitField(Opcodes.ACC_PRIVATE, "gameThread",
@@ -137,9 +158,9 @@ class LegacyFabricScreenApiAdapterTest {
         tickingScreen.visitAnnotation(UNIQUE, true).visitEnd();
         tickingScreen.visitEnd();
 
-        addHandler(writer, "checkThreadOnDev", "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO + ")V",
+        addHandler(writer, "checkThreadOnDev", "(" + screenDescriptor + CALLBACK_INFO + ")V",
                 null, false, false);
-        addHandler(writer, "onScreenRemove", "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO + ")V",
+        addHandler(writer, "onScreenRemove", "(" + screenDescriptor + CALLBACK_INFO + ")V",
                 "setScreen", true, false);
         addHandler(writer, "onScreenRemoveBecauseStopping", "(" + CALLBACK_INFO + ")V",
                 "destroy", true, false);
