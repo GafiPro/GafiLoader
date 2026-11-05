@@ -245,6 +245,16 @@ class LegacyModCompatibilityTransformerTest {
                 .get(0));
         byte[] stagedGuiManagerMixin = readEntry(stagedModule,
                 LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY);
+        assertEquals(Set.of("setScreen"),
+                injectMethodTargetsForMethod(stagedGuiManagerMixin, "onScreenRemove"));
+        assertEquals(Set.of("tick"),
+                injectMethodTargetsForMethod(stagedGuiManagerMixin, "beforeScreenTick"));
+        assertEquals(Set.of("tick"),
+                injectMethodTargetsForMethod(stagedGuiManagerMixin, "afterScreenTick"));
+        assertEquals(Set.of("doWorldLoad"),
+                injectMethodTargetsForMethod(stagedMinecraftMixin, "beforeLoadingScreenTick"));
+        assertEquals(Set.of("doWorldLoad"),
+                injectMethodTargetsForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"));
         assertEquals("Lnet/minecraft/client/gui/screen/Screen;removed()V",
                 atTargetForMethod(stagedGuiManagerMixin, "onScreenRemove"),
                 "The @At selector must use the singular 26.2 Screen package.");
@@ -515,7 +525,14 @@ class LegacyModCompatibilityTransformerTest {
                 + "\tm\t(La;)La;\tc\tmethod_2345\n"
                 + "c\tb\tnet/minecraft/class_9001\n"
                 + "c\tc\tnet/minecraft/class_310\n"
-                + "c\td\tnet/minecraft/class_437\n")
+                + "\tm\t(Ld;)V\ta\tmethod_1507\n"
+                + "\tm\t()V\tb\tmethod_1574\n"
+                + "\tm\t()V\tc\tmethod_29610\n"
+                + "\tm\t(Z)V\td\tmethod_1523\n"
+                + "c\td\tnet/minecraft/class_437\n"
+                + "\tm\t()V\taZ_\tmethod_25432\n"
+                + "\tm\t()V\te\tmethod_25393\n"
+                + "c\te\tnet/minecraft/class_3928\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -526,7 +543,14 @@ class LegacyModCompatibilityTransformerTest {
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 net.minecraft.SystemReport -> b:
                 net.minecraft.client.Minecraft -> c:
+                    void setScreen(net.minecraft.client.gui.screens.Screen) -> a
+                    void tick() -> b
+                    void doWorldLoad() -> c
+                    void runTick(boolean) -> d
                 net.minecraft.client.gui.screens.Screen -> d:
+                    void removed() -> aZ_
+                    void tick() -> e
+                net.minecraft.client.gui.screens.LevelLoadingScreen -> e:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
     }
@@ -573,6 +597,38 @@ class LegacyModCompatibilityTransformerTest {
         return target.get();
     }
 
+    private static Set<String> injectMethodTargetsForMethod(byte[] classBytes, String requestedMethod) {
+        Set<String> targets = new LinkedHashSet<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!requestedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(annotationDescriptor)) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitArray(String property) {
+                                if (!"method".equals(property)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        if (value instanceof String selector) targets.add(selector);
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return Set.copyOf(targets);
+    }
+
     private static byte[] classWithLegacyScreenApiMixin() {
         String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
         String callbackInfo = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
@@ -602,17 +658,17 @@ class LegacyModCompatibilityTransformerTest {
         addScreenApiHandler(writer, mixinClass, "checkThreadOnDev",
                 "(" + screenDescriptor + callbackInfo + ")V", null, screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "onScreenRemove",
-                "(" + screenDescriptor + callbackInfo + ")V", "setScreen", screenDescriptor, "screen");
+                "(" + screenDescriptor + callbackInfo + ")V", "method_1507", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "onScreenRemoveBecauseStopping",
                 "(" + callbackInfo + ")V", "destroy", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "beforeScreenTick",
-                "(" + callbackInfo + ")V", "tick", screenDescriptor, "screen");
+                "(" + callbackInfo + ")V", "method_1574", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "afterScreenTick",
-                "(" + callbackInfo + ")V", "tick", screenDescriptor, "tickingScreen");
+                "(" + callbackInfo + ")V", "method_1574", screenDescriptor, "tickingScreen");
         addScreenApiHandler(writer, mixinClass, "beforeLoadingScreenTick",
-                "(" + callbackInfo + ")V", "doWorldLoad", screenDescriptor, "screen");
+                "(" + callbackInfo + ")V", "method_29610", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "afterLoadingScreenTick",
-                "(" + callbackInfo + ")V", "doWorldLoad", screenDescriptor, "tickingScreen");
+                "(" + callbackInfo + ")V", "method_29610", screenDescriptor, "tickingScreen");
 
         writer.visitEnd();
         return writer.toByteArray();
@@ -629,13 +685,13 @@ class LegacyModCompatibilityTransformerTest {
             targets.visitEnd();
             String atTarget = switch (name) {
                 case "onScreenRemove" ->
-                        "Lnet/minecraft/client/gui/screens/Screen;removed()V";
+                        "Lnet/minecraft/class_437;method_25432()V";
                 case "beforeScreenTick", "afterScreenTick" ->
-                        "Lnet/minecraft/client/gui/screens/Screen;tick()V";
+                        "Lnet/minecraft/class_437;method_25393()V";
                 case "beforeLoadingScreenTick" ->
-                        "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
+                        "Lnet/minecraft/class_3928;method_25393()V";
                 case "afterLoadingScreenTick" ->
-                        "Lnet/minecraft/client/Minecraft;runTick(Z)V";
+                        "Lnet/minecraft/class_310;method_1523(Z)V";
                 default -> null;
             };
             if (atTarget != null) {
