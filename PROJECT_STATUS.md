@@ -7,7 +7,7 @@
 
 ## Estado atual — 2026-11-05
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`; cabeça atual: `3d9ae5130c4a03565f84f52a336a3bfc81b5a0a9`. Não foi integrada porque falta validação de runtime.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`; o último commit de código/testes é `3d9ae5130c4a03565f84f52a336a3bfc81b5a0a9`, seguido de atualizações documentais na mesma branch. Não foi integrada porque falta validação de runtime.
 - O último log de jogo conhecido continua a mostrar que o override das dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados) e que a falha fatal seguinte foi a Mixin `fabric-screen-api-v1:MinecraftMixin`. Não há evidência nova de rejeição inicial da Fabric API.
 - O adaptador Screen API continua a exigir que o campo `screen` seja `@Shadow` e tenha o descritor atual `Lnet/minecraft/client/gui/screen/Screen;`; estruturas inesperadas são recusadas.
 - A integração de regressão foi reforçada para começar com selectors Intermediary de 1.21.11, em vez de nomes já convertidos: `class_310#method_1507` (setScreen), `method_1574` (tick), `method_29610` (doWorldLoad), `method_1523` (runTick), `class_437#method_25432` (removed), `method_25393` (tick) e `class_3928` (LevelLoadingScreen). O teste confirma a conversão dos selectors `@Inject.method` e `@At.target` até aos nomes/pacotes esperados em 26.2. A tabela de mappings usada pelo teste é uma fixture sintética com os IDs reais; não é o JAR real da Fabric API.
