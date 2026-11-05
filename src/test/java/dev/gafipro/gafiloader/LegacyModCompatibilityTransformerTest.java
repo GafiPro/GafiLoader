@@ -546,17 +546,22 @@ class LegacyModCompatibilityTransformerTest {
                         }
                         return new AnnotationVisitor(Opcodes.ASM9) {
                             @Override
-                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
-                                if (!"at".equals(property)
-                                        || !"Lorg/spongepowered/asm/mixin/injection/At;".equals(nestedDescriptor)) {
-                                    return null;
-                                }
+                            public AnnotationVisitor visitArray(String property) {
+                                if (!"at".equals(property)) return null;
                                 return new AnnotationVisitor(Opcodes.ASM9) {
                                     @Override
-                                    public void visit(String propertyName, Object value) {
-                                        if ("target".equals(propertyName) && value instanceof String selector) {
-                                            target.set(selector);
+                                    public AnnotationVisitor visitAnnotation(String ignored, String nestedDescriptor) {
+                                        if (!"Lorg/spongepowered/asm/mixin/injection/At;".equals(nestedDescriptor)) {
+                                            return null;
                                         }
+                                        return new AnnotationVisitor(Opcodes.ASM9) {
+                                            @Override
+                                            public void visit(String propertyName, Object value) {
+                                                if ("target".equals(propertyName) && value instanceof String selector) {
+                                                    target.set(selector);
+                                                }
+                                            }
+                                        };
                                     }
                                 };
                             }
@@ -634,11 +639,19 @@ class LegacyModCompatibilityTransformerTest {
                 default -> null;
             };
             if (atTarget != null) {
-                AnnotationVisitor at = inject.visitAnnotation("at",
+                // @Inject.at is declared as At[]; model the real class-file array
+                // encoding so the remapper test covers nested annotation traversal.
+                AnnotationVisitor atArray = inject.visitArray("at");
+                AnnotationVisitor at = atArray.visitAnnotation(null,
                         "Lorg/spongepowered/asm/mixin/injection/At;");
                 at.visit("value", "INVOKE");
                 at.visit("target", atTarget);
+                if ("onScreenRemove".equals(name) || "afterScreenTick".equals(name)
+                        || "afterLoadingScreenTick".equals(name)) {
+                    at.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", "AFTER");
+                }
                 at.visitEnd();
+                atArray.visitEnd();
             }
             inject.visitEnd();
         }
