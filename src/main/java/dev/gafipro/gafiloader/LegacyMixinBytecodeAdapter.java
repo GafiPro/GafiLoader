@@ -656,15 +656,28 @@ final class LegacyMixinBytecodeAdapter {
 
             @Override
             public AnnotationVisitor visitArray(String name) {
-                if (!isSelectorProperty(descriptor, name)) {
-                    return super.visitArray(name);
+                if (isSelectorProperty(descriptor, name)) {
+                    List<Object> values = new ArrayList<>();
+                    selectorArrays.put(name, values);
+                    return new AnnotationVisitor(Opcodes.ASM9) {
+                        @Override
+                        public void visit(String ignored, Object value) {
+                            values.add(value);
+                        }
+                    };
                 }
-                List<Object> values = new ArrayList<>();
-                selectorArrays.put(name, values);
-                return new AnnotationVisitor(Opcodes.ASM9) {
+
+                // Annotation-valued array properties (notably @Inject.at, whose
+                // declared type is At[]) must keep passing nested annotations through
+                // wrapAnnotation. Returning the raw array visitor would leave nested
+                // @At.target selectors in the legacy namespace.
+                AnnotationVisitor arrayDelegate = super.visitArray(name);
+                if (arrayDelegate == null) return null;
+                return new AnnotationVisitor(Opcodes.ASM9, arrayDelegate) {
                     @Override
-                    public void visit(String ignored, Object value) {
-                        values.add(value);
+                    public AnnotationVisitor visitAnnotation(String ignored, String nestedDescriptor) {
+                        return wrapAnnotation(super.visitAnnotation(ignored, nestedDescriptor),
+                                nestedDescriptor, metadata, mappings);
                     }
                 };
             }
