@@ -1,11 +1,27 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-05
+> Última atualização: 2026-11-06
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
-## Estado atual — 2026-11-05
+
+## Estado atual — 2026-11-06
+
+- **Bloqueio de código identificado na PR #29:** a inspeção de `LegacyFabricScreenApiAdapter` encontrou uma incompatibilidade entre o formato real da anotação Mixin e a forma como o adaptador a lia/escrevia. A API oficial de Sponge Mixin declara `Mixin.value()` como `Class<?>[]`, não `Class<?>` ([fonte](https://github.com/SpongePowered/Mixin/blob/master/src/main/java/org/spongepowered/asm/mixin/Mixin.java)). Em bytecode Java, mesmo `@Mixin(Minecraft.class)` é codificado como elemento de array; uma compilação equivalente inspecionada com `javap -v` mostrou `value=[class Ljava/lang/String;]`.
+- **Causa concreta:** o adaptador lia apenas `AnnotationVisitor.visit("value", Type)`; a anotação real chega por `visitArray("value")`, pelo que o target Minecraft não era detetado e a adaptação recusava a Mixin. A geração de `GafiLoaderGuiManagerMixin` também escrevia o target como valor escalar, incompatível com o contrato `Class<?>[]`. A fixture anterior reproduzia o mesmo formato escalar incorreto e não detetava a discrepância.
+- **Correção na branch `fix/fabric-screen-api-26-2`:** `LegacyFabricScreenApiAdapter` agora lê o target dentro de `visitArray("value")` e gera a anotação com `visitArray("value")`. `LegacyFabricScreenApiAdapterTest` constrói a Mixin original com a codificação real e o inspector do resultado só reconhece a forma de array, verificando também que a classe gerada usa o formato correto.
+- **Commits:** `15017ee334bed4ee8e68dd7085b19156fe988fb8` (correção de produção); `8156fb226bf61352fcd6a4f98447b97ec905a14e` (fixture real e leitura do array nos testes); `bd0e96e64ee629da41f2db3fb6271f321aa01dfe` (teste exige codificação de array também na saída).
+- **CI intermédia:** run [797](https://github.com/GafiPro/GafiLoader/actions/runs/42206571760) falhou em Ubuntu e Windows em `LegacyFabricScreenApiAdapterTest.java:80`: o inspector antigo do teste não lia a anotação array que a produção passou corretamente a gerar. Não foi falha de compilação; 84 testes foram executados e 1 asserção falhou em cada sistema. O teste foi corrigido nos commits seguintes.
+- **CI após a correção da fixture:** run [798](https://github.com/GafiPro/GafiLoader/actions/runs/42206586938): Ubuntu `success`; Windows estava a concluir a app image/instalador na última consulta.
+- **CI da cabeça atual:** run [799](https://github.com/GafiPro/GafiLoader/actions/runs/42206649074), commit `bd0e96e`: Ubuntu `success`; Windows estava na etapa `Build Windows installer` na última consulta. Esta cabeça inclui o teste que rejeita uma anotação de saída escalar. Atualizar o estado quando o resultado final do Windows estiver disponível.
+- **Validação local:** foi executado `javac` + `javap -v` numa anotação equivalente para confirmar a codificação de array da JVM. Não foi executado Gradle localmente; o ambiente tem Java 21 e o projeto exige Java 25. A validação Gradle está a decorrer na CI Java 25.
+- **Instalador fornecido nesta execução:** `GafiLoader-0.1.793.exe` foi verificado localmente: SHA-256 `92c02715883d5fea2bf2f910ed3ed553b872bd3fd1980fca2baeaa448e6b135f`, tipo PE32+ Windows x64. Corresponde ao artefacto previamente registado, mas foi produzido antes desta correção e não deve ser tratado como contendo a correção `@Mixin.value[]`; não foi executado em Windows real.
+- **Estado de integração/runtime:** `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta. Não há novo `logs/latest.log` nem `logs/gafiloader-preflight.log` depois do 0.1.793. A correção ainda não tem validação de Minecraft real.
+- **Decisões:** manter a PR sem merge; a correção de formato é necessária para que a adaptação seja aplicada, mas só a CI e depois um arranque real podem confirmar a cadeia completa. Não alterar os JAR originais; as mudanças continuam limitadas às cópias staged.
+- **Próximos passos:** (1) confirmar run 799 verde em Ubuntu e Windows; (2) inspecionar o novo artefacto Windows e registar o SHA-256; (3) pedir/obter um arranque com esse build e os dois logs; (4) confirmar que o preflight regista a adaptação Screen API, que o menu abre e que os originais permanecem byte a byte intactos; (5) analisar a primeira exceção fatal se ainda houver falha.
+
+## Histórico — estado em 2026-11-05
 
 - `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`; o último commit de código/testes é `3d9ae5130c4a03565f84f52a336a3bfc81b5a0a9`, seguido de atualizações documentais na mesma branch. Não foi integrada porque falta validação de runtime.
 - O último log de jogo conhecido continua a mostrar que o override das dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados) e que a falha fatal seguinte foi a Mixin `fabric-screen-api-v1:MinecraftMixin`. Não há evidência nova de rejeição inicial da Fabric API.
