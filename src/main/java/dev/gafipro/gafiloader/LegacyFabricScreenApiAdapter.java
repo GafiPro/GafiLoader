@@ -139,12 +139,29 @@ final class LegacyFabricScreenApiAdapter {
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                 if (!MIXIN_ANNOTATION.equals(descriptor)) return null;
                 return new AnnotationVisitor(Opcodes.ASM9) {
-                    @Override
-                    public void visit(String name, Object value) {
-                        if ("value".equals(name) && value instanceof Type target
+                    private void recordTarget(Object value) {
+                        if (value instanceof Type target && target.getSort() == Type.OBJECT
                                 && MINECRAFT.equals(target.getInternalName())) {
                             targetMinecraft[0] = true;
                         }
+                    }
+
+                    @Override
+                    public void visit(String name, Object value) {
+                        // Be tolerant of non-standard producers, but normal Java annotation
+                        // bytecode encodes Mixin.value() as a Class<?>[] and reaches visitArray.
+                        if ("value".equals(name)) recordTarget(value);
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitArray(String name) {
+                        if (!"value".equals(name)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String ignored, Object value) {
+                                recordTarget(value);
+                            }
+                        };
                     }
                 };
             }
@@ -284,7 +301,9 @@ final class LegacyFabricScreenApiAdapter {
             @Override
             public void visitEnd() {
                 AnnotationVisitor mixin = super.visitAnnotation(MIXIN_ANNOTATION, true);
-                mixin.visit("value", Type.getObjectType(GUI_MANAGER));
+                AnnotationVisitor targets = mixin.visitArray("value");
+                targets.visit(null, Type.getObjectType(GUI_MANAGER));
+                targets.visitEnd();
                 mixin.visitEnd();
 
                 FieldVisitor screen = super.visitField(Opcodes.ACC_PRIVATE,
