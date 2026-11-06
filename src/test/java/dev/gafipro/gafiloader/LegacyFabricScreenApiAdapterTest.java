@@ -220,13 +220,6 @@ class LegacyFabricScreenApiAdapterTest {
                 if (!MIXIN.equals(descriptor)) return null;
                 return new AnnotationVisitor(Opcodes.ASM9) {
                     @Override
-                    public void visit(String name, Object value) {
-                        if ("value".equals(name) && value instanceof Type type) {
-                            mixinTarget[0] = type.getInternalName();
-                        }
-                    }
-
-                    @Override
                     public AnnotationVisitor visitArray(String property) {
                         if (!"value".equals(property)) return null;
                         return new AnnotationVisitor(Opcodes.ASM9) {
