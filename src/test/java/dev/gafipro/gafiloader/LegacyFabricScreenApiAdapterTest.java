@@ -140,7 +140,10 @@ class LegacyFabricScreenApiAdapterTest {
                 LegacyFabricScreenApiAdapter.LEGACY_MIXIN, null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
-        mixin.visit("value", Type.getObjectType(MINECRAFT));
+        // Mixin.value is Class<?>[]; model the real class-file annotation array encoding.
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(MINECRAFT));
+        targets.visitEnd();
         mixin.visitEnd();
 
         FieldVisitor screen = writer.visitField(Opcodes.ACC_PUBLIC, "screen",
@@ -221,6 +224,19 @@ class LegacyFabricScreenApiAdapterTest {
                         if ("value".equals(name) && value instanceof Type type) {
                             mixinTarget[0] = type.getInternalName();
                         }
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitArray(String property) {
+                        if (!"value".equals(property)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String ignored, Object value) {
+                                if (value instanceof Type type && type.getSort() == Type.OBJECT) {
+                                    mixinTarget[0] = type.getInternalName();
+                                }
+                            }
+                        };
                     }
                 };
             }
