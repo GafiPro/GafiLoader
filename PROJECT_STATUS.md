@@ -23,7 +23,7 @@
 
 ## Estado atual — 2026-11-07
 
-- main continua em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; a PR #29 está aberta, sem merge, na branch fix/fabric-screen-api-26-2. A cabeça atual da PR é 23054e594e4b311efad802fb9cdf133df0b1c842; o commit de teste é af5c75110dec4eabdf23075e912595dd0fb0036e.
+- main continua em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; a PR #29 está aberta, sem merge, na branch fix/fabric-screen-api-26-2. A cabeça atual da PR é 8c8ffdc071d4453619e1f4786c5c43f44e0d4977 (atualização documental); o commit de teste é af5c75110dec4eabdf23075e912595dd0fb0036e.
 - A CI run 804 passou em Ubuntu e Windows. A regressão agora cobre o snapshot e a limpeza de tickingScreen nos callbacks de loading screen. Não foi alterado código de produção nesta sessão.
 - O instalador 0.1.799 fornecido foi verificado por SHA-256 e corresponde ao artefacto da run 799. Não foi executado num Windows real.
 - **Runtime ainda não validado:** faltam novos logs/gafiloader-preflight.log e logs/latest.log depois de executar o instalador no Windows. A compatibilidade da Fabric API e dos mods não deve ser declarada concluída só com a CI.
