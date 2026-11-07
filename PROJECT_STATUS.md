@@ -5,6 +5,19 @@
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
+## Sessão 2026-11-07 — rever os alvos 26.2 e validar a cabeça 0.1.810
+
+- **Estado confirmado:** PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não foi integrada. A base `main` mantém o SHA `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; a cabeça documental revista nesta sessão era `3841dc6c6af0d305af7ace5795e20fe8b345f61d`.
+- **Validação CI da cabeça:** GitHub Actions [run 810](https://github.com/GafiPro/GafiLoader/actions/runs/42383565623), associado exatamente ao SHA `3841dc6c6af0d305af7ace5795e20fe8b345f61d`, terminou com sucesso. O job Ubuntu concluiu os testes/build Gradle; o job Windows concluiu os testes, a app image com runtime Java, o instalador WiX e os uploads dos dois artefactos.
+- **Artefactos da run 810:** instalador `GafiLoader-Installer-Windows-x64`, artefacto ID `13579155322`, ZIP de 50 497 059 bytes, digest `sha256:0c54325f1f2dd20b9ca290b707d1ee8d1582ec7112e22bc8fc4a10368e60a4d2`; app image ID `13578406936`, digest `sha256:1ec79b46541e77519c0f22e4d8580061cec963f15e0d5fbae6c6fecdda95c35e`. Ambos expiram em 2026-11-10, aproximadamente às 14:53 UTC. Esta run gera a versão de aplicação `0.1.810`.
+- **Cross-check real da Screen API 1.21.11:** voltei a ler o `MinecraftMixin.java` da Fabric API 1.21.11. Confirma que os callbacks `beforeLoadingScreenTick` e `afterLoadingScreenTick` guardam e limpam `tickingScreen`; confirma também os hooks originais em `setScreen`, `tick` e `destroy`.
+- **Cross-check dos alvos 26.2:** os mappings públicos 26.2 listam `MinecraftClient.gui` como campo público final `GuiManager`; `GuiManager` contém o campo privado `screen` e os métodos `screen()`, `setScreen(Screen)` e `tick()`. `MinecraftClient` mantém `doWorldLoad` e `runTick(boolean)`, e expõe `close()`; o antigo nome `destroy()` não aparece no mapa do cliente 26.2. Fontes: https://mappings.relativitymc.org/26.2/net/minecraft/client/gui/GuiManager.html e https://mappings.relativitymc.org/26.2/net/minecraft/client/MinecraftClient.html.
+- **Conclusão técnica desta auditoria:** os owners/métodos usados pela adaptação para mudança de ecrã, tick normal e loading screen coincidem com a estrutura publicada de 26.2. Isto valida a escolha dos alvos e a coerência estática do adaptador, não prova a sequência exata em runtime nem que os callbacks funcionam no jogo.
+- **Limitação mantida deliberadamente:** não inventei um substituto para o hook antigo `destroy`. Embora `MinecraftClient.close()` exista em 26.2, a tabela de mappings não demonstra que seja equivalente nem em que ponto o ecrã atual é removido. O callback de remoção no encerramento continua por verificar; falta uma inspeção de bytecode/execução real antes de o adaptar.
+- **Alterações de produção nesta sessão:** nenhuma. Revisei a implementação, os testes e os mappings; não alterei a lógica de runtime nem os JAR originais.
+- **Bloqueio para concluir:** ainda não existem `logs/gafiloader-preflight.log` e `logs/latest.log` de um arranque real com o instalador 0.1.810 no Windows. A CI verde não comprova que o Minecraft chega ao menu.
+- **Próximo passo verificável:** instalar/executar o artefacto da run 810 no perfil dedicado `gafiloader-26.2`, iniciar com Fabric API 0.141.6+1.21.11 e enviar os dois logs. A primeira exceção fatal, caso exista, determina a próxima correção; sem esses logs, alterar mais Mixins seria especulativo.
+
 
 ## Sessão 2026-11-07 — validar a preservação do estado de tick da loading screen
 
