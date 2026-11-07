@@ -11,6 +11,7 @@ Gafi Loader is an experimental compatibility project targeting **Minecraft Java 
 - Keep Minecraft **26.2** as the launched game version.
 - Target only legacy mods built for **1.21.11**; no general promise to support every historical version.
 - Never rewrite the original mod JARs.
+- Final acceptance also requires in-memory/runtime compatibility without loading transformed mod-JAR copies; the current staged-copy pipeline is explicitly transitional.
 - Prefer compatibility transformations prepared during discovery/start-up rather than repeated work during gameplay.
 - Automate API-difference discovery, and add only tested compatibility shims.
 - Keep the Fabric ecosystem as the base rather than implementing a new mod ecosystem from scratch.
@@ -66,7 +67,9 @@ The launch-time bootstrap also prepares staged copies under `.gafiloader/compat-
 - A targeted rewrite of `EntityType.PLAYER` (`class_1299.field_6097`) to `EntityTypes.PLAYER`.
 - A module-scoped Fabric model-loading adapter that ports selected 1.21.11 `BlockModel` hooks to the 26.2 `CuboidModel` implementation.
 
-The original mod JARs remain byte-for-byte unchanged; modified archive copies have obsolete signature files removed. Mixin refmap keys and values are rewritten in the context of the owning mixin's `@Mixin` targets, including context-specific maps. Compatibility preparation now rejects unresolvable legacy class mappings and archives that exceed the configured scan-depth or size limits, rather than silently launching with a partially transformed legacy archive. These adapters cover known cases only. Other removed members, changed descriptors or semantics, unhandled Mixin patterns, resource-based selectors, registries, and Fabric API behavior still require separate compatibility work and real-game testing. The broader TinyRemapper command above remains a separate experimental manual tool.
+The original mod JARs remain byte-for-byte unchanged; modified archive copies have obsolete signature files removed. Mixin refmap keys and values are rewritten in the context of the owning mixin's `@Mixin` targets, including context-specific maps. Compatibility preparation now rejects unresolvable legacy class mappings and archives that exceed the configured scan-depth or size limits, rather than silently launching with a partially transformed legacy archive. These adapters cover known cases only. Other removed members, changed descriptors or semantics, unhandled Mixin patterns, resource-based selectors, registries, and Fabric API behavior still require separate compatibility work and real-game testing.
+
+**Important architectural limitation:** this is an intermediate staged-copy implementation, not the final runtime-only design. When a transformation is needed, Fabric currently loads the generated JAR copies under `.gafiloader/compat-mods`; it does not define every legacy class directly from the original JAR through an in-memory compatibility agent. The source JARs are preserved, but the final requirement that compatibility must not depend on transformed mod copies is **not yet satisfied**. Do not treat this build as the finished GafiLoader architecture. The broader TinyRemapper command above remains a separate experimental manual tool.
 
 ## Compatibility scanner
 
