@@ -73,6 +73,22 @@ class LegacyFabricScreenApiAdapterTest {
                 value.contains("#screen:" + SCREEN_DESCRIPTOR)),
                 "The Minecraft mixin must not read the removed Minecraft.screen field.");
 
+        // The real 1.21.11 mixin snapshots the screen before the loading-screen
+        // callback and clears that snapshot after the callback. The adaptation
+        // must change only where the current screen is read, not lose this state.
+        List<FieldAccess> beforeLoadingAccesses =
+                inspectFieldAccesses(result.bytes(), "beforeLoadingScreenTick");
+        assertTrue(beforeLoadingAccesses.contains(new FieldAccess(Opcodes.PUTFIELD,
+                LegacyFabricScreenApiAdapter.LEGACY_MIXIN, "tickingScreen", SCREEN_DESCRIPTOR)));
+        assertTrue(beforeLoadingAccesses.contains(new FieldAccess(Opcodes.GETFIELD,
+                LegacyFabricScreenApiAdapter.LEGACY_MIXIN, "tickingScreen", SCREEN_DESCRIPTOR)));
+        List<FieldAccess> afterLoadingAccesses =
+                inspectFieldAccesses(result.bytes(), "afterLoadingScreenTick");
+        assertTrue(afterLoadingAccesses.contains(new FieldAccess(Opcodes.GETFIELD,
+                LegacyFabricScreenApiAdapter.LEGACY_MIXIN, "tickingScreen", SCREEN_DESCRIPTOR)));
+        assertTrue(afterLoadingAccesses.contains(new FieldAccess(Opcodes.PUTFIELD,
+                LegacyFabricScreenApiAdapter.LEGACY_MIXIN, "tickingScreen", SCREEN_DESCRIPTOR)));
+
         byte[] generatedBytes = result.generatedClasses()
                 .get(LegacyFabricScreenApiAdapter.GENERATED_MIXIN_ENTRY);
         ClassShape guiMixin = inspect(generatedBytes);
@@ -171,13 +187,48 @@ class LegacyFabricScreenApiAdapterTest {
                 "tick", true, false);
         addHandler(writer, "afterScreenTick", "(" + CALLBACK_INFO + ")V",
                 "tick", true, true);
-        addHandler(writer, "beforeLoadingScreenTick", "(" + CALLBACK_INFO + ")V",
-                "doWorldLoad", true, false);
-        addHandler(writer, "afterLoadingScreenTick", "(" + CALLBACK_INFO + ")V",
-                "doWorldLoad", true, true);
+        addLoadingScreenHandler(writer, "beforeLoadingScreenTick", "doWorldLoad", true);
+        addLoadingScreenHandler(writer, "afterLoadingScreenTick", "doWorldLoad", false);
 
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static void addLoadingScreenHandler(ClassWriter writer, String name,
+                                                 String target, boolean beforeTick) {
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, name,
+                "(" + CALLBACK_INFO + ")V", null, null);
+        AnnotationVisitor annotation = method.visitAnnotation(INJECT, true);
+        AnnotationVisitor targets = annotation.visitArray("method");
+        targets.visit(null, target);
+        targets.visitEnd();
+        annotation.visitEnd();
+
+        method.visitCode();
+        if (beforeTick) {
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitFieldInsn(Opcodes.GETFIELD, LegacyFabricScreenApiAdapter.LEGACY_MIXIN,
+                    "screen", SCREEN_DESCRIPTOR);
+            method.visitFieldInsn(Opcodes.PUTFIELD, LegacyFabricScreenApiAdapter.LEGACY_MIXIN,
+                    "tickingScreen", SCREEN_DESCRIPTOR);
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitFieldInsn(Opcodes.GETFIELD, LegacyFabricScreenApiAdapter.LEGACY_MIXIN,
+                    "tickingScreen", SCREEN_DESCRIPTOR);
+            method.visitInsn(Opcodes.POP);
+        } else {
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitFieldInsn(Opcodes.GETFIELD, LegacyFabricScreenApiAdapter.LEGACY_MIXIN,
+                    "tickingScreen", SCREEN_DESCRIPTOR);
+            method.visitInsn(Opcodes.POP);
+            method.visitVarInsn(Opcodes.ALOAD, 0);
+            method.visitInsn(Opcodes.ACONST_NULL);
+            method.visitFieldInsn(Opcodes.PUTFIELD, LegacyFabricScreenApiAdapter.LEGACY_MIXIN,
+                    "tickingScreen", SCREEN_DESCRIPTOR);
+        }
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(2, 1);
+        method.visitEnd();
     }
 
     private static void addHandler(ClassWriter writer, String name, String descriptor,
@@ -271,6 +322,25 @@ class LegacyFabricScreenApiAdapterTest {
         return new ClassShape(className[0], mixinTarget[0], fields, methods, injectTargets);
     }
 
+    private static List<FieldAccess> inspectFieldAccesses(byte[] bytes, String requestedMethod) {
+        List<FieldAccess> accesses = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!requestedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName,
+                                               String fieldDescriptor) {
+                        accesses.add(new FieldAccess(opcode, owner, fieldName, fieldDescriptor));
+                    }
+                };
+            }
+        }, 0);
+        return accesses;
+    }
+
     private static List<String> inspectInstructions(byte[] bytes, String requestedMethod) {
         List<String> instructions = new ArrayList<>();
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
@@ -294,6 +364,8 @@ class LegacyFabricScreenApiAdapterTest {
         }, 0);
         return instructions;
     }
+
+    private record FieldAccess(int opcode, String owner, String name, String descriptor) {}
 
     private record ClassShape(String className, String mixinTarget, Map<String, String> fields,
                               Set<String> methods, Map<String, Set<String>> injectTargets) {}
