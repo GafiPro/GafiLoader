@@ -270,6 +270,13 @@ class LegacyModCompatibilityTransformerTest {
         assertEquals("Lnet/minecraft/client/MinecraftClient;runTick(Z)V",
                 atTargetForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"),
                 "The old Minecraft runTick selector must target MinecraftClient in 26.2.");
+        assertEquals(List.of("AFTER"), atShiftsForMethod(stagedGuiManagerMixin, "onScreenRemove"),
+                "ScreenEvents.remove must run after Screen.removed().");
+        assertEquals(List.of("BEFORE"), atShiftsForMethod(stagedGuiManagerMixin, "beforeScreenTick"));
+        assertEquals(List.of("AFTER"), atShiftsForMethod(stagedGuiManagerMixin, "afterScreenTick"),
+                "The after-tick callback must remain after Screen.tick().");
+        assertEquals(List.of("BEFORE"), atShiftsForMethod(stagedMinecraftMixin, "beforeLoadingScreenTick"));
+        assertEquals(List.of("AFTER"), atShiftsForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"));
     }
 
     @Test
@@ -597,6 +604,54 @@ class LegacyModCompatibilityTransformerTest {
             }
         }, 0);
         return target.get();
+    }
+
+    private static List<String> atShiftsForMethod(byte[] classBytes, String requestedMethod) {
+        List<String> shifts = new ArrayList<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!requestedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(annotationDescriptor)) {
+                            return null;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitArray(String property) {
+                                if (!"at".equals(property)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public AnnotationVisitor visitAnnotation(String ignored,
+                                            String nestedDescriptor) {
+                                        if (!"Lorg/spongepowered/asm/mixin/injection/At;".equals(nestedDescriptor)) {
+                                            return null;
+                                        }
+                                        String[] shift = {"BEFORE"};
+                                        return new AnnotationVisitor(Opcodes.ASM9) {
+                                            @Override
+                                            public void visitEnum(String propertyName,
+                                                    String enumDescriptor, String value) {
+                                                if ("shift".equals(propertyName)) shift[0] = value;
+                                            }
+
+                                            @Override
+                                            public void visitEnd() {
+                                                shifts.add(shift[0]);
+                                            }
+                                        };
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return List.copyOf(shifts);
     }
 
     private static Set<String> injectMethodTargetsForMethod(byte[] classBytes, String requestedMethod) {
