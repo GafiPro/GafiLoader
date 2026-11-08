@@ -640,7 +640,9 @@ class LegacyModCompatibilityTransformerTest {
                 mixinClass, null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);
-        mixin.visit("value", Type.getObjectType("net/minecraft/class_310"));
+        AnnotationVisitor mixinTargets = mixin.visitArray("value");
+        mixinTargets.visit(null, Type.getObjectType("net/minecraft/class_310"));
+        mixinTargets.visitEnd();
         mixin.visitEnd();
 
         FieldVisitor screen = writer.visitField(Opcodes.ACC_PUBLIC, "screen",
@@ -655,10 +657,11 @@ class LegacyModCompatibilityTransformerTest {
 
         FieldVisitor tickingScreen = writer.visitField(Opcodes.ACC_PRIVATE, "tickingScreen",
                 screenDescriptor, null, null);
+        tickingScreen.visitAnnotation("Lorg/spongepowered/asm/mixin/Unique;", true).visitEnd();
         tickingScreen.visitEnd();
 
         addScreenApiHandler(writer, mixinClass, "checkThreadOnDev",
-                "(" + screenDescriptor + callbackInfo + ")V", null, screenDescriptor, "screen");
+                "(" + screenDescriptor + callbackInfo + ")V", "method_1507", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "onScreenRemove",
                 "(" + screenDescriptor + callbackInfo + ")V", "method_1507", screenDescriptor, "screen");
         addScreenApiHandler(writer, mixinClass, "onScreenRemoveBecauseStopping",
