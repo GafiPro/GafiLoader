@@ -146,7 +146,6 @@ final class LegacyFabricScreenApiAdapter {
         String[] gameThreadDescriptor = {null};
         String[] tickingScreenDescriptor = {null};
         boolean[] uniqueTickingScreen = {false};
-        Set<String> methods = new java.util.LinkedHashSet<>();
         Map<String, String> methodDescriptors = new LinkedHashMap<>();
         Set<String> injectedMethods = new java.util.LinkedHashSet<>();
 
@@ -209,7 +208,6 @@ final class LegacyFabricScreenApiAdapter {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
-                methods.add(name);
                 methodDescriptors.put(name, descriptor);
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
@@ -223,8 +221,7 @@ final class LegacyFabricScreenApiAdapter {
 
         return new MixinShape(targetMinecraft[0], screenShadow[0], gameThreadShadow[0],
                 screenDescriptor[0], gameThreadDescriptor[0], tickingScreenDescriptor[0],
-                uniqueTickingScreen[0], Set.copyOf(methods), Map.copyOf(methodDescriptors),
-                Set.copyOf(injectedMethods));
+                uniqueTickingScreen[0], Map.copyOf(methodDescriptors), Set.copyOf(injectedMethods));
     }
 
     private static byte[] adaptMinecraftMixin(ClassReader reader, String screenDescriptor) {
@@ -360,12 +357,8 @@ final class LegacyFabricScreenApiAdapter {
     private record MixinShape(boolean targetsMinecraft, boolean hasScreenShadow,
                               boolean hasGameThreadShadow, String screenDescriptor,
                               String gameThreadDescriptor, String tickingScreenDescriptor,
-                              boolean hasUniqueTickingScreen, Set<String> methods,
+                              boolean hasUniqueTickingScreen,
                               Map<String, String> methodDescriptors, Set<String> injectedMethods) {
-        boolean hasUniqueTickingScreen() {
-            return hasUniqueTickingScreen;
-        }
-
         boolean hasExpectedHandlers(Map<String, String> expected) {
             return expected.entrySet().stream().allMatch(entry ->
                     entry.getValue().equals(methodDescriptors.get(entry.getKey()))
