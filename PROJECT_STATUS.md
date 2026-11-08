@@ -1,9 +1,22 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-07
+> Última atualização: 2026-11-08
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
+
+## Sessão 2026-11-08 — preservar o timing dos callbacks da Fabric Screen API
+
+- **Estado inicial e prioridade:** reli o estado da branch fix/fabric-screen-api-26-2, os ficheiros centrais do projeto, o bootstrap, o transformador, o adaptador Screen API, os testes, o workflow e os commits recentes. main continua em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; a PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, sem merge. A cabeça da branch no fim desta sessão é d419162c239ff5d9e5fc045d7fc7d35157de0008.
+- **Diagnóstico P0:** o último log de runtime conhecido continua a demonstrar que o override de dependências passou: Fabric registou "Dependencies overridden for fabric-api" e carregou 48 mods. Não há evidência atual de que a rejeição inicial da Fabric API 0.141.6+1.21.11 continue a ser o bloqueio. O erro fatal conhecido depois desse ponto é a Mixin fabric-screen-api-v1:MinecraftMixin, cujo @Shadow screen já não existe no target 26.2.
+- **Evidência da API original:** voltei a consultar a fonte MinecraftMixin.java da Fabric API 1.21.11 ([fonte](https://github.com/coredex-source/FabricAPI/blob/1.21.11/fabric-screen-api-v1/src/client/java/net/fabricmc/fabric/mixin/screen/MinecraftMixin.java)). Confirma que onScreenRemove e afterScreenTick usam At.Shift.AFTER; beforeScreenTick, beforeLoadingScreenTick e afterLoadingScreenTick não especificam shift e, por isso, usam o valor por omissão NONE. As notas oficiais de 26.2 confirmam que o acesso ao ecrã foi movido de Minecraft.setScreen() para Minecraft.gui.setScreen() ([Fabric 26.2](https://www.fabricmc.net/2026/06/15/262.html)); os mappings 26.2 confirmam GuiManager.screen, screen(), setScreen(Screen) e tick() ([GuiManager](https://mappings.relativitymc.org/26.2/net/minecraft/client/gui/GuiManager.html)).
+- **Alteração concreta:** src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java passou a inspecionar as anotações ASM @Inject.at e a verificar o shift dos cinco callbacks depois da transformação: AFTER apenas nos dois casos que o declaram; NONE nos outros três. Ao rever a fonte original, corrigi também o fixture que atribuía incorretamente AFTER a afterLoadingScreenTick. Não foi alterado código de produção nem qualquer JAR de mod.
+- **Commits:** aead7bf71612d54cf8d0daf49a382f280db2a10e (primeira regressão de timing); 787ed23d2fbb716bf1e34f86101457d5e22e2db5 (fixture corrigido para os valores reais de shift); d419162c239ff5d9e5fc045d7fc7d35157de0008 (imports ArrayList/List em falta). Os dois primeiros commits desencadearam runs que falharam na compilação dos testes devido aos imports ausentes; a run 818 confirmou os erros cannot find symbol: List/ArrayList. A correção está no head atual.
+- **Validação CI anterior:** a run [816](https://github.com/GafiPro/GafiLoader/actions/runs/42472447752), no commit cc685ab1d23bc0800f5c503e7e93a69cf0698b5a, passou em Ubuntu e Windows. Ambos registaram BUILD SUCCESSFUL; o Windows concluiu também app image com runtime Java, WiX, instalador e uploads. Os logs registam tentativas repetidas por timeouts/HTTP 503 no download do Gradle, mas as tentativas seguintes tiveram sucesso. Artefactos da run 816: instalador ID 13614620299, ZIP SHA-256 046031e849454527ad77ad90fac525c7d8a8e10948d0bd3a0860b663af07a45c; app image ID 13613734749, ZIP SHA-256 9e29f5fd76dccf4baa6b2550d7bd346432b443349391b9e4c52b0ab09c34e5c1. Expiram em 2026-11-11, aproximadamente às 10:43 UTC.
+- **CI da correção atual:** a run [819](https://github.com/GafiPro/GafiLoader/actions/runs/42472929954), associada ao head d419162c239ff5d9e5fc045d7fc7d35157de0008, foi iniciada e ainda estava em execução quando este registo foi atualizado. Não a marco como aprovada. Não executei Gradle localmente; a validação depende da CI Java 25.
+- **Limitações:** não foi fornecido novo logs/gafiloader-preflight.log nem logs/latest.log depois do instalador 0.1.816; não há JAR real da Fabric API 0.141.6+1.21.11 disponível nesta sessão para comparar com a fixture. A CI não executa Minecraft 26.2 com o JAR real. A substituição do antigo hook de shutdown continua sem equivalência runtime demonstrada.
+- **Decisão:** manter a PR #29 aberta e não integrar em main. A adaptação staged preserva os JAR originais e impede carregar simultaneamente a origem e a cópia ao mudar fabric.modsFolder, mas continua a ser uma etapa experimental e não prova compatibilidade de runtime.
+- **Próximos passos:** (1) confirmar o resultado da run 819; (2) usar o instalador 0.1.816 da run 816 para um arranque real no perfil dedicado, se ainda não foi testado; (3) recolher logs/gafiloader-preflight.log e logs/latest.log; (4) confirmar que a Mixin gerada é carregada, que o menu abre e que os JAR originais permanecem byte a byte intactos; (5) validar remoção/tick/encerramento de ecrãs antes de decidir qualquer merge.
 
 ## Sessão 2026-11-07 — rever os alvos 26.2 e validar a cabeça 0.1.810
 
@@ -34,13 +47,13 @@
 - **Decisão:** manter a PR #29 aberta e não fazer merge sem validação real do jogo. O override de dependências já tinha passado no log anterior; o bloqueio conhecido era a Mixin Screen API, não a rejeição inicial da Fabric API.
 - **Próximos passos:** (1) executar o 0.1.799 no Windows e atualizar apenas o perfil dedicado gafiloader-26.2; (2) iniciar Minecraft 26.2 com Fabric API 0.141.6+1.21.11; (3) recolher logs/gafiloader-preflight.log e logs/latest.log; (4) confirmar que a Mixin gerada é carregada, que o menu abre e que os JAR originais permanecem byte a byte intactos; (5) se falhar, diagnosticar a primeira exceção fatal antes de alterar outra regra.
 
-## Estado atual — 2026-11-07
+## Estado atual — 2026-11-08
 
-- main continua em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; a PR #29 está aberta, sem merge, na branch fix/fabric-screen-api-26-2. O último commit de código/testes é af5c75110dec4eabdf23075e912595dd0fb0036e; os commits seguintes desta sessão alteram apenas este registo de estado.
-- A CI run 804 passou em Ubuntu e Windows. A regressão agora cobre o snapshot e a limpeza de tickingScreen nos callbacks de loading screen. Não foi alterado código de produção nesta sessão.
-- O instalador 0.1.799 fornecido foi verificado por SHA-256 e corresponde ao artefacto da run 799. Não foi executado num Windows real.
-- **Runtime ainda não validado:** faltam novos logs/gafiloader-preflight.log e logs/latest.log depois de executar o instalador no Windows. A compatibilidade da Fabric API e dos mods não deve ser declarada concluída só com a CI.
-- **Próximo passo:** executar o 0.1.799 no perfil dedicado gafiloader-26.2, recolher os dois logs e confirmar o carregamento da Mixin gerada, o arranque até ao menu e a preservação byte a byte dos JAR originais.
+- main permanece em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não integrada; branch fix/fabric-screen-api-26-2, head d419162c239ff5d9e5fc045d7fc7d35157de0008.
+- O gate inicial da Fabric API está ultrapassado no último log conhecido; o bloqueio ativo é a Mixin Screen API legada. A nova regressão verifica os shifts originais AFTER/NONE dos cinco callbacks.
+- A run 816 passou em Ubuntu e Windows e produziu instalador/app image. A run 819, que contém os novos testes e os imports corrigidos, estava em execução no momento da atualização deste registo.
+- **Runtime não validado:** faltam novos gafiloader-preflight.log e latest.log depois de executar o build 0.1.816 no Windows. Não há prova de arranque até ao menu nem de funcionamento dos callbacks no jogo.
+- **Próximo passo:** confirmar a run 819 e obter logs de um arranque real no perfil dedicado gafiloader-26.2; manter a PR sem merge até validar o jogo e a integridade byte a byte dos JAR originais.
 
 ## Histórico — estado em 2026-11-06
 
