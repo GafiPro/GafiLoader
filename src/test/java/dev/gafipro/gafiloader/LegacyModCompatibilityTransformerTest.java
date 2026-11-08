@@ -272,11 +272,11 @@ class LegacyModCompatibilityTransformerTest {
                 "The old Minecraft runTick selector must target MinecraftClient in 26.2.");
         assertEquals(List.of("AFTER"), atShiftsForMethod(stagedGuiManagerMixin, "onScreenRemove"),
                 "ScreenEvents.remove must run after Screen.removed().");
-        assertEquals(List.of("BEFORE"), atShiftsForMethod(stagedGuiManagerMixin, "beforeScreenTick"));
+        assertEquals(List.of("NONE"), atShiftsForMethod(stagedGuiManagerMixin, "beforeScreenTick"));
         assertEquals(List.of("AFTER"), atShiftsForMethod(stagedGuiManagerMixin, "afterScreenTick"),
                 "The after-tick callback must remain after Screen.tick().");
-        assertEquals(List.of("BEFORE"), atShiftsForMethod(stagedMinecraftMixin, "beforeLoadingScreenTick"));
-        assertEquals(List.of("AFTER"), atShiftsForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"));
+        assertEquals(List.of("NONE"), atShiftsForMethod(stagedMinecraftMixin, "beforeLoadingScreenTick"));
+        assertEquals(List.of("NONE"), atShiftsForMethod(stagedMinecraftMixin, "afterLoadingScreenTick"));
     }
 
     @Test
@@ -630,7 +630,7 @@ class LegacyModCompatibilityTransformerTest {
                                         if (!"Lorg/spongepowered/asm/mixin/injection/At;".equals(nestedDescriptor)) {
                                             return null;
                                         }
-                                        String[] shift = {"BEFORE"};
+                                        String[] shift = {"NONE"};
                                         return new AnnotationVisitor(Opcodes.ASM9) {
                                             @Override
                                             public void visitEnum(String propertyName,
@@ -762,8 +762,7 @@ class LegacyModCompatibilityTransformerTest {
                         "Lorg/spongepowered/asm/mixin/injection/At;");
                 at.visit("value", "INVOKE");
                 at.visit("target", atTarget);
-                if ("onScreenRemove".equals(name) || "afterScreenTick".equals(name)
-                        || "afterLoadingScreenTick".equals(name)) {
+                if ("onScreenRemove".equals(name) || "afterScreenTick".equals(name)) {
                     at.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", "AFTER");
                 }
                 at.visitEnd();
