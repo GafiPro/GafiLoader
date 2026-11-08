@@ -122,6 +122,20 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsUnexpectedHandlerDescriptorOrMissingInjectAnnotation() {
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(
+                        SCREEN_DESCRIPTOR, true,
+                        "(Ljava/lang/Object;" + CALLBACK_INFO + ")V", true)),
+                "A handler with a changed descriptor must not be silently moved to GuiManager.");
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(
+                        SCREEN_DESCRIPTOR, true,
+                        "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO + ")V", false)),
+                "A method without its @Inject annotation must not be treated as an active handler.");
+    }
+
+    @Test
     void registersGeneratedMixinInClientArrayExactlyOnce() throws Exception {
         byte[] original = """
                 {
@@ -151,6 +165,13 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     private static byte[] legacyMinecraftMixin(String screenDescriptor, boolean shadowScreen) {
+        return legacyMinecraftMixin(screenDescriptor, shadowScreen,
+                "(" + screenDescriptor + CALLBACK_INFO + ")V", true);
+    }
+
+    private static byte[] legacyMinecraftMixin(String screenDescriptor, boolean shadowScreen,
+                                               String onScreenRemoveDescriptor,
+                                               boolean injectOnScreenRemove) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
                 LegacyFabricScreenApiAdapter.LEGACY_MIXIN, null, "java/lang/Object", null);
@@ -178,9 +199,9 @@ class LegacyFabricScreenApiAdapterTest {
         tickingScreen.visitEnd();
 
         addHandler(writer, "checkThreadOnDev", "(" + screenDescriptor + CALLBACK_INFO + ")V",
-                null, false, false);
-        addHandler(writer, "onScreenRemove", "(" + screenDescriptor + CALLBACK_INFO + ")V",
                 "setScreen", true, false);
+        addHandler(writer, "onScreenRemove", onScreenRemoveDescriptor,
+                "setScreen", injectOnScreenRemove, false);
         addHandler(writer, "onScreenRemoveBecauseStopping", "(" + CALLBACK_INFO + ")V",
                 "destroy", true, false);
         addHandler(writer, "beforeScreenTick", "(" + CALLBACK_INFO + ")V",
