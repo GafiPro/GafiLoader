@@ -27,6 +27,10 @@ final class LegacyFabricScreenApiAdapter {
             "net/fabricmc/fabric/mixin/screen/GafiLoaderGuiManagerMixin";
     static final String GENERATED_MIXIN_ENTRY = GENERATED_MIXIN + ".class";
     static final String MIXIN_CONFIG = "fabric-screen-api-v1.mixins.json";
+    private static final String INJECT_ANNOTATION =
+            "Lorg/spongepowered/asm/mixin/injection/Inject;";
+    private static final String CALLBACK_INFO =
+            "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
 
     private static final String LEGACY_MINECRAFT = "net/minecraft/client/Minecraft";
     private static final String MINECRAFT = "net/minecraft/client/MinecraftClient";
@@ -77,14 +81,21 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         MixinShape shape = inspect(reader);
+        Map<String, String> expectedHandlers = Map.of(
+                "checkThreadOnDev", "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
+                "onScreenRemove", "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
+                "onScreenRemoveBecauseStopping", "(" + CALLBACK_INFO + ")V",
+                "beforeScreenTick", "(" + CALLBACK_INFO + ")V",
+                "afterScreenTick", "(" + CALLBACK_INFO + ")V",
+                "beforeLoadingScreenTick", "(" + CALLBACK_INFO + ")V",
+                "afterLoadingScreenTick", "(" + CALLBACK_INFO + ")V");
         if (!shape.targetsMinecraft() || !shape.hasScreenShadow()
                 || !("L" + CURRENT_SCREEN + ";").equals(shape.screenDescriptor())
                 || !shape.hasGameThreadShadow()
-                || !shape.hasMethod("onScreenRemove")
-                || !shape.hasMethod("beforeScreenTick")
-                || !shape.hasMethod("afterScreenTick")
-                || !shape.hasMethod("beforeLoadingScreenTick")
-                || !shape.hasMethod("afterLoadingScreenTick")) {
+                || !"Ljava/lang/Thread;".equals(shape.gameThreadDescriptor())
+                || !shape.hasUniqueTickingScreen()
+                || !shape.screenDescriptor().equals(shape.tickingScreenDescriptor())
+                || !shape.hasExpectedHandlers(expectedHandlers)) {
             throw new IOException("The legacy Fabric Screen API MinecraftMixin no longer has the expected "
                     + "1.21.11 structure. Refusing to apply a partial 26.2 adaptation.");
         }
@@ -132,7 +143,12 @@ final class LegacyFabricScreenApiAdapter {
         boolean[] screenShadow = {false};
         boolean[] gameThreadShadow = {false};
         String[] screenDescriptor = {null};
+        String[] gameThreadDescriptor = {null};
+        String[] tickingScreenDescriptor = {null};
+        boolean[] uniqueTickingScreen = {false};
         Set<String> methods = new java.util.LinkedHashSet<>();
+        Map<String, String> methodDescriptors = new LinkedHashMap<>();
+        Set<String> injectedMethods = new java.util.LinkedHashSet<>();
 
         reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -170,13 +186,20 @@ final class LegacyFabricScreenApiAdapter {
             public FieldVisitor visitField(int access, String name, String descriptor,
                                            String signature, Object value) {
                 if (SCREEN_FIELD.equals(name)) screenDescriptor[0] = descriptor;
-                if (!SCREEN_FIELD.equals(name) && !"gameThread".equals(name)) return null;
+                if ("gameThread".equals(name)) gameThreadDescriptor[0] = descriptor;
+                if (TICKING_SCREEN_FIELD.equals(name)) tickingScreenDescriptor[0] = descriptor;
+                if (!SCREEN_FIELD.equals(name) && !"gameThread".equals(name)
+                        && !TICKING_SCREEN_FIELD.equals(name)) return null;
                 return new FieldVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         if (SHADOW_ANNOTATION.equals(annotationDescriptor)) {
                             if (SCREEN_FIELD.equals(name)) screenShadow[0] = true;
                             if ("gameThread".equals(name)) gameThreadShadow[0] = true;
+                        }
+                        if (UNIQUE_ANNOTATION.equals(annotationDescriptor)
+                                && TICKING_SCREEN_FIELD.equals(name)) {
+                            uniqueTickingScreen[0] = true;
                         }
                         return null;
                     }
@@ -187,12 +210,21 @@ final class LegacyFabricScreenApiAdapter {
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
                 methods.add(name);
-                return null;
+                methodDescriptors.put(name, descriptor);
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (INJECT_ANNOTATION.equals(annotationDescriptor)) injectedMethods.add(name);
+                        return null;
+                    }
+                };
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
         return new MixinShape(targetMinecraft[0], screenShadow[0], gameThreadShadow[0],
-                screenDescriptor[0], Set.copyOf(methods));
+                screenDescriptor[0], gameThreadDescriptor[0], tickingScreenDescriptor[0],
+                uniqueTickingScreen[0], Set.copyOf(methods), Map.copyOf(methodDescriptors),
+                Set.copyOf(injectedMethods));
     }
 
     private static byte[] adaptMinecraftMixin(ClassReader reader, String screenDescriptor) {
@@ -326,9 +358,18 @@ final class LegacyFabricScreenApiAdapter {
     record Result(byte[] bytes, Map<String, byte[]> generatedClasses, boolean adapted) {}
 
     private record MixinShape(boolean targetsMinecraft, boolean hasScreenShadow,
-                              boolean hasGameThreadShadow, String screenDescriptor, Set<String> methods) {
-        boolean hasMethod(String name) {
-            return methods.contains(name);
+                              boolean hasGameThreadShadow, String screenDescriptor,
+                              String gameThreadDescriptor, String tickingScreenDescriptor,
+                              boolean hasUniqueTickingScreen, Set<String> methods,
+                              Map<String, String> methodDescriptors, Set<String> injectedMethods) {
+        boolean hasUniqueTickingScreen() {
+            return hasUniqueTickingScreen;
+        }
+
+        boolean hasExpectedHandlers(Map<String, String> expected) {
+            return expected.entrySet().stream().allMatch(entry ->
+                    entry.getValue().equals(methodDescriptors.get(entry.getKey()))
+                            && injectedMethods.contains(entry.getKey()));
         }
     }
 }
