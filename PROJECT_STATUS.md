@@ -1,9 +1,21 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-08
+> Última atualização: 2026-11-09
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
+
+## Sessão 2026-11-09 — respeitar namespaces de módulos aninhados mistos
+
+- **Estado inicial:** consultei primeiro este registo, README, build.gradle, settings.gradle, código do bootstrap, transformador, adaptador Screen API, testes, commits recentes e estado da PR. `main` mantém-se em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; a PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua a ser o ramo de trabalho e não foi integrada. A cabeça anterior da PR tinha CI verde na [run 810](https://github.com/GafiPro/GafiLoader/actions/runs/42383565623), mas sem teste de Minecraft em runtime.
+- **Bloqueio de runtime conhecido:** o último log real continua a mostrar que o override de dependências ultrapassou o gate inicial e que a falha seguinte era a Mixin `fabric-screen-api-v1:MinecraftMixin`, devido ao campo `Minecraft.screen` removido/movido em 26.2. Não recebi nesta execução um novo `gafiloader-preflight.log` nem `latest.log`; por isso não afirmo que a adaptação Screen API já arranca o jogo.
+- **Defeito novo confirmado por inspeção estática:** `LegacyModCompatibilityTransformer.transformArchive` propagava `remapIntermediaryBytecode` do JAR pai a todos os JARs aninhados (`parentLegacy || childLegacy`). Assim, um módulo aninhado que declare explicitamente Minecraft 26.2 podia ser tratado como bytecode Intermediary 1.21.11 apenas por estar dentro de um mod legado. Isso quebra o objetivo de permitir módulos antigos e novos na mesma instância e podia remapear incorretamente uma dependência moderna.
+- **Correção implementada:** `src/main/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformer.java` passou a distinguir três estados ao ler cada JAR aninhado: metadata própria a declarar 1.21.11, metadata própria a declarar outro alvo (por exemplo 26.2), ou ausência de `fabric.mod.json`. A metadata própria é autoritativa; apenas JARs aninhados sem metadata herdam o namespace do pai. Metadata presente mas inválida/incompleta é agora rejeitada com erro explícito, em vez de escolher silenciosamente um namespace.
+- **Regressão acrescentada:** `src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java`, teste `nestedModMetadataOverridesLegacyParentNamespaceForBytecodeRemapping`. A fixture coloca, dentro de um pai 1.21.11, um módulo aninhado 1.21.11 e outro 26.2. Confirma que apenas a classe do módulo legado é remapeada, que o módulo 26.2 permanece byte a byte igual e que o JAR original do pai não é alterado. Os testes existentes continuam a cobrir módulos sem metadata própria, que herdam o alvo do pai.
+- **Commits na branch da PR:** implementação `bc503fd6f26e55cc7fa0c2833cebb7215d87c38b`; regressão `e57b40d3afe022729c539b71d22c3bd9418a51ca`. `main` não foi alterada e não foi feito merge.
+- **Validação efetiva:** a [run 821](https://github.com/GafiPro/GafiLoader/actions/runs/42600197715), associada ao commit de teste `e57b40d3afe022729c539b71d22c3bd9418a51ca`, foi observada em execução nos jobs Ubuntu e Windows. O download dos logs ainda devolveu 404 enquanto os jobs estavam ativos. Não executei Gradle localmente; não registar a nova regressão como aprovada até a run terminar.
+- **Limitações:** a CI não inicia Minecraft 26.2 com o JAR real da Fabric API 0.141.6+1.21.11. Continua por validar em Windows real o instalador, a Mixin gerada de GuiManager, o menu e os eventos de remoção/tick de ecrãs. JARs aninhados sem `fabric.mod.json` continuam deliberadamente a herdar o namespace do pai, porque não existe metadata própria para distinguir uma biblioteca legada de uma moderna.
+- **Próximos passos:** (1) confirmar a conclusão da run 821 e corrigir qualquer falha; (2) se ficar verde, validar a classificação com o JAR real da Fabric API e manter os originais intactos; (3) executar o instalador candidato no perfil dedicado e recolher `logs/gafiloader-preflight.log` e `logs/latest.log`; (4) verificar a abertura do menu e os callbacks Screen; (5) investigar o hook de encerramento omitido antes de considerar a PR #29 pronta para integração.
 
 ## Sessão 2026-11-08 — preservar o timing dos callbacks da Fabric Screen API
 
