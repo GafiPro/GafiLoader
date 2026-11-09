@@ -526,8 +526,11 @@ final class LegacyModCompatibilityTransformer {
                             warnings.add(message);
                         }
                     } else if (lowerName.endsWith(".jar")) {
-                        boolean nestedLegacy = remapIntermediaryBytecode
-                                || declaresLegacyBytecode(data);
+                        Boolean nestedDeclaration = declaredLegacyBytecode(data);
+                        // A nested mod with its own fabric.mod.json declares its own
+                        // namespace. Only metadata-free library JARs inherit the parent.
+                        boolean nestedLegacy = nestedDeclaration != null
+                                ? nestedDeclaration : remapIntermediaryBytecode;
                         ArchiveTransform nested = transformArchive(data, depth + 1,
                                 classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
@@ -622,18 +625,33 @@ final class LegacyModCompatibilityTransformer {
         output.closeEntry();
     }
 
-    private static boolean declaresLegacyBytecode(byte[] archive) throws IOException {
+    private static Boolean declaredLegacyBytecode(byte[] archive) throws IOException {
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 if (!entry.isDirectory() && "fabric.mod.json".equals(entry.getName())) {
-                    return metadataDeclaresLegacyBytecode(
-                            readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json"));
+                    byte[] metadataBytes = readBounded(input, MAX_METADATA_BYTES, "fabric.mod.json");
+                    final JsonElement parsed;
+                    try {
+                        parsed = JsonParser.parseString(new String(metadataBytes, StandardCharsets.UTF_8));
+                    } catch (RuntimeException exception) {
+                        throw new IOException("Could not parse nested fabric.mod.json while determining "
+                                + "its Minecraft bytecode namespace.", exception);
+                    }
+                    if (!parsed.isJsonObject()) {
+                        throw new IOException("Nested fabric.mod.json must contain a JSON object; "
+                                + "refusing to inherit a parent mod's bytecode namespace.");
+                    }
+                    return LegacyMinecraftVersionDetector.targetsLegacyBytecode(parsed.getAsJsonObject());
                 }
                 input.closeEntry();
             }
         }
-        return false;
+        return null;
+    }
+
+    private static boolean declaresLegacyBytecode(byte[] archive) throws IOException {
+        return Boolean.TRUE.equals(declaredLegacyBytecode(archive));
     }
 
     private static boolean containsLegacyModMetadata(byte[] archive, int depth) throws IOException {
