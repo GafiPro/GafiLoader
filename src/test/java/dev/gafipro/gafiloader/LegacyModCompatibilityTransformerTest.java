@@ -191,6 +191,61 @@ class LegacyModCompatibilityTransformerTest {
     }
 
     @Test
+    void nestedModMetadataOverridesLegacyParentNamespaceForBytecodeRemapping() throws Exception {
+        LegacyClassTweakerMappings mappings = createBytecodeMappings();
+        Path gameDirectory = Files.createDirectories(
+                temporaryDirectory.resolve("game-mixed-nested-namespaces"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+
+        byte[] legacyClass = classWithIntermediaryRegistryReferences();
+        byte[] legacyModule = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"legacy-nested","version":"1.0.0+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "net/example/LegacyApiEntrypoint.class", legacyClass));
+
+        // Deliberately use an Intermediary-shaped sentinel class: the 26.2 metadata
+        // must prevent the legacy parent's namespace flag from being inherited.
+        byte[] modernClass = classWithIntermediaryRegistryReferences();
+        byte[] modernModule = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"modern-nested","version":"1.0.0+26.2",
+                         "depends":{"minecraft":">=26.2"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "net/example/ModernApiEntrypoint.class", modernClass));
+
+        byte[] originalParent = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"legacy-parent","version":"0.141.6+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "META-INF/jars/legacy-module.jar", legacyModule,
+                "META-INF/jars/modern-module.jar", modernModule));
+        Path source = modsDirectory.resolve("legacy-parent.jar");
+        Files.write(source, originalParent);
+
+        LegacyModCompatibilityTransformer.Result result =
+                new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory);
+
+        assertTrue(result.transformed());
+        assertEquals(1, result.remappedClasses(),
+                "Only the nested module that declares Minecraft 1.21.11 should be remapped.");
+        assertArrayEquals(originalParent, Files.readAllBytes(source),
+                "The original parent JAR must remain byte-for-byte unchanged.");
+
+        byte[] stagedParent = Files.readAllBytes(result.modsDirectory().resolve("legacy-parent.jar"));
+        byte[] stagedLegacyModule = readEntry(stagedParent, "META-INF/jars/legacy-module.jar");
+        byte[] stagedModernModule = readEntry(stagedParent, "META-INF/jars/modern-module.jar");
+        byte[] stagedLegacyClass = readEntry(stagedLegacyModule, "net/example/LegacyApiEntrypoint.class");
+
+        assertEquals("net/minecraft/core/Registry", firstFieldOwner(stagedLegacyClass),
+                "The explicitly legacy nested module must still be converted.");
+        assertArrayEquals(modernModule, stagedModernModule,
+                "A nested module with its own 26.2 metadata must not inherit the parent's legacy namespace.");
+    }
+
+    @Test
     void adaptsLegacyScreenApiMixinInsideNestedFabricApiModuleWithoutChangingOriginals() throws Exception {
         LegacyClassTweakerMappings mappings = createBytecodeMappings();
         Path gameDirectory = Files.createDirectories(temporaryDirectory.resolve("game-screen-api"));
