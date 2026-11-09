@@ -526,11 +526,17 @@ final class LegacyModCompatibilityTransformer {
                             warnings.add(message);
                         }
                     } else if (lowerName.endsWith(".jar")) {
-                        Boolean nestedDeclaration = declaredLegacyBytecode(data);
-                        // A nested mod with its own fabric.mod.json declares its own
-                        // namespace. Only metadata-free library JARs inherit the parent.
-                        boolean nestedLegacy = nestedDeclaration != null
-                                ? nestedDeclaration : remapIntermediaryBytecode;
+                        DeclaredBytecodeTarget nestedTarget = inspectDeclaredBytecodeTarget(data);
+                        if (nestedTarget.metadataPresent() && nestedTarget.legacy() == null) {
+                            throw new IOException("Nested mod archive " + entryName
+                                    + " declares fabric.mod.json but does not provide an explicit Minecraft "
+                                    + "dependency or a version suffix identifying the target. Refusing to guess "
+                                    + "its bytecode namespace.");
+                        }
+                        // A nested mod with explicit metadata owns its namespace.
+                        // Only metadata-free library JARs inherit the parent target.
+                        boolean nestedLegacy = nestedTarget.metadataPresent()
+                                ? Boolean.TRUE.equals(nestedTarget.legacy()) : remapIntermediaryBytecode;
                         ArchiveTransform nested = transformArchive(data, depth + 1,
                                 classTweakerRemapper, bytecodeRemapper, nestedLegacy);
                         warnings.addAll(nested.warnings());
@@ -625,7 +631,7 @@ final class LegacyModCompatibilityTransformer {
         output.closeEntry();
     }
 
-    private static Boolean declaredLegacyBytecode(byte[] archive) throws IOException {
+    private static DeclaredBytecodeTarget inspectDeclaredBytecodeTarget(byte[] archive) throws IOException {
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
@@ -640,19 +646,45 @@ final class LegacyModCompatibilityTransformer {
                     }
                     if (!parsed.isJsonObject()) {
                         throw new IOException("Nested fabric.mod.json must contain a JSON object; "
-                                + "refusing to inherit a parent mod's bytecode namespace.");
+                                + "refusing to guess its bytecode namespace.");
                     }
-                    return LegacyMinecraftVersionDetector.targetsLegacyBytecode(parsed.getAsJsonObject());
+                    JsonObject metadata = parsed.getAsJsonObject();
+                    if (!hasExplicitMinecraftTarget(metadata)) {
+                        return new DeclaredBytecodeTarget(true, null);
+                    }
+                    return new DeclaredBytecodeTarget(true,
+                            LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
                 }
                 input.closeEntry();
             }
         }
-        return null;
+        return new DeclaredBytecodeTarget(false, null);
+    }
+
+    private static boolean hasExplicitMinecraftTarget(JsonObject metadata) {
+        JsonElement depends = metadata.get("depends");
+        if (depends != null && depends.isJsonObject()
+                && depends.getAsJsonObject().has("minecraft")) {
+            return true;
+        }
+
+        JsonElement version = metadata.get("version");
+        if (version == null || !version.isJsonPrimitive()
+                || !version.getAsJsonPrimitive().isString()) {
+            return false;
+        }
+        String versionText = version.getAsString().trim();
+        int separator = versionText.lastIndexOf('+');
+        if (separator < 0 || separator == versionText.length() - 1) return false;
+        String targetSuffix = versionText.substring(separator + 1);
+        return targetSuffix.matches("[0-9]+(?:\\.[0-9]+)*(?:-[A-Za-z0-9.-]+)?");
     }
 
     private static boolean declaresLegacyBytecode(byte[] archive) throws IOException {
-        return Boolean.TRUE.equals(declaredLegacyBytecode(archive));
+        return Boolean.TRUE.equals(inspectDeclaredBytecodeTarget(archive).legacy());
     }
+
+    private record DeclaredBytecodeTarget(boolean metadataPresent, Boolean legacy) {}
 
     private static boolean containsLegacyModMetadata(byte[] archive, int depth) throws IOException {
         if (depth > MAX_NESTED_ARCHIVE_DEPTH) {
