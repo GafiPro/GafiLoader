@@ -632,6 +632,7 @@ final class LegacyModCompatibilityTransformer {
     }
 
     private static DeclaredBytecodeTarget inspectDeclaredBytecodeTarget(byte[] archive) throws IOException {
+        boolean intermediaryClassTweaker = archiveHasIntermediaryClassTweaker(archive);
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
@@ -650,10 +651,16 @@ final class LegacyModCompatibilityTransformer {
                     }
                     JsonObject metadata = parsed.getAsJsonObject();
                     if (!hasExplicitMinecraftTarget(metadata)) {
-                        return new DeclaredBytecodeTarget(true, null);
+                        return new DeclaredBytecodeTarget(true,
+                                intermediaryClassTweaker ? Boolean.TRUE : null);
                     }
-                    return new DeclaredBytecodeTarget(true,
-                            LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+                    boolean legacy = LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata);
+                    if (!legacy && intermediaryClassTweaker) {
+                        throw new IOException("Nested mod metadata identifies a non-1.21.11 target, but its "
+                                + "declared ClassTweaker resource uses the Intermediary namespace. Refusing "
+                                + "to combine contradictory namespace declarations.");
+                    }
+                    return new DeclaredBytecodeTarget(true, legacy);
                 }
                 input.closeEntry();
             }
@@ -691,6 +698,7 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Nested mod archive depth exceeds the safety limit of "
                     + MAX_NESTED_ARCHIVE_DEPTH + " while discovering legacy metadata.");
         }
+        if (archiveHasIntermediaryClassTweaker(archive)) return true;
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
@@ -784,6 +792,24 @@ final class LegacyModCompatibilityTransformer {
             }
         }
         return null;
+    }
+
+    private static boolean archiveHasIntermediaryClassTweaker(byte[] archive) throws IOException {
+        String declaredResource = declaredClassTweakerResource(archive);
+        if (declaredResource == null) return false;
+
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (!entry.isDirectory()
+                        && declaredResource.equals(normalizeResourcePath(entry.getName()))) {
+                    byte[] contents = readBounded(input, MAX_RESOURCE_ENTRY_BYTES, entry.getName());
+                    return hasIntermediaryClassTweakerHeader(contents);
+                }
+                input.closeEntry();
+            }
+        }
+        return false;
     }
 
     private static String normalizeResourcePath(String resourcePath) {
