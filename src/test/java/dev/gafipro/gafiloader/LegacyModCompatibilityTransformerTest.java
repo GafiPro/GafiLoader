@@ -34,6 +34,7 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LegacyModCompatibilityTransformerTest {
@@ -243,6 +244,36 @@ class LegacyModCompatibilityTransformerTest {
                 "The explicitly legacy nested module must still be converted.");
         assertArrayEquals(modernModule, stagedModernModule,
                 "A nested module with its own 26.2 metadata must not inherit the parent's legacy namespace.");
+    }
+
+    @Test
+    void rejectsNestedModMetadataWithoutAnExplicitMinecraftTarget() throws Exception {
+        LegacyClassTweakerMappings mappings = createBytecodeMappings();
+        Path gameDirectory = Files.createDirectories(
+                temporaryDirectory.resolve("game-ambiguous-nested-target"));
+        Path modsDirectory = Files.createDirectories(gameDirectory.resolve("mods"));
+
+        byte[] ambiguousModule = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"ambiguous-nested","version":"1.0.0"}
+                        """.getBytes(StandardCharsets.UTF_8)));
+        byte[] legacyParent = jar(Map.of(
+                "fabric.mod.json", """
+                        {"schemaVersion":1,"id":"legacy-parent","version":"0.141.6+1.21.11",
+                         "depends":{"minecraft":">=1.21.11"}}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "META-INF/jars/ambiguous-module.jar", ambiguousModule));
+        Path source = modsDirectory.resolve("legacy-parent.jar");
+        Files.write(source, legacyParent);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> new LegacyModCompatibilityTransformer(mappings).prepare(modsDirectory, gameDirectory));
+
+        assertTrue(failure.getMessage().contains("does not provide an explicit Minecraft dependency"));
+        assertArrayEquals(legacyParent, Files.readAllBytes(source),
+                "Ambiguous nested metadata must not cause the original parent archive to be modified.");
+        assertFalse(Files.exists(gameDirectory.resolve(".gafiloader/compat-mods")),
+                "The transformer must fail before creating a partially prepared active mods directory.");
     }
 
     @Test
