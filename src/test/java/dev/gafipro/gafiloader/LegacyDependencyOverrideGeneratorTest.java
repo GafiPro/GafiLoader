@@ -83,6 +83,37 @@ class LegacyDependencyOverrideGeneratorTest {
     }
 
     @Test
+    void doesNotRewriteAnUnchangedConfigOrCreateBackupFromGeneratedOutput() throws IOException {
+        Path mods = Files.createDirectory(temporaryDirectory.resolve("unchanged-mods"));
+        writeJar(mods.resolve("legacy-mod.jar"), "fabric.mod.json", """
+                {
+                  "id": "legacy-mod",
+                  "depends": { "minecraft": "1.21.11" }
+                }
+                """.getBytes(StandardCharsets.UTF_8));
+        Path config = temporaryDirectory.resolve("unchanged-config/fabric_loader_dependencies.json");
+        LegacyDependencyOverrideGenerator generator = new LegacyDependencyOverrideGenerator();
+
+        generator.generate(mods, config);
+        byte[] generated = Files.readAllBytes(config);
+        Files.setLastModifiedTime(config, java.nio.file.attribute.FileTime.from(
+                java.time.Instant.parse("2001-01-01T00:00:00Z")));
+        var expectedModifiedTime = Files.getLastModifiedTime(config);
+
+        generator.generate(mods, config);
+
+        assertTrue(java.util.Arrays.equals(generated, Files.readAllBytes(config)),
+                "An unchanged dependency override must retain its exact bytes.");
+        assertEquals(expectedModifiedTime, Files.getLastModifiedTime(config),
+                "An unchanged preflight must not replace the config file.");
+        assertTrue(!Files.exists(config.resolveSibling("fabric_loader_dependencies.json.bak")),
+                "A generated config must not be mistaken for the user's original backup.");
+        try (var files = Files.list(config.getParent())) {
+            assertEquals(1L, files.count(), "No temporary file should remain after an unchanged preflight.");
+        }
+    }
+
+    @Test
     void discoversLegacyFabricModNestedInsideAnApiJar() throws IOException {
         Path mods = Files.createDirectory(temporaryDirectory.resolve("nested-mods"));
         Path outer = mods.resolve("fabric-api.jar");

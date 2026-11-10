@@ -236,6 +236,9 @@ public final class LaunchBootstrap {
                     + configPath);
             return;
         }
+        if (originalConfig != null && java.util.Arrays.equals(originalConfig, generatedConfig)) {
+            return;
+        }
 
         if (originalConfig == null) {
             Files.delete(configPath);

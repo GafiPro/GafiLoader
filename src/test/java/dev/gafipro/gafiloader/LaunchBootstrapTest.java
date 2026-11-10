@@ -62,6 +62,23 @@ class LaunchBootstrapTest {
     }
 
     @Test
+    void doesNotRewriteTheConfigWhenOriginalAndGeneratedBytesAlreadyMatch() throws IOException {
+        Path config = temporaryDirectory.resolve("unchanged-config/fabric_loader_dependencies.json");
+        Files.createDirectories(config.getParent());
+        byte[] unchanged = "{\"version\":1,\"overrides\":{}}".getBytes(StandardCharsets.UTF_8);
+        Files.write(config, unchanged);
+        Files.setLastModifiedTime(config, java.nio.file.attribute.FileTime.from(
+                java.time.Instant.parse("2001-01-01T00:00:00Z")));
+        var expectedModifiedTime = Files.getLastModifiedTime(config);
+
+        LaunchBootstrap.restoreDependencyConfig(config, unchanged, unchanged);
+
+        assertArrayEquals(unchanged, Files.readAllBytes(config));
+        assertEquals(expectedModifiedTime, Files.getLastModifiedTime(config),
+                "Restoring identical bytes must not replace the existing config file.");
+    }
+
+    @Test
     void removesAConfigCreatedOnlyForTheGafiLoaderLaunch() throws IOException {
         Path config = temporaryDirectory.resolve("config/fabric_loader_dependencies.json");
         Files.createDirectories(config.getParent());
