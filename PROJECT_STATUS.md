@@ -74,7 +74,7 @@
 
 ## Estado atual — 2026-11-10
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, não integrada, na branch `fix/fabric-screen-api-26-2`, head `dc49155721daee81b71ff1885f5c9c551d20ffe1`.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não integrada na branch `fix/fabric-screen-api-26-2`; o último commit de código/testes desta sessão é `dc49155721daee81b71ff1885f5c9c551d20ffe1`. A cabeça posterior inclui apenas a atualização deste registo.
 - O último log real conhecido confirma que o override de dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados). O bloqueio de runtime conhecido depois desse ponto é a Mixin da Fabric Screen API; não existe ainda log de arranque com o build 0.1.826.
 - A correção P1 de idempotência evita reescritas e backups falsos de `fabric_loader_dependencies.json` quando os bytes já estão corretos; a restauração também deixa de substituir ficheiros byte a byte iguais.
 - A run [826](https://github.com/GafiPro/GafiLoader/actions/runs/42798980683) passou em Ubuntu e Windows, incluindo testes/build, app image com runtime Java, WiX, instalador e uploads.
