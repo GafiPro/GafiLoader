@@ -153,6 +153,13 @@ final class LegacyModCompatibilityTransformer {
             }
         }
 
+        if (adaptedScreenApiMixins > 0) {
+            warnings.add("Fabric Screen API adaptation is partial: screen-change and regular tick handlers are retained, "
+                    + "but the legacy shutdown-specific onScreenRemoveBecauseStopping callback (injected into "
+                    + "Minecraft.destroy) is not migrated to MinecraftClient 26.2. ScreenEvents.remove during "
+                    + "client shutdown is therefore not guaranteed; checkThreadOnDev is also omitted.");
+        }
+
         if (changedArchives.isEmpty()) {
             return new Result(false, source, 0, 0, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
