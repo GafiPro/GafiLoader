@@ -8,13 +8,13 @@
 - **Teste de regressão:** o teste de integração `adaptsLegacyScreenApiMixinInsideNestedFabricApiModuleWithoutChangingOriginals` agora exige que o aviso sobre shutdown esteja presente no resultado, evitando que uma futura alteração volte a ocultar esta limitação.
 - **Documentação:** README atualizado para informar que a adaptação Screen API não preserva ainda o callback específico de remoção durante o shutdown. Não foram alterados os JARs originais dos mods.
 - **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformer.java`; `src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java`; `README.md`; este `PROJECT_STATUS.md`.
-- **Commits de código/teste/documentação:** `b5cfd57f5187879e4c3b95e96c4e32919e027c95` (aviso de preflight), `fd84eac72e8fbbe74bc266edb7bda1b08d35ac64` (teste), `36c407c963670d7abc237f00b5953352ba77d741` (README) e `001df82d68380ba88741e967dab1c5a81d54414a` (registo desta sessão).
+- **Commits de código/teste/documentação:** `b5cfd57f5187879e4c3b95e96c4e32919e027c95` (aviso de preflight), `fd84eac72e8fbbe74bc266edb7bda1b08d35ac64` (teste), `36c407c963670d7abc237f00b5953352ba77d741` (README) e `76a82451b68bb80c0c586b81c9a6c7abc97cb756` (registo atualizado com o resultado CI).
 - **Validação:** GitHub Actions run [831](https://github.com/GafiPro/GafiLoader/actions/runs/43007983685), associada ao commit `36c407c963670d7abc237f00b5953352ba77d741`, terminou com sucesso em Ubuntu e Windows. Ubuntu executou `clean test build`; Windows executou `clean test installDist`, criou a app image com runtime Java, confirmou WiX, construiu o instalador e publicou os dois artefactos. Não executei Gradle localmente. A run 828 verde é anterior a estas alterações e não é apresentada como validação delas.
 - **Limitações:** ainda não existe um novo `logs/gafiloader-preflight.log` nem `logs/latest.log` de um arranque com 0.1.826. A adaptação continua a usar cópias staged em `.gafiloader/compat-mods`; runtime-only ainda não foi implementado. A equivalência de shutdown permanece sem prova.
 - **Próximos passos:** (1) confirmar o resultado da run 831; (2) inspecionar o bytecode oficial 26.2 de `MinecraftClient.close()`/`stop()` e `GuiManager.setScreen()` para identificar se há um ponto seguro equivalente ao antigo `destroy`; (3) só então decidir se o callback pode ser migrado com um selector Mixin exato e teste de integração; (4) obter um arranque real 0.1.826 para confirmar se a Mixin gerada chega a ser aplicada e se o jogo alcança o menu.
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-10
+> Última atualização: 2026-11-11
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -87,7 +87,7 @@
 
 ## Estado atual — 2026-11-10
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não integrada na branch `fix/fabric-screen-api-26-2`; a cabeça atual é `001df82d68380ba88741e967dab1c5a81d54414a`.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não integrada na branch `fix/fabric-screen-api-26-2`; a cabeça atual é `76a82451b68bb80c0c586b81c9a6c7abc97cb756`.
 - O último log real conhecido confirma que o override de dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados). O bloqueio de runtime conhecido depois desse ponto é a Mixin da Fabric Screen API; não existe ainda log de arranque com o build 0.1.826.
 - A correção P1 de idempotência evita reescritas e backups falsos de `fabric_loader_dependencies.json` quando os bytes já estão corretos; a restauração também deixa de substituir ficheiros byte a byte iguais.
 - A run [826](https://github.com/GafiPro/GafiLoader/actions/runs/42798980683) passou em Ubuntu e Windows, incluindo testes/build, app image com runtime Java, WiX, instalador e uploads. A run [831](https://github.com/GafiPro/GafiLoader/actions/runs/43007983685) está a validar a alteração de diagnóstico de shutdown desta sessão.
