@@ -307,6 +307,11 @@ class LegacyModCompatibilityTransformerTest {
 
         assertTrue(result.transformed());
         assertEquals(1, result.adaptedScreenApiMixins());
+        assertTrue(result.warnings().stream().anyMatch(warning ->
+                        warning.contains("onScreenRemoveBecauseStopping")
+                                && warning.contains("client shutdown")),
+                "The preflight result must disclose that the legacy shutdown-removal callback is not adapted.");
+
         assertEquals(1, result.remappedClasses());
         assertArrayEquals(originalApi, Files.readAllBytes(source),
                 "The original Fabric API outer JAR must remain byte-for-byte unchanged.");
