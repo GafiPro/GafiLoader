@@ -1,5 +1,30 @@
 # GafiLoader — Registo de progresso
 
+## Estado atual — 2026-11-12
+
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, base `main`, branch `fix/fabric-screen-api-26-2`; a cabeça atual é `4ba346b7110e0e9713c51925c2795493e71b2955`. Não foi feito merge.
+- O último log de runtime conhecido confirma que o override de dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados). O bloqueio conhecido depois desse ponto continua a ser a adaptação da Fabric Screen API; não há logs de um arranque com a versão 0.1.836.
+- A adaptação Screen API agora valida também os seletores `@Inject.method` e `@At` antes de gerar a Mixin para `GuiManager`. Isto é uma salvaguarda estática, não uma prova de que o Minecraft arranca ou de que os eventos funcionam em runtime.
+- A run [836](https://github.com/GafiPro/GafiLoader/actions/runs/43201279961) passou em Ubuntu e Windows, incluindo testes, build, app image com runtime Java, WiX e instalador. Artefactos Windows disponíveis até 2026-11-15; versão produzida: `0.1.836`.
+- **Runtime ainda não validado:** continuam por confirmar a chegada ao menu, os eventos Screen em jogo e a integridade dos JARs originais após um arranque real. O callback de remoção durante shutdown e o check de desenvolvimento continuam omitidos. O bootstrap ainda usa cópias staged em `.gafiloader/compat-mods`; a arquitetura runtime-only continua por implementar.
+- **Próximo passo:** testar 0.1.836 apenas no perfil dedicado `gafiloader-26.2`, guardar `logs/gafiloader-preflight.log` e `logs/latest.log`, e só adaptar o hook de shutdown depois de provar o ponto equivalente em 26.2.
+
+## Sessão 2026-11-12 — validação estrita dos selectors Mixin da Screen API
+
+- **Objetivo:** impedir que a adaptação da Mixin `fabric-screen-api-v1:MinecraftMixin` seja aplicada a uma variante da Fabric API 1.21.11 cujos pontos de injeção tenham mudado sem o GafiLoader perceber.
+- **Estado inicial:** PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) aberta em `fix/fabric-screen-api-26-2`, cabeça anterior `42666b49d0a585d7c9236ccd1bd10f606a90fec0`; `main` não foi alterada. A run [831](https://github.com/GafiPro/GafiLoader/actions/runs/43007983685) validava as alterações anteriores, não esta sessão.
+- **Lacuna encontrada:** `LegacyFabricScreenApiAdapter.inspect` confirmava o target Mixin, os shadows, os descritores e a presença de `@Inject`, mas não confirmava os valores de `@Inject.method` nem os `@At` (`value`, `target`, `shift`). Assim, um selector diferente podia ser tratado como se ainda correspondesse à estrutura 1.21.11 conhecida.
+- **Alteração implementada:** o adaptador recolhe agora os selectors de método e os pontos `@At`, incluindo o shift por omissão `NONE`, e exige a forma exata dos sete handlers conhecidos antes de adaptar a classe. Qualquer diferença faz a adaptação falhar de forma explícita, em vez de gerar uma Mixin com alvos presumidos.
+- **Testes de regressão:** acrescentados casos que rejeitam um método `@Inject` diferente, um target `@At` diferente e um shift diferente. O fixture de integração passou também a representar os `@At` reais de `checkThreadOnDev` e `onScreenRemoveBecauseStopping`; não foram alterados JARs originais de mods.
+- **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java`; `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java`; `src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java`.
+- **Commit:** `4ba346b7110e0e9713c51925c2795493e71b2955` ([ver commit](https://github.com/GafiPro/GafiLoader/commit/4ba346b7110e0e9713c51925c2795493e71b2955)).
+- **Validação CI:** run [836](https://github.com/GafiPro/GafiLoader/actions/runs/43201279961), associada exatamente ao commit acima, terminou com sucesso em Ubuntu e Windows. Ubuntu executou `./gradlew --no-daemon "-Pproject_version=0.1.$GITHUB_RUN_NUMBER" clean test build` e registou `BUILD SUCCESSFUL in 26s`. Windows executou `.\\gradlew.bat --no-daemon "-Pproject_version=0.1.$env:GITHUB_RUN_NUMBER" clean test installDist` e registou `BUILD SUCCESSFUL in 24s`; a app image com runtime Java, WiX, instalador e uploads dos dois artefactos também terminaram com sucesso. Não executei Gradle localmente.
+- **Artefactos run 836:** instalador `GafiLoader-Installer-Windows-x64`, ID `13935916007`, 50 520 609 bytes, SHA-256 `17042c6ee4e689b30c4882db2c62bb47da7c71684de82dd47f6bd2657aba3b2a`; app image `GafiLoader-Windows-x64`, ID `13935895727`, 50 291 968 bytes, SHA-256 `19880af784c8f78bd536c01f21d368ee098df7b2154b2f4a3b47acd0082b8653`. Ambos expiram em 2026-11-15, aproximadamente às 10:34 UTC. A versão empacotada é `0.1.836`.
+- **Limitações:** esta CI valida testes, build e empacotamento, mas não inicia Minecraft 26.2. Não há novo `logs/gafiloader-preflight.log` nem `logs/latest.log`. O callback de shutdown continua sem substituto provado; `checkThreadOnDev` continua omitido; as cópias staged continuam a ser usadas quando há transformações. Não declarar compatibilidade de runtime.
+- **Decisão:** manter a PR #29 aberta. A validação estrita é preferível a tentar adivinhar selectors de outra versão da Fabric API; não altera o comportamento de runtime quando a Mixin coincide com a estrutura esperada.
+- **Próximos passos:** (1) testar 0.1.836 no perfil dedicado `gafiloader-26.2`; (2) recolher os dois logs e confirmar se chega ao menu e se a Mixin gerada é aplicada; (3) comparar hashes dos JARs originais antes/depois; (4) inspecionar o bytecode 26.2 de `MinecraftClient.close()`/`exitWorldAndClose()` para só então avaliar o callback de shutdown; (5) retomar a investigação runtime-only sem importar em bloco o protótipo antigo.
+
+
 ## Sessão 2026-11-11 — tornar explícita a lacuna de remoção de ecrã no shutdown
 
 - **Estado inicial e branch:** reli este registo, README, build.gradle, settings.gradle, LaunchBootstrap, LegacyDependencyOverrideGenerator, LegacyMinecraftVersionDetector, LegacyMixinBytecodeAdapter, LegacyFabricScreenApiAdapter, LegacyModCompatibilityTransformer e testes relacionados. `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, base `main`, na branch `fix/fabric-screen-api-26-2`. A cabeça antes desta sessão era `d023b99d6b94d8ba3311746f6e2484228a4138d9`, uma atualização apenas documental sobre o código/testes `dc49155721daee81b71ff1885f5c9c551d20ffe1`. A run [828](https://github.com/GafiPro/GafiLoader/actions/runs/42799508335) passou, mas validava apenas essa cabeça anterior.
@@ -14,7 +39,7 @@
 - **Próximos passos:** (1) confirmar o resultado da run 831; (2) inspecionar o bytecode oficial 26.2 de `MinecraftClient.close()`/`stop()` e `GuiManager.setScreen()` para identificar se há um ponto seguro equivalente ao antigo `destroy`; (3) só então decidir se o callback pode ser migrado com um selector Mixin exato e teste de integração; (4) obter um arranque real 0.1.826 para confirmar se a Mixin gerada chega a ser aplicada e se o jogo alcança o menu.
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-11
+> Última atualização: 2026-11-12
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
@@ -85,7 +110,7 @@
 - **Decisão:** manter a PR #29 aberta e não fazer merge sem validação real do jogo. O override de dependências já tinha passado no log anterior; o bloqueio conhecido era a Mixin Screen API, não a rejeição inicial da Fabric API.
 - **Próximos passos:** (1) executar o 0.1.799 no Windows e atualizar apenas o perfil dedicado gafiloader-26.2; (2) iniciar Minecraft 26.2 com Fabric API 0.141.6+1.21.11; (3) recolher logs/gafiloader-preflight.log e logs/latest.log; (4) confirmar que a Mixin gerada é carregada, que o menu abre e que os JAR originais permanecem byte a byte intactos; (5) se falhar, diagnosticar a primeira exceção fatal antes de alterar outra regra.
 
-## Estado atual — 2026-11-10
+## Estado histórico — 2026-11-10
 
 - `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não integrada na branch `fix/fabric-screen-api-26-2`; a cabeça antes das últimas atualizações documentais era `e2f04583a0f0552db261c71c3370b07e328db234`; o último commit de código/testes continua a ser `36c407c963670d7abc237f00b5953352ba77d741`.
 - O último log real conhecido confirma que o override de dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados). O bloqueio de runtime conhecido depois desse ponto é a Mixin da Fabric Screen API; não existe ainda log de arranque com o build 0.1.826.
