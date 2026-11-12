@@ -2,7 +2,7 @@
 
 ## Estado atual — 2026-11-12
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, base `main`, branch `fix/fabric-screen-api-26-2`; a cabeça atual é `85d803a41bd97636a93f04c6efed20ef3b7cdbcd`. Não foi feito merge.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, base `main`, branch `fix/fabric-screen-api-26-2`; o último commit de código/testes é `4ba346b7110e0e9713c51925c2795493e71b2955`. Não foi feito merge.
 - O último log de runtime conhecido confirma que o override de dependências passou (`Dependencies overridden for fabric-api`, 48 mods carregados). O bloqueio conhecido depois desse ponto continua a ser a adaptação da Fabric Screen API; não há logs de um arranque com a versão 0.1.836.
 - A adaptação Screen API agora valida também os seletores `@Inject.method` e `@At` antes de gerar a Mixin para `GuiManager`. Isto é uma salvaguarda estática, não uma prova de que o Minecraft arranca ou de que os eventos funcionam em runtime.
 - A run [836](https://github.com/GafiPro/GafiLoader/actions/runs/43201279961) passou em Ubuntu e Windows, incluindo testes, build, app image com runtime Java, WiX e instalador. Artefactos Windows disponíveis até 2026-11-15; versão produzida: `0.1.836`.
