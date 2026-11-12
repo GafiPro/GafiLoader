@@ -836,8 +836,9 @@ class LegacyModCompatibilityTransformerTest {
             AnnotationVisitor targets = inject.visitArray("method");
             targets.visit(null, target);
             targets.visitEnd();
+            String atValue = "INVOKE";
             String atTarget = switch (name) {
-                case "onScreenRemove" ->
+                case "onScreenRemove", "onScreenRemoveBecauseStopping" ->
                         "Lnet/minecraft/class_437;method_25432()V";
                 case "beforeScreenTick", "afterScreenTick" ->
                         "Lnet/minecraft/class_437;method_25393()V";
@@ -847,15 +848,17 @@ class LegacyModCompatibilityTransformerTest {
                         "Lnet/minecraft/class_310;method_1523(Z)V";
                 default -> null;
             };
-            if (atTarget != null) {
+            if ("checkThreadOnDev".equals(name)) atValue = "HEAD";
+            if (atTarget != null || "checkThreadOnDev".equals(name)) {
                 // @Inject.at is declared as At[]; model the real class-file array
                 // encoding so the remapper test covers nested annotation traversal.
                 AnnotationVisitor atArray = inject.visitArray("at");
                 AnnotationVisitor at = atArray.visitAnnotation(null,
                         "Lorg/spongepowered/asm/mixin/injection/At;");
-                at.visit("value", "INVOKE");
-                at.visit("target", atTarget);
-                if ("onScreenRemove".equals(name) || "afterScreenTick".equals(name)) {
+                at.visit("value", atValue);
+                if (atTarget != null) at.visit("target", atTarget);
+                if ("onScreenRemove".equals(name) || "onScreenRemoveBecauseStopping".equals(name)
+                        || "afterScreenTick".equals(name)) {
                     at.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", "AFTER");
                 }
                 at.visitEnd();

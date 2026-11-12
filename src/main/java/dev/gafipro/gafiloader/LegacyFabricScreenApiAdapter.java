@@ -10,7 +10,10 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,6 +32,10 @@ final class LegacyFabricScreenApiAdapter {
     static final String MIXIN_CONFIG = "fabric-screen-api-v1.mixins.json";
     private static final String INJECT_ANNOTATION =
             "Lorg/spongepowered/asm/mixin/injection/Inject;";
+    private static final String AT_ANNOTATION =
+            "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String AT_SHIFT_ENUM =
+            "Lorg/spongepowered/asm/mixin/injection/At$Shift;";
     private static final String CALLBACK_INFO =
             "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
 
@@ -37,6 +44,11 @@ final class LegacyFabricScreenApiAdapter {
     private static final String LEGACY_SCREEN = "net/minecraft/client/gui/screens/Screen";
     private static final String CURRENT_SCREEN = "net/minecraft/client/gui/screen/Screen";
     private static final String GUI_MANAGER = "net/minecraft/client/gui/GuiManager";
+    private static final String SCREEN_REMOVED_SELECTOR = "L" + CURRENT_SCREEN + ";removed()V";
+    private static final String SCREEN_TICK_SELECTOR = "L" + CURRENT_SCREEN + ";tick()V";
+    private static final String LOADING_SCREEN_TICK_SELECTOR =
+            "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
+    private static final String CLIENT_RUN_TICK_SELECTOR = "L" + MINECRAFT + ";runTick(Z)V";
     private static final String MIXIN_ANNOTATION =
             "Lorg/spongepowered/asm/mixin/Mixin;";
     private static final String SHADOW_ANNOTATION =
@@ -81,14 +93,28 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         MixinShape shape = inspect(reader);
-        Map<String, String> expectedHandlers = Map.of(
-                "checkThreadOnDev", "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
-                "onScreenRemove", "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
-                "onScreenRemoveBecauseStopping", "(" + CALLBACK_INFO + ")V",
-                "beforeScreenTick", "(" + CALLBACK_INFO + ")V",
-                "afterScreenTick", "(" + CALLBACK_INFO + ")V",
-                "beforeLoadingScreenTick", "(" + CALLBACK_INFO + ")V",
-                "afterLoadingScreenTick", "(" + CALLBACK_INFO + ")V");
+        Map<String, ExpectedHandler> expectedHandlers = Map.of(
+                "checkThreadOnDev", expectedHandler(
+                        "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
+                        "setScreen", "HEAD", null, "NONE"),
+                "onScreenRemove", expectedHandler(
+                        "(" + shape.screenDescriptor() + CALLBACK_INFO + ")V",
+                        "setScreen", "INVOKE", SCREEN_REMOVED_SELECTOR, "AFTER"),
+                "onScreenRemoveBecauseStopping", expectedHandler(
+                        "(" + CALLBACK_INFO + ")V",
+                        "destroy", "INVOKE", SCREEN_REMOVED_SELECTOR, "AFTER"),
+                "beforeScreenTick", expectedHandler(
+                        "(" + CALLBACK_INFO + ")V",
+                        "tick", "INVOKE", SCREEN_TICK_SELECTOR, "NONE"),
+                "afterScreenTick", expectedHandler(
+                        "(" + CALLBACK_INFO + ")V",
+                        "tick", "INVOKE", SCREEN_TICK_SELECTOR, "AFTER"),
+                "beforeLoadingScreenTick", expectedHandler(
+                        "(" + CALLBACK_INFO + ")V",
+                        "doWorldLoad", "INVOKE", LOADING_SCREEN_TICK_SELECTOR, "NONE"),
+                "afterLoadingScreenTick", expectedHandler(
+                        "(" + CALLBACK_INFO + ")V",
+                        "doWorldLoad", "INVOKE", CLIENT_RUN_TICK_SELECTOR, "NONE"));
         if (!shape.targetsMinecraft() || !shape.hasScreenShadow()
                 || !("L" + CURRENT_SCREEN + ";").equals(shape.screenDescriptor())
                 || !shape.hasGameThreadShadow()
@@ -147,7 +173,9 @@ final class LegacyFabricScreenApiAdapter {
         String[] tickingScreenDescriptor = {null};
         boolean[] uniqueTickingScreen = {false};
         Map<String, String> methodDescriptors = new LinkedHashMap<>();
-        Set<String> injectedMethods = new java.util.LinkedHashSet<>();
+        Set<String> injectedMethods = new LinkedHashSet<>();
+        Map<String, Set<String>> injectionMethods = new LinkedHashMap<>();
+        Map<String, List<AtSelector>> injectionPoints = new LinkedHashMap<>();
 
         reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -212,16 +240,79 @@ final class LegacyFabricScreenApiAdapter {
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
-                        if (INJECT_ANNOTATION.equals(annotationDescriptor)) injectedMethods.add(name);
-                        return null;
+                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) return null;
+                        injectedMethods.add(name);
+                        Set<String> targets = new LinkedHashSet<>();
+                        List<AtSelector> points = new ArrayList<>();
+                        injectionMethods.put(name, targets);
+                        injectionPoints.put(name, points);
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitArray(String property) {
+                                if ("method".equals(property)) {
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public void visit(String ignored, Object value) {
+                                            if (value instanceof String selector) targets.add(selector);
+                                        }
+                                    };
+                                }
+                                if ("at".equals(property)) {
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public AnnotationVisitor visitAnnotation(String ignored,
+                                                String nestedDescriptor) {
+                                            if (!AT_ANNOTATION.equals(nestedDescriptor)) return null;
+                                            String[] value = {null};
+                                            String[] target = {null};
+                                            String[] shift = {"NONE"};
+                                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                                @Override
+                                                public void visit(String propertyName, Object propertyValue) {
+                                                    if ("value".equals(propertyName)
+                                                            && propertyValue instanceof String selector) {
+                                                        value[0] = selector;
+                                                    } else if ("target".equals(propertyName)
+                                                            && propertyValue instanceof String selector) {
+                                                        target[0] = selector;
+                                                    }
+                                                }
+
+                                                @Override
+                                                public void visitEnum(String propertyName,
+                                                        String enumDescriptor, String enumValue) {
+                                                    if ("shift".equals(propertyName)) {
+                                                        shift[0] = AT_SHIFT_ENUM.equals(enumDescriptor)
+                                                                ? enumValue : "<invalid-enum>";
+                                                    }
+                                                }
+
+                                                @Override
+                                                public void visitEnd() {
+                                                    points.add(new AtSelector(value[0], target[0], shift[0]));
+                                                }
+                                            };
+                                        }
+                                    };
+                                }
+                                return null;
+                            }
+                        };
                     }
                 };
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
+        Map<String, Set<String>> immutableInjectionMethods = new LinkedHashMap<>();
+        injectionMethods.forEach((name, targets) ->
+                immutableInjectionMethods.put(name, Set.copyOf(targets)));
+        Map<String, List<AtSelector>> immutableInjectionPoints = new LinkedHashMap<>();
+        injectionPoints.forEach((name, points) ->
+                immutableInjectionPoints.put(name, List.copyOf(points)));
         return new MixinShape(targetMinecraft[0], screenShadow[0], gameThreadShadow[0],
                 screenDescriptor[0], gameThreadDescriptor[0], tickingScreenDescriptor[0],
-                uniqueTickingScreen[0], Map.copyOf(methodDescriptors), Set.copyOf(injectedMethods));
+                uniqueTickingScreen[0], Map.copyOf(methodDescriptors), Set.copyOf(injectedMethods),
+                Map.copyOf(immutableInjectionMethods), Map.copyOf(immutableInjectionPoints));
     }
 
     private static byte[] adaptMinecraftMixin(ClassReader reader, String screenDescriptor) {
@@ -354,15 +445,33 @@ final class LegacyFabricScreenApiAdapter {
 
     record Result(byte[] bytes, Map<String, byte[]> generatedClasses, boolean adapted) {}
 
+    private static ExpectedHandler expectedHandler(String descriptor, String methodTarget,
+            String atValue, String atTarget, String shift) {
+        return new ExpectedHandler(descriptor, Set.of(methodTarget),
+                List.of(new AtSelector(atValue, atTarget, shift)));
+    }
+
+    private record ExpectedHandler(String descriptor, Set<String> methodTargets,
+                                   List<AtSelector> injectionPoints) {}
+
+    private record AtSelector(String value, String target, String shift) {}
+
     private record MixinShape(boolean targetsMinecraft, boolean hasScreenShadow,
                               boolean hasGameThreadShadow, String screenDescriptor,
                               String gameThreadDescriptor, String tickingScreenDescriptor,
                               boolean hasUniqueTickingScreen,
-                              Map<String, String> methodDescriptors, Set<String> injectedMethods) {
-        boolean hasExpectedHandlers(Map<String, String> expected) {
-            return expected.entrySet().stream().allMatch(entry ->
-                    entry.getValue().equals(methodDescriptors.get(entry.getKey()))
-                            && injectedMethods.contains(entry.getKey()));
+                              Map<String, String> methodDescriptors, Set<String> injectedMethods,
+                              Map<String, Set<String>> injectionMethods,
+                              Map<String, List<AtSelector>> injectionPoints) {
+        boolean hasExpectedHandlers(Map<String, ExpectedHandler> expected) {
+            if (!injectedMethods.equals(expected.keySet())) return false;
+            return expected.entrySet().stream().allMatch(entry -> {
+                String methodName = entry.getKey();
+                ExpectedHandler handler = entry.getValue();
+                return handler.descriptor().equals(methodDescriptors.get(methodName))
+                        && handler.methodTargets().equals(injectionMethods.get(methodName))
+                        && handler.injectionPoints().equals(injectionPoints.get(methodName));
+            });
         }
     }
 }

@@ -31,12 +31,20 @@ class LegacyFabricScreenApiAdapterTest {
     private static final String FINAL = "Lorg/spongepowered/asm/mixin/Final;";
     private static final String UNIQUE = "Lorg/spongepowered/asm/mixin/Unique;";
     private static final String INJECT = "Lorg/spongepowered/asm/mixin/injection/Inject;";
+    private static final String AT = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String AT_SHIFT = "Lorg/spongepowered/asm/mixin/injection/At$Shift;";
     private static final String CALLBACK_INFO =
             "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
     private static final String MINECRAFT = "net/minecraft/client/MinecraftClient";
     private static final String GUI_MANAGER = "net/minecraft/client/gui/GuiManager";
     private static final String SCREEN = "net/minecraft/client/gui/screen/Screen";
     private static final String SCREEN_DESCRIPTOR = "L" + SCREEN + ";";
+    private static final String SCREEN_REMOVED_SELECTOR = SCREEN_DESCRIPTOR + "removed()V";
+    private static final String SCREEN_TICK_SELECTOR = SCREEN_DESCRIPTOR + "tick()V";
+    private static final String LOADING_SCREEN_TICK_SELECTOR =
+            "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
+    private static final String CLIENT_RUN_TICK_SELECTOR =
+            "L" + MINECRAFT + ";runTick(Z)V";
 
     @Test
     void splitsLegacyScreenMixinAndPreservesScreenEventHandlers() throws Exception {
@@ -136,6 +144,26 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsUnexpectedInjectionMethodAndAtSelectors() {
+        String descriptor = "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO + ")V";
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(
+                        SCREEN_DESCRIPTOR, true, descriptor, true,
+                        "setScreenAndShow", SCREEN_REMOVED_SELECTOR, "AFTER")),
+                "A changed @Inject method selector must not be silently migrated.");
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(
+                        SCREEN_DESCRIPTOR, true, descriptor, true,
+                        "setScreen", SCREEN_TICK_SELECTOR, "AFTER")),
+                "A changed @At target must not be silently migrated.");
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.adapt(legacyMinecraftMixin(
+                        SCREEN_DESCRIPTOR, true, descriptor, true,
+                        "setScreen", SCREEN_REMOVED_SELECTOR, "NONE")),
+                "A changed @At shift must not be silently migrated.");
+    }
+
+    @Test
     void registersGeneratedMixinInClientArrayExactlyOnce() throws Exception {
         byte[] original = """
                 {
@@ -172,6 +200,13 @@ class LegacyFabricScreenApiAdapterTest {
     private static byte[] legacyMinecraftMixin(String screenDescriptor, boolean shadowScreen,
                                                String onScreenRemoveDescriptor,
                                                boolean injectOnScreenRemove) {
+        return legacyMinecraftMixin(screenDescriptor, shadowScreen, onScreenRemoveDescriptor,
+                injectOnScreenRemove, "setScreen", SCREEN_REMOVED_SELECTOR, "AFTER");
+    }
+
+    private static byte[] legacyMinecraftMixin(String screenDescriptor, boolean shadowScreen,
+            String onScreenRemoveDescriptor, boolean injectOnScreenRemove,
+            String onScreenRemoveTarget, String onScreenRemoveAtTarget, String onScreenRemoveShift) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
                 LegacyFabricScreenApiAdapter.LEGACY_MIXIN, null, "java/lang/Object", null);
@@ -199,15 +234,16 @@ class LegacyFabricScreenApiAdapterTest {
         tickingScreen.visitEnd();
 
         addHandler(writer, "checkThreadOnDev", "(" + screenDescriptor + CALLBACK_INFO + ")V",
-                "setScreen", true, false);
+                "setScreen", true, false, "HEAD", null, "NONE");
         addHandler(writer, "onScreenRemove", onScreenRemoveDescriptor,
-                "setScreen", injectOnScreenRemove, false);
+                onScreenRemoveTarget, injectOnScreenRemove, false,
+                "INVOKE", onScreenRemoveAtTarget, onScreenRemoveShift);
         addHandler(writer, "onScreenRemoveBecauseStopping", "(" + CALLBACK_INFO + ")V",
-                "destroy", true, false);
+                "destroy", true, false, "INVOKE", SCREEN_REMOVED_SELECTOR, "AFTER");
         addHandler(writer, "beforeScreenTick", "(" + CALLBACK_INFO + ")V",
-                "tick", true, false);
+                "tick", true, false, "INVOKE", SCREEN_TICK_SELECTOR, "NONE");
         addHandler(writer, "afterScreenTick", "(" + CALLBACK_INFO + ")V",
-                "tick", true, true);
+                "tick", true, true, "INVOKE", SCREEN_TICK_SELECTOR, "AFTER");
         addLoadingScreenHandler(writer, "beforeLoadingScreenTick", "doWorldLoad", true);
         addLoadingScreenHandler(writer, "afterLoadingScreenTick", "doWorldLoad", false);
 
@@ -223,6 +259,8 @@ class LegacyFabricScreenApiAdapterTest {
         AnnotationVisitor targets = annotation.visitArray("method");
         targets.visit(null, target);
         targets.visitEnd();
+        String atTarget = beforeTick ? LOADING_SCREEN_TICK_SELECTOR : CLIENT_RUN_TICK_SELECTOR;
+        addAt(annotation, "INVOKE", atTarget, "NONE");
         annotation.visitEnd();
 
         method.visitCode();
@@ -253,13 +291,15 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     private static void addHandler(ClassWriter writer, String name, String descriptor,
-                                   String target, boolean inject, boolean readTickingScreen) {
+            String target, boolean inject, boolean readTickingScreen,
+            String atValue, String atTarget, String shift) {
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, name, descriptor, null, null);
         if (inject) {
             AnnotationVisitor annotation = method.visitAnnotation(INJECT, true);
             AnnotationVisitor targets = annotation.visitArray("method");
             targets.visit(null, target);
             targets.visitEnd();
+            addAt(annotation, atValue, atTarget, shift);
             annotation.visitEnd();
         }
         method.visitCode();
@@ -271,6 +311,16 @@ class LegacyFabricScreenApiAdapterTest {
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(1, 1);
         method.visitEnd();
+    }
+
+    private static void addAt(AnnotationVisitor inject, String value, String target, String shift) {
+        AnnotationVisitor atArray = inject.visitArray("at");
+        AnnotationVisitor at = atArray.visitAnnotation(null, AT);
+        at.visit("value", value);
+        if (target != null) at.visit("target", target);
+        if (!"NONE".equals(shift)) at.visitEnum("shift", AT_SHIFT, shift);
+        at.visitEnd();
+        atArray.visitEnd();
     }
 
     private static ClassShape inspect(byte[] bytes) {
