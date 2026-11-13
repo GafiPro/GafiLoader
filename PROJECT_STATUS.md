@@ -1,5 +1,30 @@
 # GafiLoader — Registo de progresso
 
+## Estado atual — 2026-11-13
+
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; não foi alterada. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`, agora na cabeça `0061dc75f449942b89568ac672896bd6c3304168`.
+- A última validação CI verificada antes desta sessão foi a run [839](https://github.com/GafiPro/GafiLoader/actions/runs/43201841097), verde em Ubuntu e Windows para a cabeça anterior `0ddb1cd3535a3f3ac4fff5676f116afc53ae9a96`. Não é validação do commit `0061dc7`.
+- **Alteração desta sessão:** o adaptador Screen API rejeita agora propriedades explícitas de `@Inject` fora de `method/at` e de `@At` fora de `value/target/shift`. A inspeção anterior ignorava, por exemplo, `@At.ordinal` e `@Inject.require`, apesar de poderem alterar a instrução selecionada ou a semântica de falha. A regra é deliberadamente conservadora: só transforma a forma conhecida da Mixin Fabric API 1.21.11.
+- Foram acrescentados testes que introduzem `ordinal=0` e `require=1` e exigem rejeição explícita. Commit de código/testes: [0061dc75](https://github.com/GafiPro/GafiLoader/commit/0061dc75f449942b89568ac672896bd6c3304168).
+- **Validação do commit atual:** ainda não existe uma run Actions ou status check visível associado a `0061dc75`; não executei Gradle localmente. O resultado verde da run 839 não deve ser atribuído a este commit.
+- **Runtime:** continua sem novo `gafiloader-preflight.log` / `latest.log` desde o diagnóstico Screen API registado em 2026-11-02. O callback de remoção no shutdown continua omitido; a adaptação ainda usa cópias staged quando transforma mods. Não declarar arranque 26.2 validado.
+- **Próximos passos:** (1) confirmar CI para `0061dc75`; (2) se verde, testar o instalador produzido por essa cabeça apenas no perfil dedicado `gafiloader-26.2`; (3) recolher os dois logs e comparar hashes dos JARs originais; (4) continuar a investigação do ponto equivalente ao callback de shutdown apenas com evidência de bytecode 26.2.
+
+## Sessão 2026-11-13 — validação integral das opções de injeção Mixin
+
+- **Objetivo:** fechar uma lacuna no fail-closed da adaptação `fabric-screen-api-v1:MinecraftMixin` antes de continuar a pedir testes de runtime.
+- **Estado inicial:** reli este registo, README, `build.gradle`, `settings.gradle`, o bootstrap, o gerador de dependency overrides, o adaptador Screen API, os testes e o workflow. `main` estava em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; PR #29 estava aberta e a cabeça era `0ddb1cd3535a3f3ac4fff5676f116afc53ae9a96`. A run 839 tinha passado em Ubuntu e Windows nessa cabeça.
+- **Evidência:** a fonte Fabric API 1.21.11 consultada declara os handlers conhecidos apenas com `@Inject(method=..., at=...)`; os `@At` relevantes usam `value`, `target` e, quando necessário, `shift`. A API Mixin também permite propriedades adicionais como `ordinal`, `opcode`, `args`, `remap`, `require`, `cancellable` e `locals`. O parser anterior comparava método/valor/target/shift, mas ignorava essas propriedades extra.
+- **Alteração concreta:** `LegacyFabricScreenApiAdapter.inspect` recolhe propriedades não reconhecidas em todos os formatos de anotação ASM relevantes (valor escalar, enum, anotação aninhada e array) e `hasExpectedHandlers` recusa a adaptação se alguma estiver presente. Não se tentam inferir defaults nem equivalências de atributos não auditados.
+- **Testes adicionados:** `LegacyFabricScreenApiAdapterTest.rejectsAdditionalInjectionPointAndInjectorOptions` cria fixtures com `@At(ordinal=0)` e `@Inject(require=1)`; ambos têm de lançar `IOException`. O fixture normal da Mixin 1.21.11 continua a representar apenas as propriedades verificadas.
+- **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java` e `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java`. Não foram alterados JARs de mods, instalador ou perfis vanilla.
+- **Commit:** `0061dc75f449942b89568ac672896bd6c3304168` ([ver commit](https://github.com/GafiPro/GafiLoader/commit/0061dc75f449942b89568ac672896bd6c3304168)); branch `fix/fabric-screen-api-26-2`. A PR #29 permanece aberta; não houve merge para `main`.
+- **Testes:** não foi possível executar Gradle neste ambiente remoto. À hora deste registo, ainda não havia run Actions/status check associado ao novo commit; a run 839 é anterior e não valida esta alteração.
+- **Decisão:** manter a adaptação restrita à forma Mixin observada na versão Fabric API 1.21.11. É preferível falhar explicitamente quando surge uma propriedade não auditada do que migrar silenciosamente um ponto de injeção com semântica potencialmente diferente.
+- **Limitações:** não existe novo log de runtime; esta alteração melhora apenas a validação estrutural da Mixin. Não corrige o callback de shutdown, não prova que a Mixin é aplicada em 26.2 e não prova compatibilidade geral.
+- **Próximos passos:** (1) obter CI verde para este commit; (2) inspecionar e testar o artefacto resultante no perfil 26.2; (3) recolher `logs/gafiloader-preflight.log` e `logs/latest.log`; (4) só depois voltar a alterar o hook de shutdown.
+
+
 ## Estado atual — 2026-11-12
 
 - `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta, base `main`, branch `fix/fabric-screen-api-26-2`; o último commit de código/testes é `4ba346b7110e0e9713c51925c2795493e71b2955`. Não foi feito merge.
