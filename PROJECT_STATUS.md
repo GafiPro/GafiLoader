@@ -2,7 +2,7 @@
 
 ## Estado atual — 2026-11-13
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; não foi alterada. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`, agora na cabeça `0061dc75f449942b89568ac672896bd6c3304168`.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; não foi alterada. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`; a alteração de código/testes desta sessão está identificada pelo commit `0061dc75f449942b89568ac672896bd6c3304168`.
 - A última validação CI verificada antes desta sessão foi a run [839](https://github.com/GafiPro/GafiLoader/actions/runs/43201841097), verde em Ubuntu e Windows para a cabeça anterior `0ddb1cd3535a3f3ac4fff5676f116afc53ae9a96`. Não é validação do commit `0061dc7`.
 - **Alteração desta sessão:** o adaptador Screen API rejeita agora propriedades explícitas de `@Inject` fora de `method/at` e de `@At` fora de `value/target/shift`. A inspeção anterior ignorava, por exemplo, `@At.ordinal` e `@Inject.require`, apesar de poderem alterar a instrução selecionada ou a semântica de falha. A regra é deliberadamente conservadora: só transforma a forma conhecida da Mixin Fabric API 1.21.11.
 - Foram acrescentados testes que introduzem `ordinal=0` e `require=1` e exigem rejeição explícita. Commit de código/testes: [0061dc75](https://github.com/GafiPro/GafiLoader/commit/0061dc75f449942b89568ac672896bd6c3304168).
