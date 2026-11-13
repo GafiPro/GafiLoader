@@ -176,6 +176,8 @@ final class LegacyFabricScreenApiAdapter {
         Set<String> injectedMethods = new LinkedHashSet<>();
         Map<String, Set<String>> injectionMethods = new LinkedHashMap<>();
         Map<String, List<AtSelector>> injectionPoints = new LinkedHashMap<>();
+        Set<String> unexpectedInjectProperties = new LinkedHashSet<>();
+        Set<String> unexpectedAtProperties = new LinkedHashSet<>();
 
         reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -248,6 +250,22 @@ final class LegacyFabricScreenApiAdapter {
                         injectionPoints.put(name, points);
                         return new AnnotationVisitor(Opcodes.ASM9) {
                             @Override
+                            public void visit(String property, Object value) {
+                                unexpectedInjectProperties.add(property);
+                            }
+
+                            @Override
+                            public void visitEnum(String property, String enumDescriptor, String enumValue) {
+                                unexpectedInjectProperties.add(property);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                unexpectedInjectProperties.add(property);
+                                return null;
+                            }
+
+                            @Override
                             public AnnotationVisitor visitArray(String property) {
                                 if ("method".equals(property)) {
                                     return new AnnotationVisitor(Opcodes.ASM9) {
@@ -275,6 +293,9 @@ final class LegacyFabricScreenApiAdapter {
                                                     } else if ("target".equals(propertyName)
                                                             && propertyValue instanceof String selector) {
                                                         target[0] = selector;
+                                                    } else {
+                                                        // The known 1.21.11 points use only value/target here.
+                                                        unexpectedAtProperties.add(propertyName);
                                                     }
                                                 }
 
@@ -284,7 +305,22 @@ final class LegacyFabricScreenApiAdapter {
                                                     if ("shift".equals(propertyName)) {
                                                         shift[0] = AT_SHIFT_ENUM.equals(enumDescriptor)
                                                                 ? enumValue : "<invalid-enum>";
+                                                    } else {
+                                                        unexpectedAtProperties.add(propertyName);
                                                     }
+                                                }
+
+                                                @Override
+                                                public AnnotationVisitor visitAnnotation(String propertyName,
+                                                        String nestedDescriptor) {
+                                                    unexpectedAtProperties.add(propertyName);
+                                                    return null;
+                                                }
+
+                                                @Override
+                                                public AnnotationVisitor visitArray(String propertyName) {
+                                                    unexpectedAtProperties.add(propertyName);
+                                                    return null;
                                                 }
 
                                                 @Override
@@ -295,6 +331,7 @@ final class LegacyFabricScreenApiAdapter {
                                         }
                                     };
                                 }
+                                unexpectedInjectProperties.add(property);
                                 return null;
                             }
                         };
@@ -312,7 +349,8 @@ final class LegacyFabricScreenApiAdapter {
         return new MixinShape(targetMinecraft[0], screenShadow[0], gameThreadShadow[0],
                 screenDescriptor[0], gameThreadDescriptor[0], tickingScreenDescriptor[0],
                 uniqueTickingScreen[0], Map.copyOf(methodDescriptors), Set.copyOf(injectedMethods),
-                Map.copyOf(immutableInjectionMethods), Map.copyOf(immutableInjectionPoints));
+                Map.copyOf(immutableInjectionMethods), Map.copyOf(immutableInjectionPoints),
+                Set.copyOf(unexpectedInjectProperties), Set.copyOf(unexpectedAtProperties));
     }
 
     private static byte[] adaptMinecraftMixin(ClassReader reader, String screenDescriptor) {
@@ -462,8 +500,11 @@ final class LegacyFabricScreenApiAdapter {
                               boolean hasUniqueTickingScreen,
                               Map<String, String> methodDescriptors, Set<String> injectedMethods,
                               Map<String, Set<String>> injectionMethods,
-                              Map<String, List<AtSelector>> injectionPoints) {
+                              Map<String, List<AtSelector>> injectionPoints,
+                              Set<String> unexpectedInjectProperties,
+                              Set<String> unexpectedAtProperties) {
         boolean hasExpectedHandlers(Map<String, ExpectedHandler> expected) {
+            if (!unexpectedInjectProperties.isEmpty() || !unexpectedAtProperties.isEmpty()) return false;
             if (!injectedMethods.equals(expected.keySet())) return false;
             return expected.entrySet().stream().allMatch(entry -> {
                 String methodName = entry.getKey();
