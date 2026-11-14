@@ -145,6 +145,15 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         com.google.gson.JsonObject root = parsed.getAsJsonObject();
+        String expectedPackage = LEGACY_MIXIN.substring(0, LEGACY_MIXIN.lastIndexOf('/')).replace('/', '.');
+        com.google.gson.JsonElement packageElement = root.get("package");
+        if (packageElement == null || !packageElement.isJsonPrimitive()
+                || !packageElement.getAsJsonPrimitive().isString()
+                || !expectedPackage.equals(packageElement.getAsString())) {
+            throw new IOException(MIXIN_CONFIG + " must declare package \"" + expectedPackage
+                    + "\" before the generated " + GENERATED_MIXIN + " can be registered.");
+        }
+
         com.google.gson.JsonElement clientElement = root.get("client");
         if (clientElement == null || !clientElement.isJsonArray()) {
             throw new IOException(MIXIN_CONFIG + " has no client mixin array; refusing to register "
@@ -152,14 +161,27 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         com.google.gson.JsonArray clientMixins = clientElement.getAsJsonArray();
-        String simpleName = GENERATED_MIXIN.substring(GENERATED_MIXIN.lastIndexOf('/') + 1);
+        String originalSimpleName = LEGACY_MIXIN.substring(LEGACY_MIXIN.lastIndexOf('/') + 1);
+        String generatedSimpleName = GENERATED_MIXIN.substring(GENERATED_MIXIN.lastIndexOf('/') + 1);
+        int originalCount = 0;
+        int generatedCount = 0;
         for (com.google.gson.JsonElement entry : clientMixins) {
-            if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()
-                    && simpleName.equals(entry.getAsString())) {
-                return originalConfig;
-            }
+            if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString()) continue;
+            String name = entry.getAsString();
+            if (originalSimpleName.equals(name)) originalCount++;
+            if (generatedSimpleName.equals(name)) generatedCount++;
         }
-        clientMixins.add(simpleName);
+        if (originalCount != 1) {
+            throw new IOException(MIXIN_CONFIG + " must contain exactly one client entry for "
+                    + originalSimpleName + "; found " + originalCount
+                    + ". Refusing to register a replacement that could omit the original loading-screen handlers.");
+        }
+        if (generatedCount > 1) {
+            throw new IOException(MIXIN_CONFIG + " contains duplicate entries for " + generatedSimpleName
+                    + "; refusing to alter an ambiguous Mixin configuration.");
+        }
+        if (generatedCount == 1) return originalConfig;
+        clientMixins.add(generatedSimpleName);
         return new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping()
                 .create().toJson(root).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
