@@ -179,6 +179,36 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsMixinConfigWithUnexpectedPackage() {
+        byte[] config = """
+                {
+                  "required": true,
+                  "package": "net.fabricmc.fabric.mixin.other",
+                  "client": ["MinecraftMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGeneratedMixinToConfig(config),
+                "The generated class path must agree with the package declared by the Mixin config.");
+    }
+
+    @Test
+    void rejectsMixinConfigThatDoesNotRegisterTheOriginalClientMixin() {
+        byte[] config = """
+                {
+                  "required": true,
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["GameRendererMixin", "ScreenMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGeneratedMixinToConfig(config),
+                "Registering only the generated GuiManager mixin would otherwise drop the original loading-screen handlers.");
+    }
+
+    @Test
     void registersGeneratedMixinInClientArrayExactlyOnce() throws Exception {
         byte[] original = """
                 {
