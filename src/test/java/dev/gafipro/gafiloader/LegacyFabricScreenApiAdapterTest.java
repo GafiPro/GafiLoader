@@ -209,6 +209,36 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsDuplicateOriginalClientMixinEntries() {
+        byte[] config = """
+                {
+                  "required": true,
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["MinecraftMixin", "MinecraftMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGeneratedMixinToConfig(config),
+                "The source mixin must be registered exactly once so its retained handlers are not ambiguous.");
+    }
+
+    @Test
+    void rejectsDuplicateGeneratedClientMixinEntries() {
+        byte[] config = """
+                {
+                  "required": true,
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["MinecraftMixin", "GafiLoaderGuiManagerMixin", "GafiLoaderGuiManagerMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGeneratedMixinToConfig(config),
+                "Duplicate generated mixin entries must be rejected rather than silently accepted.");
+    }
+
+    @Test
     void registersGeneratedMixinInClientArrayExactlyOnce() throws Exception {
         byte[] original = """
                 {
