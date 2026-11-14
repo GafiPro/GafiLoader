@@ -2,7 +2,7 @@
 
 ## Estado atual — 2026-11-14
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; não foi alterada. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`. A branch está 89 commits à frente de `main`, sem commits atrás; não foi feito merge.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; não foi alterada. A PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta na branch `fix/fabric-screen-api-26-2`, que está à frente de `main`; não foi feito merge.
 - Cabeça de código/testes desta sessão: [`ade60e62bbb2b60257f9bf74bfa40fb1fb284aa5`](https://github.com/GafiPro/GafiLoader/commit/ade60e62bbb2b60257f9bf74bfa40fb1fb284aa5). O commit anterior `8ea81df6aa42498e2dfc5cf97bcd1643bf17d3fb` implementa a validação; `1ff0fce11be4c5b56dd6e8c88f3ea84178adfbaf` e `ade60e62bbb2b60257f9bf74bfa40fb1fb284aa5` acrescentam os testes.
 - **Alteração desta sessão:** antes de registar a Mixin gerada, `LegacyFabricScreenApiAdapter.addGeneratedMixinToConfig` exige que o `package` do JSON corresponda ao pacote da classe gerada, que a entrada original `MinecraftMixin` exista exatamente uma vez e que a entrada gerada não esteja duplicada. Se já existir exatamente uma entrada gerada, a operação continua idempotente.
 - **Motivo:** uma divergência entre o `package` do config e o caminho da classe gerada faria a Mixin não resolver; a ausência da entrada original poderia deixar de carregar os handlers de loading screen que permanecem na Mixin original; duplicados tornam a configuração ambígua. O adaptador agora falha explicitamente nestes casos.
