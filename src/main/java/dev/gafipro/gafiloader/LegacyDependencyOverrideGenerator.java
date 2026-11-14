@@ -115,27 +115,38 @@ public final class LegacyDependencyOverrideGenerator {
         root.add("overrides", overrides);
         Path output = configPath.toAbsolutePath().normalize();
         Path parent = output.getParent();
-        if (parent != null) Files.createDirectories(parent);
-
-        // Keep the previous config recoverable and avoid leaving a truncated file if writing fails.
-        if (Files.exists(output) && isValidConfigFile(output)) {
-            Path backup = output.resolveSibling(output.getFileName() + ".bak");
-            // Preserve the first valid pre-GafiLoader config; never replace it with damaged content.
-            if (!Files.exists(backup)) {
-                Files.copy(output, backup);
-            }
+        if (parent == null) {
+            throw new IOException("Config path has no parent directory: " + output);
         }
-        Path temporary = output.resolveSibling(output.getFileName() + ".tmp");
-        try {
-            Files.writeString(temporary, GSON.toJson(root) + System.lineSeparator(), StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-                Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.createDirectories(parent);
+
+        byte[] generatedBytes = (GSON.toJson(root) + System.lineSeparator()).getBytes(StandardCharsets.UTF_8);
+        boolean alreadyCurrent = Files.isRegularFile(output)
+                && java.util.Arrays.equals(Files.readAllBytes(output), generatedBytes);
+
+        if (!alreadyCurrent) {
+            // Preserve the first valid pre-GafiLoader config, but never mistake an unchanged
+            // generated config for the user's original when a backup is absent.
+            if (Files.exists(output) && isValidConfigFile(output)) {
+                Path backup = output.resolveSibling(output.getFileName() + ".bak");
+                if (!Files.exists(backup)) {
+                    Files.copy(output, backup);
+                }
             }
-        } finally {
-            Files.deleteIfExists(temporary);
+
+            // A unique temporary file avoids collisions between overlapping preflight launches.
+            Path temporary = Files.createTempFile(parent, output.getFileName().toString() + ".", ".tmp");
+            try {
+                Files.write(temporary, generatedBytes);
+                try {
+                    Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+                    Files.move(temporary, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
         }
 
         return new Result(output.toString(), jars.size(), legacyMods.size(),

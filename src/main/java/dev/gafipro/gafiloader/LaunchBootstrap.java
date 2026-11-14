@@ -111,6 +111,12 @@ public final class LaunchBootstrap {
                                 + " legacy class file(s) from BlockModel to the 26.2 CuboidModel implementation.",
                                 false);
                     }
+                    if (compatibilityResult.adaptedScreenApiMixins() > 0) {
+                        log(logPath, "Fabric Screen API compatibility: split "
+                                + compatibilityResult.adaptedScreenApiMixins()
+                                + " legacy Minecraft screen mixin(s) between Minecraft and GuiManager; "
+                                + "screen-change and regular tick event handlers are retained.", false);
+                    }
                     log(logPath, "ClassTweaker compatibility: remapped "
                             + compatibilityResult.rewrittenClassTweakerFiles()
                             + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",
@@ -228,6 +234,9 @@ public final class LaunchBootstrap {
                 || !java.util.Arrays.equals(Files.readAllBytes(configPath), generatedConfig)) {
             System.err.println("[GafiLoader] Dependency config changed externally; leaving it untouched: "
                     + configPath);
+            return;
+        }
+        if (originalConfig != null && java.util.Arrays.equals(originalConfig, generatedConfig)) {
             return;
         }
 

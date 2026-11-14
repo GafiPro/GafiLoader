@@ -211,8 +211,14 @@ final class LegacyMixinBytecodeAdapter {
                     if (adaptSystemReportDetail && SUPPLIER_INTERNAL_NAME.equals(internalName)) {
                         return CRASH_REPORT_DETAIL_INTERNAL_NAME;
                     }
+                    String currentClientName =
+                            LegacyFabricScreenApiAdapter.mapLegacyClassName(internalName);
+                    if (!currentClientName.equals(internalName)) {
+                        return currentClientName;
+                    }
                     try {
-                        return mappings.mapClass(internalName);
+                        String mappedName = mappings.mapClass(internalName);
+                        return LegacyFabricScreenApiAdapter.mapLegacyClassName(mappedName);
                     } catch (IOException exception) {
                         throw new UncheckedIOException(exception);
                     }
@@ -337,7 +343,11 @@ final class LegacyMixinBytecodeAdapter {
 
             reader.accept(mixinMetadataAdapter, 0);
             byte[] mapped = writer.toByteArray();
-            return new Result(mapped, !Arrays.equals(originalBytes, mapped));
+            LegacyFabricScreenApiAdapter.Result screenApi =
+                    LegacyFabricScreenApiAdapter.adapt(mapped);
+            byte[] adaptedBytes = screenApi.bytes();
+            return new Result(adaptedBytes, !Arrays.equals(originalBytes, adaptedBytes),
+                    screenApi.generatedClasses());
         } catch (UncheckedIOException exception) {
             throw exception.getCause();
         } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
@@ -646,15 +656,28 @@ final class LegacyMixinBytecodeAdapter {
 
             @Override
             public AnnotationVisitor visitArray(String name) {
-                if (!isSelectorProperty(descriptor, name)) {
-                    return super.visitArray(name);
+                if (isSelectorProperty(descriptor, name)) {
+                    List<Object> values = new ArrayList<>();
+                    selectorArrays.put(name, values);
+                    return new AnnotationVisitor(Opcodes.ASM9) {
+                        @Override
+                        public void visit(String ignored, Object value) {
+                            values.add(value);
+                        }
+                    };
                 }
-                List<Object> values = new ArrayList<>();
-                selectorArrays.put(name, values);
-                return new AnnotationVisitor(Opcodes.ASM9) {
+
+                // Annotation-valued array properties (notably @Inject.at, whose
+                // declared type is At[]) must keep passing nested annotations through
+                // wrapAnnotation. Returning the raw array visitor would leave nested
+                // @At.target selectors in the legacy namespace.
+                AnnotationVisitor arrayDelegate = super.visitArray(name);
+                if (arrayDelegate == null) return null;
+                return new AnnotationVisitor(Opcodes.ASM9, arrayDelegate) {
                     @Override
-                    public void visit(String ignored, Object value) {
-                        values.add(value);
+                    public AnnotationVisitor visitAnnotation(String ignored, String nestedDescriptor) {
+                        return wrapAnnotation(super.visitAnnotation(ignored, nestedDescriptor),
+                                nestedDescriptor, metadata, mappings);
                     }
                 };
             }
@@ -738,22 +761,32 @@ final class LegacyMixinBytecodeAdapter {
 
     private static String mapAnnotationString(String annotationDescriptor, String propertyName,
             String value, MixinMetadata metadata, LegacyClassTweakerMappings mappings) throws IOException {
+        String mapped = value;
         if (MIXIN_ANNOTATION.equals(annotationDescriptor) && "targets".equals(propertyName)) {
-            return mapClassSelector(value, mappings);
-        }
-        if (AT_ANNOTATION.equals(annotationDescriptor) && "target".equals(propertyName)) {
-            return mapMemberSelector(value, metadata.targetOwners(), mappings, true);
-        }
-        if (isInjectionAnnotation(annotationDescriptor) && "method".equals(propertyName)) {
-            return mapMethodSelectorList(value, metadata.targetOwners(), mappings);
-        }
-        if ((ACCESSOR_ANNOTATION.equals(annotationDescriptor)
+            mapped = mapClassSelector(value, mappings);
+        } else if (AT_ANNOTATION.equals(annotationDescriptor) && "target".equals(propertyName)) {
+            mapped = mapMemberSelector(value, metadata.targetOwners(), mappings, true);
+        } else if (isInjectionAnnotation(annotationDescriptor) && "method".equals(propertyName)) {
+            mapped = mapMethodSelectorList(value, metadata.targetOwners(), mappings);
+        } else if ((ACCESSOR_ANNOTATION.equals(annotationDescriptor)
                 || INVOKER_ANNOTATION.equals(annotationDescriptor))
                 && "value".equals(propertyName) && !value.isBlank()) {
             boolean method = INVOKER_ANNOTATION.equals(annotationDescriptor);
-            return mapSelectorNameOnly(value, metadata.targetOwners(), mappings, method);
+            mapped = mapSelectorNameOnly(value, metadata.targetOwners(), mappings, method);
         }
-        return value;
+        return mapCurrentClassAliases(mapped);
+    }
+
+    private static String mapCurrentClassAliases(String selector) {
+        return selector
+                .replace("Lnet/minecraft/client/Minecraft;",
+                        "Lnet/minecraft/client/MinecraftClient;")
+                .replace("Lnet/minecraft/client/gui/screens/Screen;",
+                        "Lnet/minecraft/client/gui/screen/Screen;")
+                .replace("net.minecraft.client.Minecraft",
+                        "net.minecraft.client.MinecraftClient")
+                .replace("net.minecraft.client.gui.screens.Screen",
+                        "net.minecraft.client.gui.screen.Screen");
     }
 
     private static boolean isInjectionAnnotation(String descriptor) {
@@ -906,7 +939,7 @@ final class LegacyMixinBytecodeAdapter {
         return name + "\u0000" + descriptor;
     }
 
-    record Result(byte[] bytes, boolean changed) {}
+    record Result(byte[] bytes, boolean changed, Map<String, byte[]> generatedClasses) {}
     record RefmapResult(byte[] bytes, int remappedSelectors) {}
 
     private record MixinMetadata(String className, List<String> targetOwners,
