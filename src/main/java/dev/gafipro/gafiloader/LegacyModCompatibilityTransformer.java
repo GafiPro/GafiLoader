@@ -531,7 +531,8 @@ final class LegacyModCompatibilityTransformer {
                         warnings.addAll(nested.warnings());
                         if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0
                                 || nested.rewrittenMixinRefmaps() > 0 || nested.remappedClasses() > 0
-                                || nested.adaptedModelLoadingClasses() > 0) {
+                                || nested.adaptedModelLoadingClasses() > 0
+                                || nested.adaptedScreenApiModules() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
@@ -539,6 +540,7 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenMixinRefmaps += nested.rewrittenMixinRefmaps();
                             remappedClasses += nested.remappedClasses();
                             adaptedModelLoadingClasses += nested.adaptedModelLoadingClasses();
+                            adaptedScreenApiModules += nested.adaptedScreenApiModules();
                         }
                     } else if (isClassTweakerResource(entryName, data, declaredClassTweakerResource)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
