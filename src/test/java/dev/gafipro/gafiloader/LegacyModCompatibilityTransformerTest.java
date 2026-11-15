@@ -647,6 +647,72 @@ class LegacyModCompatibilityTransformerTest {
         return writer.toByteArray();
     }
 
+    private static String mixinTarget(byte[] classBytes) {
+        AtomicReference<String> target = new AtomicReference<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                if (!MIXIN_ANNOTATION.equals(descriptor)) return null;
+                return new AnnotationVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visit(String name, Object value) {
+                        if ("value".equals(name) && value instanceof Type type) {
+                            target.set(type.getInternalName());
+                        }
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitArray(String name) {
+                        if (!"value".equals(name)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String ignored, Object value) {
+                                if (value instanceof Type type) target.set(type.getInternalName());
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return target.get();
+    }
+
+    private static java.util.Set<String> injectionSelectors(byte[] classBytes) {
+        java.util.Set<String> selectors = new java.util.LinkedHashSet<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String property, Object value) {
+                                if ("method".equals(property) && value instanceof String selector) {
+                                    selectors.add(selector);
+                                }
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitArray(String property) {
+                                if (!"method".equals(property)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        if (value instanceof String selector) selectors.add(selector);
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return java.util.Set.copyOf(selectors);
+    }
+
     private static String firstFieldOwner(byte[] classBytes) {
         AtomicReference<String> owner = new AtomicReference<>();
         new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
