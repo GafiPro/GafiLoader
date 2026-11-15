@@ -111,6 +111,12 @@ public final class LaunchBootstrap {
                                 + " legacy class file(s) from BlockModel to the 26.2 CuboidModel implementation.",
                                 false);
                     }
+                    if (compatibilityResult.adaptedScreenApiModules() > 0) {
+                        log(logPath, "Fabric screen API compatibility: adapted "
+                                + compatibilityResult.adaptedScreenApiModules()
+                                + " legacy fabric-screen-api-v1 module(s) to the 26.2 GuiManager/Minecraft split.",
+                                false);
+                    }
                     log(logPath, "ClassTweaker compatibility: remapped "
                             + compatibilityResult.rewrittenClassTweakerFiles()
                             + " legacy Intermediary resource(s); staged archives passed the post-remap namespace audit.",
