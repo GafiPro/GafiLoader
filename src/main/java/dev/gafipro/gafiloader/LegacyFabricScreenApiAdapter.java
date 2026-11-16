@@ -116,38 +116,53 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         JsonObject root = parsed.getAsJsonObject();
+        String expectedPackage = LEGACY_MIXIN_CLASS.substring(0, LEGACY_MIXIN_CLASS.lastIndexOf('/'))
+                .replace('/', '.');
+        JsonElement packageElement = root.get("package");
+        if (packageElement == null || !packageElement.isJsonPrimitive()
+                || !packageElement.getAsJsonPrimitive().isString()
+                || !expectedPackage.equals(packageElement.getAsString())) {
+            throw new IOException("The legacy fabric-screen-api-v1 Mixin config must declare package \""
+                    + expectedPackage + "\".");
+        }
+
         JsonElement clientElement = root.get("client");
         if (clientElement == null || !clientElement.isJsonArray()) {
             throw new IOException("The legacy fabric-screen-api-v1 Mixin config is missing its client array.");
         }
 
         JsonArray client = clientElement.getAsJsonArray();
-        boolean hasMinecraftMixin = false;
-        boolean hasGuiMixin = false;
-        for (JsonElement element : client) {
+        int minecraftIndex = -1;
+        int guiIndex = -1;
+        int minecraftCount = 0;
+        int guiCount = 0;
+        for (int i = 0; i < client.size(); i++) {
+            JsonElement element = client.get(i);
             if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) continue;
             String name = element.getAsString();
-            hasMinecraftMixin |= "MinecraftMixin".equals(name);
-            hasGuiMixin |= "GuiMixin".equals(name);
+            if ("MinecraftMixin".equals(name)) {
+                minecraftIndex = i;
+                minecraftCount++;
+            } else if ("GuiMixin".equals(name)) {
+                guiIndex = i;
+                guiCount++;
+            }
         }
-        if (!hasMinecraftMixin) {
-            throw new IOException("The legacy fabric-screen-api-v1 Mixin config does not list MinecraftMixin.");
+        if (minecraftCount != 1) {
+            throw new IOException("The legacy fabric-screen-api-v1 Mixin config must list MinecraftMixin exactly once; "
+                    + "found " + minecraftCount + ".");
         }
-        if (hasGuiMixin) return originalBytes;
+        if (guiCount > 1) {
+            throw new IOException("The legacy fabric-screen-api-v1 Mixin config contains duplicate GuiMixin entries; "
+                    + "refusing an ambiguous screen migration.");
+        }
+        if (guiIndex >= 0 && guiIndex < minecraftIndex) return originalBytes;
 
         JsonArray updated = new JsonArray();
-        boolean inserted = false;
-        for (JsonElement element : client) {
-            if (!inserted && element.isJsonPrimitive()
-                    && element.getAsJsonPrimitive().isString()
-                    && "MinecraftMixin".equals(element.getAsString())) {
-                updated.add("GuiMixin");
-                inserted = true;
-            }
-            updated.add(element.deepCopy());
-        }
-        if (!inserted) {
-            throw new IOException("Could not insert GuiMixin before MinecraftMixin in the client Mixin list.");
+        for (int i = 0; i < client.size(); i++) {
+            if (i == guiIndex) continue;
+            if (i == minecraftIndex) updated.add("GuiMixin");
+            updated.add(client.get(i).deepCopy());
         }
 
         root.add("client", updated);
