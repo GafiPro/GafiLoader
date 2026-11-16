@@ -97,7 +97,7 @@ final class LegacyFabricScreenApiAdapter {
 
     static Result adapt(byte[] remappedLegacyMixin) throws IOException {
         verifyLegacyMixin(remappedLegacyMixin);
-        return new Result(buildGuiMixin(), buildMinecraftMixin(), buildGuiExtensions());
+        return new Result(buildMinecraftMixin(), buildGuiMixin(), buildGuiExtensions());
     }
 
     /**
