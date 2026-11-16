@@ -1,9 +1,32 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-02
+> Última atualização: 2026-11-16
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
+
+## Sessão de desenvolvimento — 2026-11-16 (validação da configuração Screen API)
+
+- **Objetivo:** retomar o trabalho no estado mais recente do repositório e fechar um caso de configuração insegura na migração do Mixin `fabric-screen-api-v1`, sem misturar esta implementação com a PR #29.
+- **Estado inicial verificado:** `main` ficou em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7` (2026-11-02). A branch de trabalho mais recente é `compat/fabric-screen-api-26.2`, inicialmente em `e5176f67d0d846a7ce4f4047edc6247ba3dfe8d6`, oito commits à frente de `main`. A PR #29 continua aberta na branch separada `fix/fabric-screen-api-26-2` (head `761344e6c24560f1e394f947adbe791c0feb98b4`), com uma implementação diferente e 91 commits à frente de `main`. Não foi feito merge, rebase ou fecho de nenhuma das branches/PRs.
+- **Diagnóstico P0 atualizado:** o último log real registado (2026-11-02) mostrava Fabric Loader 0.19.5, Fabric API 0.141.6+1.21.11, mensagem `Dependencies overridden for fabric-api` e 48 mods carregados antes de uma falha `InvalidMixinException` no Mixin da Screen API. Nesse arranque, o bloqueio de metadados foi ultrapassado; o bloqueio observado passou a ser compatibilidade Mixin/runtime. Ainda não existe prova de um arranque atual até ao menu.
+- **Inspeção desta sessão:** foram relidos `PROJECT_STATUS.md`, `README.md`, `build.gradle`, `settings.gradle`, workflow, `LaunchBootstrap`, gerador/detetor de dependências, transformer, adapter Screen API e testes. Confirmou-se que a branch `compat` transforma cópias staged em `.gafiloader/compat-mods` e deixa os JARs originais intactos; não é ainda uma solução runtime-only.
+- **Problema concreto encontrado:** `LegacyFabricScreenApiAdapter.addGuiMixinToConfig` aceitava um `GuiMixin` preexistente em qualquer posição, incluindo depois de `MinecraftMixin`, aceitava entradas duplicadas e não verificava o campo `package`. Isso podia deixar um Mixin gerado por resolver no pacote errado ou manter uma configuração ambígua.
+- **Alterações implementadas:**
+  - `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java`: valida que `package` é exatamente `net.fabricmc.fabric.mixin.screen`; exige exatamente uma entrada `MinecraftMixin`; rejeita entradas `GuiMixin` duplicadas; se uma única entrada `GuiMixin` existir depois de `MinecraftMixin`, move-a para antes, preservando as restantes entradas; mantém idempotência quando a ordem já está correta.
+  - `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java`: acrescenta regressões para reordenar uma entrada preexistente sem duplicar, preservar as outras entradas, repetir a operação sem alterações e rejeitar duplicados/pacote inesperado.
+  - Commits de código e teste: `84aabd3e0dd566b7d1c908d1da23986afc71166a` ([código](https://github.com/GafiPro/GafiLoader/commit/84aabd3e0dd566b7d1c908d1da23986afc71166a)) e `ab05f82ad3ff6dd217e3a03561d00fd2c0163e6a` ([testes](https://github.com/GafiPro/GafiLoader/commit/ab05f82ad3ff6dd217e3a03561d00fd2c0163e6a)).
+- **Evidência adicional / risco ainda aberto:** a fonte de `MinecraftMixin.java` da Fabric API 1.21.11 ([branch 1.21.11](https://github.com/coredex-source/FabricAPI/blob/1.21.11/fabric-screen-api-v1/src/client/java/net/fabricmc/fabric/mixin/screen/MinecraftMixin.java)) injeta o fim do tick de loading em `Minecraft.runTick(Z)V` e a remoção de shutdown em `Minecraft.destroy`. A implementação da branch `compat` usa `renderFrame(Z)V` e `exitWorldAndClose`. A equivalência destes pontos para 26.2 ainda não foi demonstrada com o bytecode/JAR 26.2; não devem ser tratados como equivalentes sem inspeção do alvo real.
+- **Validação executada:** revisão estática dos diffs e confirmação via GitHub de que os dois commits e os novos testes estão gravados na branch. Não foi executado Gradle localmente: o ambiente só disponibiliza Java 21 (o projeto exige Java 25) e a tentativa de clone falhou por indisponibilidade de resolução de `github.com`. A run 832 verde da PR #29 é de outra branch/head e não valida estas alterações.
+- **Limitações:** não foi disponibilizado nesta sessão o JAR real `fabric-api-0.141.6+1.21.11.jar`, a cópia staged correspondente, nem um novo `gafiloader-preflight.log`/`latest.log`. Não houve arranque real de Minecraft 26.2 nem teste do instalador em Windows.
+- **Decisão:** manter esta alteração pequena e fail-closed; não alterar ainda os selectors `renderFrame`/`exitWorldAndClose` sem confirmar o método/descritor e o ponto de injeção no cliente 26.2 real. A branch `compat` permanece separada da PR #29 até comparação técnica das duas implementações.
+- **Próximos passos por prioridade:**
+  1. Obter/inspecionar o cliente 26.2 real e confirmar owners, descritores e pontos de injeção de `GuiManager`, `Minecraft.gui`, `setScreen`, `tick`, `doWorldLoad`, `renderFrame`, `exitWorldAndClose` e do encerramento do jogo; em particular, provar a substituição de `runTick` e `destroy`.
+  2. Reforçar `verifyLegacyMixin` para validar o target único, os handlers/descritores e os `@At` originais, em vez de verificar apenas a presença de nomes de selectors.
+  3. Acrescentar um teste de integração com o módulo real `fabric-screen-api-v1` dentro do JAR Fabric API 0.141.6+1.21.11 e verificar preservação byte a byte dos originais.
+  4. Executar CI Windows/Linux nesta branch e, depois, pedir um arranque real com os logs `logs/gafiloader-preflight.log` e `logs/latest.log`; não confundir build/testes com compatibilidade runtime.
+  5. Comparar a branch `compat` com a implementação da PR #29 e decidir qual deve ser a linha de integração, sem fechar nem substituir a PR existente sem validação.
+- **Informação necessária para validação runtime:** caminho do JAR original `fabric-api-0.141.6+1.21.11.jar`, caminho da cópia staged em `.gafiloader/compat-mods` e os dois logs do arranque mais recente.
 
 ## Atualização de diagnóstico — 2026-11-02 (Fabric Screen API)
 
