@@ -106,6 +106,58 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void movesAnExistingGuiMixinBeforeMinecraftMixinAndPreservesOtherEntries() throws Exception {
+        byte[] original = """
+                {
+                  "required": true,
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["GameRendererMixin", "MinecraftMixin", "ScreenMixin", "GuiMixin"],
+                  "mixins": ["KeyboardHandlerMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        byte[] updated = LegacyFabricScreenApiAdapter.addGuiMixinToConfig(original);
+        JsonArray client = JsonParser.parseString(new String(updated, StandardCharsets.UTF_8))
+                .getAsJsonObject().getAsJsonArray("client");
+
+        assertEquals("GameRendererMixin", client.get(0).getAsString());
+        assertEquals("GuiMixin", client.get(1).getAsString());
+        assertEquals("MinecraftMixin", client.get(2).getAsString());
+        assertEquals("ScreenMixin", client.get(3).getAsString());
+        assertEquals(4, client.size());
+        assertSame(updated, LegacyFabricScreenApiAdapter.addGuiMixinToConfig(updated));
+    }
+
+    @Test
+    void rejectsDuplicateMixinEntriesAndUnexpectedPackage() {
+        byte[] duplicateGui = """
+                {
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["GuiMixin", "MinecraftMixin", "GuiMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] duplicateMinecraft = """
+                {
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["MinecraftMixin", "MinecraftMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] unexpectedPackage = """
+                {
+                  "package": "net.fabricmc.fabric.mixin.other",
+                  "client": ["MinecraftMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(duplicateGui));
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(duplicateMinecraft));
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(unexpectedPackage));
+    }
+
+    @Test
     void rejectsAChangedMixinTargetOrMissingLegacyInjectionInsteadOfPartiallyAdapting() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
                 legacyMixin("net/minecraft/client/gui/GuiManager",
