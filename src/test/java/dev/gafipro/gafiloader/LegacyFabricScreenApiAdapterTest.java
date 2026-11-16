@@ -60,8 +60,8 @@ class LegacyFabricScreenApiAdapterTest {
                 "net/minecraft/client/Minecraft", "getRunningThread"));
         assertTrue(hasMethodCall(result.minecraftMixinBytes(),
                 "net/minecraft/client/gui/GuiManager", "screen"));
-        assertTrue(hasMethodCall(result.minecraftMixinBytes(),
-                "net/minecraft/client/Minecraft", "renderFrame"));
+        assertTrue(hasInjectionTarget(result.minecraftMixinBytes(),
+                "Lnet/minecraft/client/Minecraft;renderFrame(Z)V"));
 
         AtomicReference<Set<String>> interfaceMethods = new AtomicReference<>(new LinkedHashSet<>());
         extensions.accept(new ClassVisitor(Opcodes.ASM9) {
@@ -233,6 +233,35 @@ class LegacyFabricScreenApiAdapterTest {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         return selectors;
+    }
+
+    private static boolean hasInjectionTarget(byte[] bytes, String expectedTarget) {
+        boolean[] found = {false};
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                if (!"at".equals(property) || !AT_ANNOTATION.equals(nestedDescriptor)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String name, Object value) {
+                                        if ("target".equals(name) && expectedTarget.equals(value)) found[0] = true;
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return found[0];
     }
 
     private static boolean hasMethodCall(byte[] bytes, String expectedOwner, String expectedName) {
