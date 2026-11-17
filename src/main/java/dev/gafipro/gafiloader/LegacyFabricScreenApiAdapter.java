@@ -17,7 +17,11 @@ import org.objectweb.asm.Type;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -87,6 +91,38 @@ final class LegacyFabricScreenApiAdapter {
     private static final String LOGGER_DESCRIPTOR = "L" + LOGGER + ";";
     private static final String EVENT_DESCRIPTOR = "L" + EVENT + ";";
     private static final String JSON_CHARSET = StandardCharsets.UTF_8.name();
+
+    private static final Map<String, ExpectedHandler> EXPECTED_LEGACY_HANDLERS = Map.of(
+            "checkThreadOnDev", new ExpectedHandler(
+                    "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "setScreen", "HEAD", null, "NONE"),
+            "onScreenRemove", new ExpectedHandler(
+                    "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "setScreen", "INVOKE", SCREEN_DESCRIPTOR + "removed()V", "AFTER"),
+            "onScreenRemoveBecauseStopping", new ExpectedHandler(
+                    "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "destroy", "INVOKE", SCREEN_DESCRIPTOR + "removed()V", "AFTER"),
+            "beforeScreenTick", new ExpectedHandler(
+                    "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "tick", "INVOKE", SCREEN_DESCRIPTOR + "tick()V", "NONE"),
+            "afterScreenTick", new ExpectedHandler(
+                    "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "tick", "INVOKE", SCREEN_DESCRIPTOR + "tick()V", "AFTER"),
+            "beforeLoadingScreenTick", new ExpectedHandler(
+                    "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "doWorldLoad", "INVOKE", "L" + LEVEL_LOADING_SCREEN + ";tick()V", "NONE"),
+            "afterLoadingScreenTick", new ExpectedHandler(
+                    "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                    "doWorldLoad", "INVOKE", "L" + MINECRAFT + ";runTick(Z)V", "NONE")
+    );
+
+    private static final Map<String, FieldShape> EXPECTED_LEGACY_FIELDS = Map.of(
+            "LOGGER", new FieldShape(LOGGER_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION)),
+            "DEBUG_SCREEN", new FieldShape("Z", Set.of(UNIQUE_ANNOTATION)),
+            "screen", new FieldShape(SCREEN_DESCRIPTOR, Set.of(SHADOW_ANNOTATION)),
+            "gameThread", new FieldShape("Ljava/lang/Thread;", Set.of(SHADOW_ANNOTATION)),
+            "tickingScreen", new FieldShape(SCREEN_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION))
+    );
 
     private static final Gson JSON = new GsonBuilder()
             .setPrettyPrinting()
@@ -182,31 +218,82 @@ final class LegacyFabricScreenApiAdapter {
         }
 
         Set<String> targets = new LinkedHashSet<>();
-        Set<String> injectionSelectors = new LinkedHashSet<>();
+        Set<String> unexpectedMixinProperties = new LinkedHashSet<>();
+        int[] mixinAnnotationCount = {0};
+        int[] mixinTargetCount = {0};
+        Map<String, FieldShape> fields = new LinkedHashMap<>();
+        Set<String> duplicateFields = new LinkedHashSet<>();
+        Map<String, String> methodDescriptors = new LinkedHashMap<>();
+        Set<String> duplicateMethods = new LinkedHashSet<>();
+        Map<String, InjectionMetadata> injections = new LinkedHashMap<>();
+        Set<String> duplicateInjectMethods = new LinkedHashSet<>();
+        Set<String> unexpectedInjectorAnnotations = new LinkedHashSet<>();
+        Set<String> unexpectedMixinMethodAnnotations = new LinkedHashSet<>();
+
         reader.accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
             @Override
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                 if (!MIXIN_ANNOTATION.equals(descriptor)) return null;
+                mixinAnnotationCount[0]++;
                 return new AnnotationVisitor(Opcodes.ASM9) {
-                    @Override
-                    public void visit(String name, Object value) {
-                        if ("value".equals(name) && value instanceof Type type
-                                && type.getSort() == Type.OBJECT) {
+                    private void recordTarget(Object value) {
+                        if (value instanceof Type type && type.getSort() == Type.OBJECT) {
                             targets.add(type.getInternalName());
+                            mixinTargetCount[0]++;
+                        } else {
+                            unexpectedMixinProperties.add("value");
                         }
                     }
 
                     @Override
-                    public AnnotationVisitor visitArray(String name) {
-                        if (!"value".equals(name)) return null;
+                    public void visit(String property, Object value) {
+                        if ("value".equals(property)) recordTarget(value);
+                        else unexpectedMixinProperties.add(property);
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitArray(String property) {
+                        if (!"value".equals(property)) {
+                            unexpectedMixinProperties.add(property);
+                            return null;
+                        }
                         return new AnnotationVisitor(Opcodes.ASM9) {
                             @Override
                             public void visit(String ignored, Object value) {
-                                if (value instanceof Type type && type.getSort() == Type.OBJECT) {
-                                    targets.add(type.getInternalName());
-                                }
+                                recordTarget(value);
                             }
                         };
+                    }
+
+                    @Override
+                    public void visitEnum(String property, String enumDescriptor, String value) {
+                        unexpectedMixinProperties.add(property);
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                        unexpectedMixinProperties.add(property);
+                        return null;
+                    }
+                };
+            }
+
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor,
+                                           String signature, Object value) {
+                Set<String> annotations = new LinkedHashSet<>();
+                return new FieldVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        annotations.add(annotationDescriptor);
+                        return null;
+                    }
+
+                    @Override
+                    public void visitEnd() {
+                        FieldShape previous = fields.putIfAbsent(
+                                name, new FieldShape(descriptor, Set.copyOf(annotations)));
+                        if (previous != null) duplicateFields.add(name);
                     }
                 };
             }
@@ -214,29 +301,96 @@ final class LegacyFabricScreenApiAdapter {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
+                if (methodDescriptors.putIfAbsent(name, descriptor) != null) {
+                    duplicateMethods.add(name);
+                }
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
-                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) return null;
+                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) {
+                            if (annotationDescriptor.startsWith(
+                                    "Lorg/spongepowered/asm/mixin/injection/")) {
+                                unexpectedInjectorAnnotations.add(name + ":" + annotationDescriptor);
+                            } else if (annotationDescriptor.startsWith("Lorg/spongepowered/asm/mixin/")) {
+                                unexpectedMixinMethodAnnotations.add(name + ":" + annotationDescriptor);
+                            }
+                            return null;
+                        }
+
+                        InjectionMetadata metadata = new InjectionMetadata();
+                        if (injections.putIfAbsent(name, metadata) != null) {
+                            duplicateInjectMethods.add(name);
+                        }
                         return new AnnotationVisitor(Opcodes.ASM9) {
                             @Override
                             public void visit(String property, Object value) {
                                 if ("method".equals(property) && value instanceof String selector) {
-                                    addSelectors(injectionSelectors, selector);
+                                    metadata.selectors.add(selector);
+                                } else {
+                                    metadata.unexpectedInjectProperties.add(property);
                                 }
                             }
 
                             @Override
+                            public void visitEnum(String property, String enumDescriptor, String value) {
+                                metadata.unexpectedInjectProperties.add(property);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                if ("at".equals(property) && AT_ANNOTATION.equals(nestedDescriptor)) {
+                                    return atVisitor(metadata);
+                                }
+                                metadata.unexpectedInjectProperties.add(property);
+                                return null;
+                            }
+
+                            @Override
                             public AnnotationVisitor visitArray(String property) {
-                                if (!"method".equals(property)) return null;
-                                return new AnnotationVisitor(Opcodes.ASM9) {
-                                    @Override
-                                    public void visit(String ignored, Object value) {
-                                        if (value instanceof String selector) {
-                                            addSelectors(injectionSelectors, selector);
+                                if ("method".equals(property)) {
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public void visit(String ignored, Object value) {
+                                            if (value instanceof String selector) {
+                                                metadata.selectors.add(selector);
+                                            } else {
+                                                metadata.malformed = true;
+                                            }
                                         }
-                                    }
-                                };
+                                    };
+                                }
+                                if ("at".equals(property)) {
+                                    return new AnnotationVisitor(Opcodes.ASM9) {
+                                        @Override
+                                        public AnnotationVisitor visitAnnotation(String ignored,
+                                                String nestedDescriptor) {
+                                            if (AT_ANNOTATION.equals(nestedDescriptor)) {
+                                                return atVisitor(metadata);
+                                            }
+                                            metadata.unexpectedInjectProperties.add("at");
+                                            return null;
+                                        }
+
+                                        @Override
+                                        public void visit(String ignored, Object value) {
+                                            metadata.unexpectedInjectProperties.add("at");
+                                        }
+
+                                        @Override
+                                        public void visitEnum(String ignored, String enumDescriptor,
+                                                              String value) {
+                                            metadata.unexpectedInjectProperties.add("at");
+                                        }
+
+                                        @Override
+                                        public AnnotationVisitor visitArray(String ignored) {
+                                            metadata.unexpectedInjectProperties.add("at");
+                                            return null;
+                                        }
+                                    };
+                                }
+                                metadata.unexpectedInjectProperties.add(property);
+                                return null;
                             }
                         };
                     }
@@ -244,27 +398,95 @@ final class LegacyFabricScreenApiAdapter {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-        if (!targets.contains(MINECRAFT)) {
-            throw new IOException("The legacy screen Mixin no longer targets " + MINECRAFT
-                    + "; refusing to apply the 1.21.11-to-26.2 screen adapter.");
+        if (mixinAnnotationCount[0] != 1 || mixinTargetCount[0] != 1
+                || !targets.equals(Set.of(MINECRAFT)) || !unexpectedMixinProperties.isEmpty()) {
+            throw new IOException("The legacy screen Mixin must target only " + MINECRAFT
+                    + " exactly once with the audited @Mixin metadata; found targets " + targets + ".");
         }
-        for (String selector : Set.of("setScreen", "destroy", "tick", "doWorldLoad")) {
-            if (!injectionSelectors.contains(selector)) {
-                throw new IOException("The legacy screen Mixin is missing its expected @Inject target '"
-                        + selector + "'; refusing a partial screen migration.");
+        if (!duplicateFields.isEmpty() || !fields.equals(EXPECTED_LEGACY_FIELDS)) {
+            throw new IOException("The legacy screen Mixin fields no longer match the audited 1.21.11 "
+                    + "shadow/unique field contract; found " + fields.keySet() + ".");
+        }
+        if (!duplicateMethods.isEmpty() || !duplicateInjectMethods.isEmpty()
+                || !unexpectedInjectorAnnotations.isEmpty() || !unexpectedMixinMethodAnnotations.isEmpty()) {
+            throw new IOException("The legacy screen Mixin contains duplicate or unreviewed handler methods.");
+        }
+
+        Set<String> allowedMethods = new LinkedHashSet<>(EXPECTED_LEGACY_HANDLERS.keySet());
+        allowedMethods.add("<init>");
+        allowedMethods.add("<clinit>");
+        Set<String> unexpectedMethods = new LinkedHashSet<>(methodDescriptors.keySet());
+        unexpectedMethods.removeAll(allowedMethods);
+        if (!unexpectedMethods.isEmpty() || !injections.keySet().equals(EXPECTED_LEGACY_HANDLERS.keySet())) {
+            throw new IOException("The legacy screen Mixin handler set differs from the audited 1.21.11 "
+                    + "implementation; found handlers " + injections.keySet() + ".");
+        }
+
+        for (Map.Entry<String, ExpectedHandler> entry : EXPECTED_LEGACY_HANDLERS.entrySet()) {
+            String handlerName = entry.getKey();
+            ExpectedHandler expected = entry.getValue();
+            InjectionMetadata actual = injections.get(handlerName);
+            if (!expected.descriptor().equals(methodDescriptors.get(handlerName))
+                    || actual == null
+                    || actual.malformed
+                    || !actual.unexpectedInjectProperties.isEmpty()
+                    || !actual.unexpectedAtProperties.isEmpty()
+                    || !actual.selectors.equals(List.of(expected.selector()))
+                    || !actual.points.equals(List.of(new AtSelector(
+                            expected.atValue(), expected.atTarget(), expected.atShift())))) {
+                throw new IOException("Legacy screen handler '" + handlerName
+                        + "' no longer matches its audited 1.21.11 descriptor/selector/@At contract; "
+                        + "refusing to replace unrecognized behavior.");
             }
         }
     }
 
-    private static void addSelectors(Set<String> selectors, String value) {
-        for (String item : value.split(",")) {
-            String selector = item.trim();
-            int descriptorStart = selector.indexOf('(');
-            if (descriptorStart >= 0) selector = selector.substring(0, descriptorStart);
-            int ownerEnd = selector.lastIndexOf(';');
-            if (ownerEnd >= 0) selector = selector.substring(ownerEnd + 1);
-            if (!selector.isBlank()) selectors.add(selector);
-        }
+    private static AnnotationVisitor atVisitor(InjectionMetadata metadata) {
+        String[] value = {null};
+        String[] target = {null};
+        String[] shift = {"NONE"};
+        Set<String> seen = new LinkedHashSet<>();
+        return new AnnotationVisitor(Opcodes.ASM9) {
+            @Override
+            public void visit(String property, Object propertyValue) {
+                if ("value".equals(property) && propertyValue instanceof String selector
+                        && seen.add(property)) {
+                    value[0] = selector;
+                } else if ("target".equals(property) && propertyValue instanceof String selector
+                        && seen.add(property)) {
+                    target[0] = selector;
+                } else {
+                    metadata.unexpectedAtProperties.add(property);
+                }
+            }
+
+            @Override
+            public void visitEnum(String property, String enumDescriptor, String enumValue) {
+                if ("shift".equals(property) && AT_SHIFT_ANNOTATION.equals(enumDescriptor)
+                        && seen.add(property)) {
+                    shift[0] = enumValue;
+                } else {
+                    metadata.unexpectedAtProperties.add(property);
+                }
+            }
+
+            @Override
+            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                metadata.unexpectedAtProperties.add(property);
+                return null;
+            }
+
+            @Override
+            public AnnotationVisitor visitArray(String property) {
+                metadata.unexpectedAtProperties.add(property);
+                return null;
+            }
+
+            @Override
+            public void visitEnd() {
+                metadata.points.add(new AtSelector(value[0], target[0], shift[0]));
+            }
+        };
     }
 
     private static byte[] buildGuiMixin() {
@@ -601,6 +823,21 @@ final class LegacyFabricScreenApiAdapter {
         if (shift != null) at.visitEnum("shift", AT_SHIFT_ANNOTATION, shift);
         at.visitEnd();
         inject.visitEnd();
+    }
+
+    private record ExpectedHandler(String descriptor, String selector, String atValue,
+                                   String atTarget, String atShift) {}
+
+    private record FieldShape(String descriptor, Set<String> annotations) {}
+
+    private record AtSelector(String value, String target, String shift) {}
+
+    private static final class InjectionMetadata {
+        private final List<String> selectors = new ArrayList<>();
+        private final List<AtSelector> points = new ArrayList<>();
+        private final Set<String> unexpectedInjectProperties = new LinkedHashSet<>();
+        private final Set<String> unexpectedAtProperties = new LinkedHashSet<>();
+        private boolean malformed;
     }
 
     record Result(byte[] minecraftMixinBytes, byte[] guiMixinBytes, byte[] guiExtensionsBytes) {}
