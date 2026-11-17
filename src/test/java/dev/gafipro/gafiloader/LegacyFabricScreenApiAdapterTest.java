@@ -31,6 +31,18 @@ class LegacyFabricScreenApiAdapterTest {
     private static final String MIXIN_ANNOTATION = "Lorg/spongepowered/asm/mixin/Mixin;";
     private static final String INJECT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Inject;";
     private static final String AT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String AT_SHIFT_ANNOTATION =
+            "Lorg/spongepowered/asm/mixin/injection/At$Shift;";
+    private static final String MINECRAFT = "net/minecraft/client/Minecraft";
+    private static final String GUI_MANAGER = "net/minecraft/client/gui/GuiManager";
+    private static final String SCREEN = "net/minecraft/client/gui/screens/Screen";
+    private static final String SCREEN_DESCRIPTOR = "L" + SCREEN + ";";
+    private static final String CALLBACK_INFO_DESCRIPTOR =
+            "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
+    private static final String SCREEN_REMOVED_TARGET = SCREEN_DESCRIPTOR + "removed()V";
+    private static final String SCREEN_TICK_TARGET = SCREEN_DESCRIPTOR + "tick()V";
+    private static final String LOADING_SCREEN_TICK_TARGET =
+            "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
 
     @Test
     void generatesTheTwoTarget26_2ScreenLifecycleAndSharedInterface() throws Exception {
@@ -62,6 +74,26 @@ class LegacyFabricScreenApiAdapterTest {
                 "net/minecraft/client/gui/GuiManager", "screen"));
         assertTrue(hasInjectionTarget(result.minecraftMixinBytes(),
                 "Lnet/minecraft/client/Minecraft;renderFrame(Z)V"));
+
+        // Exact 26.2 Fabric API hooks: normal screen events move to GuiManager,
+        // while loading-screen and shutdown lifecycle hooks remain on Minecraft.
+        assertInjection(result.guiMixinBytes(), "checkThreadOnDev",
+                "setScreen", "HEAD", null, "NONE");
+        assertInjection(result.guiMixinBytes(), "onScreenRemove",
+                "setScreen", "INVOKE", SCREEN_REMOVED_TARGET, "AFTER");
+        assertInjection(result.guiMixinBytes(), "beforeScreenTick",
+                "tick", "INVOKE", SCREEN_TICK_TARGET, "NONE");
+        assertInjection(result.guiMixinBytes(), "afterScreenTick",
+                "tick", "INVOKE", SCREEN_TICK_TARGET, "AFTER");
+        assertInjection(result.minecraftMixinBytes(), "onInit",
+                "<init>", "RETURN", null, "NONE");
+        assertInjection(result.minecraftMixinBytes(), "onScreenRemoveBecauseStopping",
+                "exitWorldAndClose", "INVOKE", SCREEN_REMOVED_TARGET, "AFTER");
+        assertInjection(result.minecraftMixinBytes(), "beforeLoadingScreenTick",
+                "doWorldLoad", "INVOKE", LOADING_SCREEN_TICK_TARGET, "NONE");
+        assertInjection(result.minecraftMixinBytes(), "afterLoadingScreenTick",
+                "doWorldLoad", "INVOKE",
+                "Lnet/minecraft/client/Minecraft;renderFrame(Z)V", "NONE");
 
         AtomicReference<Set<String>> interfaceMethods = new AtomicReference<>(new LinkedHashSet<>());
         extensions.accept(new ClassVisitor(Opcodes.ASM9) {
@@ -165,6 +197,20 @@ class LegacyFabricScreenApiAdapterTest {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
                 legacyMixin("net/minecraft/client/Minecraft",
                         "setScreen", "tick", "doWorldLoad")));
+    }
+
+    @Test
+    void rejectsMultipleTargetsChangedLegacyAtOptionsAndChangedHandlerDescriptors() {
+        String[] selectors = {"setScreen", "destroy", "tick", "doWorldLoad"};
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                legacyMixin(new String[] {MINECRAFT, GUI_MANAGER}, selectors, null, false, null)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                legacyMixin(new String[] {MINECRAFT}, selectors,
+                        "afterLoadingScreenTick", false, null)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                legacyMixin(new String[] {MINECRAFT}, selectors, null, true, null)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                legacyMixin(new String[] {MINECRAFT}, selectors, null, false, "beforeScreenTick")));
     }
 
     @Test
@@ -282,36 +328,165 @@ class LegacyFabricScreenApiAdapterTest {
         return found[0];
     }
 
+    private static void assertInjection(byte[] bytes, String handlerName, String expectedSelector,
+                                         String expectedAtValue, String expectedAtTarget,
+                                         String expectedShift) {
+        AtomicReference<String> selector = new AtomicReference<>();
+        AtomicReference<String> atValue = new AtomicReference<>();
+        AtomicReference<String> atTarget = new AtomicReference<>();
+        AtomicReference<String> atShift = new AtomicReference<>("NONE");
+
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!handlerName.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if (!INJECT_ANNOTATION.equals(annotationDescriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitArray(String property) {
+                                if (!"method".equals(property)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        if (value instanceof String text) selector.set(text);
+                                    }
+                                };
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String property, String nestedDescriptor) {
+                                if (!"at".equals(property) || !AT_ANNOTATION.equals(nestedDescriptor)) return null;
+                                return new AnnotationVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visit(String propertyName, Object value) {
+                                        if ("value".equals(propertyName) && value instanceof String text) {
+                                            atValue.set(text);
+                                        } else if ("target".equals(propertyName) && value instanceof String text) {
+                                            atTarget.set(text);
+                                        }
+                                    }
+
+                                    @Override
+                                    public void visitEnum(String propertyName, String enumDescriptor,
+                                                          String enumValue) {
+                                        if ("shift".equals(propertyName)
+                                                && AT_SHIFT_ANNOTATION.equals(enumDescriptor)) {
+                                            atShift.set(enumValue);
+                                        }
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        assertEquals(expectedSelector, selector.get(), handlerName + " @Inject.method");
+        assertEquals(expectedAtValue, atValue.get(), handlerName + " @At.value");
+        assertEquals(expectedAtTarget, atTarget.get(), handlerName + " @At.target");
+        assertEquals(expectedShift, atShift.get(), handlerName + " @At.shift");
+    }
+
     private static byte[] legacyMixin(String target, String... selectors) {
-        ClassWriter writer = new ClassWriter(0);
-        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+        return legacyMixin(new String[] {target}, selectors, null, false, null);
+    }
+
+    private static byte[] legacyMixin(String[] targets, String[] selectors, String changedAtHandler,
+                                      boolean addUnexpectedInjectOption, String wrongDescriptorHandler) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
                 "net/fabricmc/fabric/mixin/screen/MinecraftMixin", null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);
-        AnnotationVisitor targets = mixin.visitArray("value");
-        targets.visit(null, Type.getObjectType(target));
-        targets.visitEnd();
+        AnnotationVisitor targetValues = mixin.visitArray("value");
+        for (String target : targets) targetValues.visit(null, Type.getObjectType(target));
+        targetValues.visitEnd();
         mixin.visitEnd();
 
-        int index = 0;
-        for (String selector : selectors) {
+        addLegacyField(writer, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "LOGGER", "Lorg/slf4j/Logger;", "Lorg/spongepowered/asm/mixin/Unique;");
+        addLegacyField(writer, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "DEBUG_SCREEN", "Z", "Lorg/spongepowered/asm/mixin/Unique;");
+        addLegacyField(writer, Opcodes.ACC_PUBLIC, "screen", SCREEN_DESCRIPTOR,
+                "Lorg/spongepowered/asm/mixin/Shadow;");
+        addLegacyField(writer, Opcodes.ACC_PRIVATE, "gameThread", "Ljava/lang/Thread;",
+                "Lorg/spongepowered/asm/mixin/Shadow;");
+        addLegacyField(writer, Opcodes.ACC_PRIVATE, "tickingScreen", SCREEN_DESCRIPTOR,
+                "Lorg/spongepowered/asm/mixin/Unique;");
+
+        List<LegacyHandlerFixture> handlers = List.of(
+                new LegacyHandlerFixture("checkThreadOnDev",
+                        "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "setScreen", "HEAD", null, "NONE"),
+                new LegacyHandlerFixture("onScreenRemove",
+                        "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "setScreen", "INVOKE", SCREEN_REMOVED_TARGET, "AFTER"),
+                new LegacyHandlerFixture("onScreenRemoveBecauseStopping",
+                        "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "destroy", "INVOKE", SCREEN_REMOVED_TARGET, "AFTER"),
+                new LegacyHandlerFixture("beforeScreenTick",
+                        "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "tick", "INVOKE", SCREEN_TICK_TARGET, "NONE"),
+                new LegacyHandlerFixture("afterScreenTick",
+                        "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "tick", "INVOKE", SCREEN_TICK_TARGET, "AFTER"),
+                new LegacyHandlerFixture("beforeLoadingScreenTick",
+                        "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "doWorldLoad", "INVOKE", LOADING_SCREEN_TICK_TARGET, "NONE"),
+                new LegacyHandlerFixture("afterLoadingScreenTick",
+                        "(" + CALLBACK_INFO_DESCRIPTOR + ")V",
+                        "doWorldLoad", "INVOKE",
+                        "Lnet/minecraft/client/Minecraft;runTick(Z)V", "NONE")
+        );
+
+        Set<String> includedSelectors = Set.of(selectors);
+        for (LegacyHandlerFixture fixture : handlers) {
+            if (!includedSelectors.contains(fixture.selector())) continue;
+            String descriptor = fixture.name().equals(wrongDescriptorHandler) ? "()V" : fixture.descriptor();
             MethodVisitor handler = writer.visitMethod(Opcodes.ACC_PRIVATE,
-                    "legacyHandler" + index++, "()V", null, null);
+                    fixture.name(), descriptor, null, null);
             AnnotationVisitor inject = handler.visitAnnotation(INJECT_ANNOTATION, true);
             AnnotationVisitor methods = inject.visitArray("method");
-            methods.visit(null, selector);
+            methods.visit(null, fixture.selector());
             methods.visitEnd();
-            AnnotationVisitor at = inject.visitAnnotation("at", AT_ANNOTATION);
-            at.visit("value", "HEAD");
+            if (addUnexpectedInjectOption && "checkThreadOnDev".equals(fixture.name())) {
+                inject.visit("require", 0);
+            }
+            AnnotationVisitor points = inject.visitArray("at");
+            AnnotationVisitor at = points.visitAnnotation(null, AT_ANNOTATION);
+            at.visit("value", fixture.atValue());
+            String atTarget = fixture.name().equals(changedAtHandler)
+                    ? "Lnet/minecraft/client/Minecraft;renderFrame(Z)V" : fixture.atTarget();
+            if (atTarget != null) at.visit("target", atTarget);
+            if (!"NONE".equals(fixture.atShift())) {
+                at.visitEnum("shift", AT_SHIFT_ANNOTATION, fixture.atShift());
+            }
             at.visitEnd();
+            points.visitEnd();
             inject.visitEnd();
             handler.visitCode();
             handler.visitInsn(Opcodes.RETURN);
-            handler.visitMaxs(0, 1);
+            handler.visitMaxs(0, 0);
             handler.visitEnd();
         }
 
         writer.visitEnd();
         return writer.toByteArray();
     }
+
+    private static void addLegacyField(ClassWriter writer, int access, String name,
+                                       String descriptor, String annotationDescriptor) {
+        org.objectweb.asm.FieldVisitor field = writer.visitField(access, name, descriptor, null, null);
+        field.visitAnnotation(annotationDescriptor, true).visitEnd();
+        field.visitEnd();
+    }
+
+    private record LegacyHandlerFixture(String name, String descriptor, String selector,
+                                        String atValue, String atTarget, String atShift) {}
+
 }
