@@ -1,9 +1,33 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-16
+> Última atualização: 2026-11-17
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
+
+
+## Sessão de desenvolvimento — 2026-11-17 (Screen API: prova upstream e validação estrita)
+
+- **Branch de trabalho:** `compat/fabric-screen-api-26.2`, PR #30 em draft; base `main` continua em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`. Head inicial desta sessão: `c1b686b59c19dca47c3b87dcab62c80af0b23a34`. A PR #29 continua aberta e não foi alterada.
+- **Objetivo:** verificar a migração Screen API contra a implementação oficial Fabric 26.2 e impedir que o adaptador descarte silenciosamente uma variante 1.21.11 com handlers, descritores ou pontos de injeção diferentes.
+- **Evidência nova:** consultados diretamente os fontes oficiais de `FabricMC/fabric-api`:
+  - branch `1.21.11`: `MinecraftMixin.java`, blob `8192ac863da7cf4229fa093ecffe853ef42b8828`, que contém os sete handlers antigos e os campos `screen`, `gameThread`, `tickingScreen`, `LOGGER` e `DEBUG_SCREEN`;
+  - branch `26.2`: `MinecraftMixin.java`, blob `9bc4a700b5ad8cde600ab6322e08d08ca2dcdae2`; `GuiMixin.java`, blob `29047b35820b3fc87e8f4435a3755292638a8ef6`; e `GuiExtensions.java`.
+  A implementação oficial 26.2 confirma que `Gui` (nome Mojang no runtime: `GuiManager`) possui o ecrã atual e os métodos `screen()`, `setScreen(Screen)` e `tick()`; `Minecraft.gui` é o gestor GUI; a remoção em encerramento é injetada em `Minecraft.exitWorldAndClose`, depois de `Screen.removed()`; e o tick especial do loading screen é tratado em `Minecraft.doWorldLoad`, antes de `LevelLoadingScreen.tick()` e depois na chamada `Minecraft.renderFrame(Z)V`.
+  A tabela de mappings 26.2 também lista o campo `GuiManager.screen`, o getter `screen()`, `setScreen(Screen)` e `tick()` ([mappings 26.2](https://mappings.relativitymc.org/26.2/net/minecraft/client/gui/GuiManager.html)).
+- **Conclusão delimitada:** os selectors/owners `exitWorldAndClose`, `doWorldLoad`, `renderFrame(Z)V`, `GuiManager.screen()` e `GuiManager.tick()` usados pela branch `compat` coincidem com os fontes oficiais Fabric 26.2. Isto valida a escolha dos pontos de integração contra o código upstream, mas **não** prova que o Mixin é aplicado com sucesso ao JAR de jogo instalado nem que os eventos funcionam em runtime.
+- **Lacuna de segurança identificada:** o antigo `verifyLegacyMixin` só verificava que o target incluía `Minecraft` e que existiam quatro nomes de selector. Como o adaptador substitui a classe original por classes geradas, essa verificação permitia descartar silenciosamente handlers com descritores/`@At` diferentes ou opções Mixin não auditadas.
+- **Alterações implementadas nesta sessão:**
+  - `LegacyFabricScreenApiAdapter.java`: validar target único `Minecraft`; contrato exato dos cinco campos e respetivos `@Shadow`/`@Unique`; exatamente os sete handlers conhecidos; descritores JVM, selectors e `@At.value/target/shift`; rejeitar métodos/annotations de injeção extra e propriedades `@Inject`/`@At` não auditadas.
+  - `LegacyFabricScreenApiAdapterTest.java`: fixture com a estrutura 1.21.11 conhecida; regressões para múltiplos targets, selector `@At` alterado, opção `require` extra e descritor de handler divergente; asserções de metadata das injeções geradas contra os hooks oficiais 26.2.
+- **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java`, `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java`, `PROJECT_STATUS.md`. Os JARs originais, perfis vanilla e instalador não foram alterados.
+- **Validação:** ainda não executada nesta atualização. Não existe JDK 25 nem clone local funcional neste ambiente remoto; a CI GitHub Actions da branch será a validação de compilação/testes. Não declarar sucesso até obter o resultado da run associada ao novo commit.
+- **Limitações:** continua em falta o JAR real `fabric-api-0.141.6+1.21.11.jar`, a cópia staged e logs recentes `logs/gafiloader-preflight.log` / `logs/latest.log`. Não houve arranque real do Minecraft 26.2 nem teste do instalador num Windows de utilizador.
+- **Próximos passos:**
+  1. Executar/consultar CI Ubuntu e Windows para este commit; corrigir qualquer falha antes de avançar.
+  2. Obter o JAR original Fabric API 0.141.6+1.21.11 e os dois logs do último arranque; validar a transformação no módulo aninhado real.
+  3. Testar o instalador apenas no perfil dedicado `gafiloader-26.2`, verificar hashes dos originais e confirmar chegada ao menu.
+  4. Comparar a implementação desta branch com a PR #29; manter ambas abertas até existir validação de runtime e decisão fundamentada.
 
 ## Sessão de desenvolvimento — 2026-11-16 (validação da configuração Screen API)
 
