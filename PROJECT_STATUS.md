@@ -14,6 +14,7 @@
 - O `README.md` da branch foi atualizado para descrever o adapter Screen API, a validação fail-closed, a divisão `Minecraft`/`GuiManager` e a ausência de validação runtime real.
 - Artefactos da run 44072240220: instalador ID `14323666773` (50 512 572 bytes; digest `sha256:a9715852bea4d020c6dac20bbe090e4060a6fe6167bcf3ee423fc9a1b9d143b5`) e app image ID `14323076901` (50 283 207 bytes; digest `sha256:185887c79c0e2ce2791f516b24df863c6dc9fe691f30cd8f13349b8f6c772a66`). Expiram em 2026-11-20. São artefactos de CI, não um release validado em PC de utilizador.
 - **Runtime continua por validar:** não há novo `logs/gafiloader-preflight.log`, `logs/latest.log`, JAR original Fabric API 0.141.6+1.21.11 ou cópia staged nesta sessão. Não há prova de chegada ao menu, de funcionamento dos eventos Screen ou de preservação de hashes após arranque real. A arquitetura continua a carregar cópias staged em `.gafiloader/compat-mods`, não sendo ainda runtime-only.
+- O índice oficial do [Fabric Maven](https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.141.6%2B1.21.11/) confirma que o artefacto `fabric-api-0.141.6+1.21.11.jar` está publicado (aprox. 2 MB; data do índice: 2026-07-28). A transferência binária falhou neste ambiente (`application/java-archive` não suportado pelo leitor web e falha do downloader); não foram inspecionados bytes do JAR real.
 
 ## Sessão de desenvolvimento — 2026-11-17 (corrigir fixture de integração após CI)
 
