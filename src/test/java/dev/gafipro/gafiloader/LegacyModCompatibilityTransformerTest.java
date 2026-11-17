@@ -533,34 +533,89 @@ class LegacyModCompatibilityTransformerTest {
 
     private static byte[] classWithLegacyScreenApiMixin() {
         String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
-        ClassWriter writer = new ClassWriter(0);
-        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+        String screen = "net/minecraft/client/gui/screens/Screen";
+        String screenDescriptor = "L" + screen + ";";
+        String callbackInfo = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
+        String screenRemovedTarget = screenDescriptor + "removed()V";
+        String screenTickTarget = screenDescriptor + "tick()V";
+        String loadingScreenTickTarget =
+                "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
+
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
                 mixinClass, null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);
         mixin.visit("value", Type.getObjectType("net/minecraft/client/Minecraft"));
         mixin.visitEnd();
 
-        int index = 0;
-        for (String selector : java.util.List.of("setScreen", "destroy", "tick", "doWorldLoad")) {
-            MethodVisitor handler = writer.visitMethod(Opcodes.ACC_PRIVATE,
-                    "legacyScreenHandler" + index++, "()V", null, null);
-            AnnotationVisitor inject = handler.visitAnnotation(INJECT_ANNOTATION, true);
-            AnnotationVisitor methods = inject.visitArray("method");
-            methods.visit(null, selector);
-            methods.visitEnd();
-            AnnotationVisitor at = inject.visitAnnotation("at", AT_ANNOTATION);
-            at.visit("value", "HEAD");
-            at.visitEnd();
-            inject.visitEnd();
-            handler.visitCode();
-            handler.visitInsn(Opcodes.RETURN);
-            handler.visitMaxs(0, 1);
-            handler.visitEnd();
-        }
+        addLegacyScreenField(writer, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "LOGGER", "Lorg/slf4j/Logger;", "Lorg/spongepowered/asm/mixin/Unique;");
+        addLegacyScreenField(writer, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "DEBUG_SCREEN", "Z", "Lorg/spongepowered/asm/mixin/Unique;");
+        addLegacyScreenField(writer, Opcodes.ACC_PUBLIC, "screen", screenDescriptor,
+                "Lorg/spongepowered/asm/mixin/Shadow;");
+        addLegacyScreenField(writer, Opcodes.ACC_PRIVATE, "gameThread", "Ljava/lang/Thread;",
+                "Lorg/spongepowered/asm/mixin/Shadow;");
+        addLegacyScreenField(writer, Opcodes.ACC_PRIVATE, "tickingScreen", screenDescriptor,
+                "Lorg/spongepowered/asm/mixin/Unique;");
+
+        addLegacyScreenHandler(writer, "checkThreadOnDev",
+                "(" + screenDescriptor + callbackInfo + ")V",
+                "setScreen", "HEAD", null, null);
+        addLegacyScreenHandler(writer, "onScreenRemove",
+                "(" + screenDescriptor + callbackInfo + ")V",
+                "setScreen", "INVOKE", screenRemovedTarget, "AFTER");
+        addLegacyScreenHandler(writer, "onScreenRemoveBecauseStopping",
+                "(" + callbackInfo + ")V",
+                "destroy", "INVOKE", screenRemovedTarget, "AFTER");
+        addLegacyScreenHandler(writer, "beforeScreenTick",
+                "(" + callbackInfo + ")V",
+                "tick", "INVOKE", screenTickTarget, null);
+        addLegacyScreenHandler(writer, "afterScreenTick",
+                "(" + callbackInfo + ")V",
+                "tick", "INVOKE", screenTickTarget, "AFTER");
+        addLegacyScreenHandler(writer, "beforeLoadingScreenTick",
+                "(" + callbackInfo + ")V",
+                "doWorldLoad", "INVOKE", loadingScreenTickTarget, null);
+        addLegacyScreenHandler(writer, "afterLoadingScreenTick",
+                "(" + callbackInfo + ")V",
+                "doWorldLoad", "INVOKE",
+                "Lnet/minecraft/client/Minecraft;runTick(Z)V", null);
 
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static void addLegacyScreenField(ClassWriter writer, int access, String name,
+                                             String descriptor, String annotationDescriptor) {
+        FieldVisitor field = writer.visitField(access, name, descriptor, null, null);
+        field.visitAnnotation(annotationDescriptor, true).visitEnd();
+        field.visitEnd();
+    }
+
+    private static void addLegacyScreenHandler(ClassWriter writer, String name, String descriptor,
+                                               String selector, String atValue, String atTarget,
+                                               String shift) {
+        MethodVisitor handler = writer.visitMethod(Opcodes.ACC_PRIVATE, name, descriptor, null, null);
+        AnnotationVisitor inject = handler.visitAnnotation(INJECT_ANNOTATION, true);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, selector);
+        methods.visitEnd();
+        AnnotationVisitor points = inject.visitArray("at");
+        AnnotationVisitor at = points.visitAnnotation(null, AT_ANNOTATION);
+        at.visit("value", atValue);
+        if (atTarget != null) at.visit("target", atTarget);
+        if (shift != null) {
+            at.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", shift);
+        }
+        at.visitEnd();
+        points.visitEnd();
+        inject.visitEnd();
+        handler.visitCode();
+        handler.visitInsn(Opcodes.RETURN);
+        handler.visitMaxs(0, 0);
+        handler.visitEnd();
     }
 
     private static byte[] classWithLegacySystemReportMixin() {
