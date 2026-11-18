@@ -21,13 +21,13 @@
 
 
 
-## Estado atual — 2026-11-17 (após correção do fixture Screen API)
+## Estado atual — 2026-11-18
 
-- `main` continua inalterada em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`.
-- PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) continua em draft na branch `compat/fabric-screen-api-26.2`; cabeça de código/testes: `f2bcb270f6ee4e73800cacb5911497451ed7bfc4`. PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não foi alterada.
-- A regressão de integração Screen API foi corrigida no fixture de teste, não relaxando o adaptador de produção. CI run [44072240220](https://github.com/GafiPro/GafiLoader/actions/runs/44072240220) terminou com sucesso em Ubuntu e Windows: testes/build passaram; no Windows também passaram `installDist`, app image com runtime, WiX, instalador e uploads.
-- O `README.md` da branch foi atualizado para descrever o adapter Screen API, a validação fail-closed, a divisão `Minecraft`/`GuiManager` e a ausência de validação runtime real.
-- Artefactos da run 44072240220: instalador ID `14323666773` (50 512 572 bytes; digest `sha256:a9715852bea4d020c6dac20bbe090e4060a6fe6167bcf3ee423fc9a1b9d143b5`) e app image ID `14323076901` (50 283 207 bytes; digest `sha256:185887c79c0e2ce2791f516b24df863c6dc9fe691f30cd8f13349b8f6c772a66`). Expiram em 2026-11-20. São artefactos de CI, não um release validado em PC de utilizador.
+- `main` continua inalterada em `6bd4cef9cdee2ededde8518f5fedd19e11cd657b7`.
+- PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) continua em draft na branch `compat/fabric-screen-api-26.2`; head atual da PR: `59f97fbe90128cdcab862729627b75aa95c5519b`; último commit de código/testes: `e256e112340f679e787835b97b8302bc8d844202`. PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não foi alterada.
+- A validação estrutural do Mixin Screen API foi reforçada sem relaxar o fail-closed. CI run [44288863652](https://github.com/GafiPro/GafiLoader/actions/runs/44288863652) terminou com sucesso em Ubuntu e Windows: testes/build passaram; no Windows também passaram `installDist`, app image com runtime, WiX, instalador e uploads.
+- Artefactos da run 44288863652: instalador ID `14421190013` (50 513 879 bytes; digest `sha256:4578c899bff889b1ec58c86fa9cc0da5d9e84ddcb00cb3d02cad9d1ede529a12`) e app image ID `14419459028` (50 284 728 bytes; digest `sha256:1d26567dab97749991e2d1441637fb241910454774af0fe2ef3c59f375698acf`). Expiram em 2026-11-21. São artefactos de CI, não um release validado em PC de utilizador.
+- O `README.md` da branch descreve o adapter Screen API, a validação fail-closed, a divisão `Minecraft`/`GuiManager` e a ausência de validação runtime real.
 - **Runtime continua por validar:** não há novo `logs/gafiloader-preflight.log`, `logs/latest.log`, JAR original Fabric API 0.141.6+1.21.11 ou cópia staged nesta sessão. Não há prova de chegada ao menu, de funcionamento dos eventos Screen ou de preservação de hashes após arranque real. A arquitetura continua a carregar cópias staged em `.gafiloader/compat-mods`, não sendo ainda runtime-only.
 - O índice oficial do [Fabric Maven](https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.141.6%2B1.21.11/) confirma que o artefacto `fabric-api-0.141.6+1.21.11.jar` está publicado (aprox. 2 MB; data do índice: 2026-07-28). A transferência binária falhou neste ambiente (`application/java-archive` não suportado pelo leitor web e falha do downloader); não foram inspecionados bytes do JAR real.
 
