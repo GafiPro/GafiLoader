@@ -24,7 +24,7 @@
 ## Estado atual — 2026-11-18
 
 - `main` continua inalterada em `6bd4cef9cdee2ededde8518f5fedd19e11cd657b7`.
-- PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) continua em draft na branch `compat/fabric-screen-api-26.2`; head atual da PR: `7be66a8aeaf260b077fe778a5573d8d7d6e3d571`; último commit de código/testes: `e256e112340f679e787835b97b8302bc8d844202`. PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não foi alterada.
+- PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) continua em draft na branch `compat/fabric-screen-api-26.2`; último commit de código/testes: `e256e112340f679e787835b97b8302bc8d844202`; os commits seguintes nesta sessão atualizam apenas `PROJECT_STATUS.md`. PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) continua aberta e não foi alterada.
 - A validação estrutural do Mixin Screen API foi reforçada sem relaxar o fail-closed. CI run [44288863652](https://github.com/GafiPro/GafiLoader/actions/runs/44288863652) terminou com sucesso em Ubuntu e Windows: testes/build passaram; no Windows também passaram `installDist`, app image com runtime, WiX, instalador e uploads.
 - Artefactos da run 44288863652: instalador ID `14421190013` (50 513 879 bytes; digest `sha256:4578c899bff889b1ec58c86fa9cc0da5d9e84ddcb00cb3d02cad9d1ede529a12`) e app image ID `14419459028` (50 284 728 bytes; digest `sha256:1d26567dab97749991e2d1441637fb241910454774af0fe2ef3c59f375698acf`). Expiram em 2026-11-21. São artefactos de CI, não um release validado em PC de utilizador.
 - O `README.md` da branch descreve o adapter Screen API, a validação fail-closed, a divisão `Minecraft`/`GuiManager` e a ausência de validação runtime real.
