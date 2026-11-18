@@ -117,11 +117,16 @@ final class LegacyFabricScreenApiAdapter {
     );
 
     private static final Map<String, FieldShape> EXPECTED_LEGACY_FIELDS = Map.of(
-            "LOGGER", new FieldShape(LOGGER_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION)),
-            "DEBUG_SCREEN", new FieldShape("Z", Set.of(UNIQUE_ANNOTATION)),
-            "screen", new FieldShape(SCREEN_DESCRIPTOR, Set.of(SHADOW_ANNOTATION)),
-            "gameThread", new FieldShape("Ljava/lang/Thread;", Set.of(SHADOW_ANNOTATION)),
-            "tickingScreen", new FieldShape(SCREEN_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION))
+            "LOGGER", new FieldShape(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                    LOGGER_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION)),
+            "DEBUG_SCREEN", new FieldShape(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                    "Z", Set.of(UNIQUE_ANNOTATION)),
+            "screen", new FieldShape(Opcodes.ACC_PUBLIC,
+                    SCREEN_DESCRIPTOR, Set.of(SHADOW_ANNOTATION)),
+            "gameThread", new FieldShape(Opcodes.ACC_PRIVATE,
+                    "Ljava/lang/Thread;", Set.of(SHADOW_ANNOTATION)),
+            "tickingScreen", new FieldShape(Opcodes.ACC_PRIVATE,
+                    SCREEN_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION))
     );
 
     private static final Gson JSON = new GsonBuilder()
@@ -221,9 +226,13 @@ final class LegacyFabricScreenApiAdapter {
         Set<String> unexpectedMixinProperties = new LinkedHashSet<>();
         int[] mixinAnnotationCount = {0};
         int[] mixinTargetCount = {0};
+        int[] classAccess = {-1};
+        String[] superclass = {null};
+        Set<String> interfaces = new LinkedHashSet<>();
         Map<String, FieldShape> fields = new LinkedHashMap<>();
         Set<String> duplicateFields = new LinkedHashSet<>();
         Map<String, String> methodDescriptors = new LinkedHashMap<>();
+        Map<String, Integer> methodAccesses = new LinkedHashMap<>();
         Set<String> duplicateMethods = new LinkedHashSet<>();
         Map<String, InjectionMetadata> injections = new LinkedHashMap<>();
         Set<String> duplicateInjectMethods = new LinkedHashSet<>();
@@ -231,6 +240,18 @@ final class LegacyFabricScreenApiAdapter {
         Set<String> unexpectedMixinMethodAnnotations = new LinkedHashSet<>();
 
         reader.accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public void visit(int version, int access, String name, String signature,
+                              String superName, String[] implementedInterfaces) {
+                classAccess[0] = access;
+                superclass[0] = superName;
+                if (implementedInterfaces != null) {
+                    for (String implementedInterface : implementedInterfaces) {
+                        interfaces.add(implementedInterface);
+                    }
+                }
+            }
+
             @Override
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                 if (!MIXIN_ANNOTATION.equals(descriptor)) return null;
@@ -292,7 +313,7 @@ final class LegacyFabricScreenApiAdapter {
                     @Override
                     public void visitEnd() {
                         FieldShape previous = fields.putIfAbsent(
-                                name, new FieldShape(descriptor, Set.copyOf(annotations)));
+                                name, new FieldShape(access, descriptor, Set.copyOf(annotations)));
                         if (previous != null) duplicateFields.add(name);
                     }
                 };
@@ -304,6 +325,7 @@ final class LegacyFabricScreenApiAdapter {
                 if (methodDescriptors.putIfAbsent(name, descriptor) != null) {
                     duplicateMethods.add(name);
                 }
+                methodAccesses.putIfAbsent(name, access);
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
@@ -398,6 +420,11 @@ final class LegacyFabricScreenApiAdapter {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
+        if (classAccess[0] != (Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER)
+                || !"java/lang/Object".equals(superclass[0]) || !interfaces.isEmpty()) {
+            throw new IOException("The legacy screen Mixin class header no longer matches the audited "
+                    + "package-private abstract 1.21.11 class; refusing to replace an unrecognized type.");
+        }
         if (mixinAnnotationCount[0] != 1 || mixinTargetCount[0] != 1
                 || !targets.equals(Set.of(MINECRAFT)) || !unexpectedMixinProperties.isEmpty()) {
             throw new IOException("The legacy screen Mixin must target only " + MINECRAFT
@@ -428,6 +455,7 @@ final class LegacyFabricScreenApiAdapter {
             InjectionMetadata actual = injections.get(handlerName);
             if (!expected.descriptor().equals(methodDescriptors.get(handlerName))
                     || actual == null
+                    || methodAccesses.getOrDefault(handlerName, -1) != Opcodes.ACC_PRIVATE
                     || actual.malformed
                     || !actual.unexpectedInjectProperties.isEmpty()
                     || !actual.unexpectedAtProperties.isEmpty()
@@ -828,7 +856,7 @@ final class LegacyFabricScreenApiAdapter {
     private record ExpectedHandler(String descriptor, String selector, String atValue,
                                    String atTarget, String atShift) {}
 
-    private record FieldShape(String descriptor, Set<String> annotations) {}
+    private record FieldShape(int access, String descriptor, Set<String> annotations) {}
 
     private record AtSelector(String value, String target, String shift) {}
 

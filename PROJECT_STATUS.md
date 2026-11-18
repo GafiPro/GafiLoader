@@ -1,9 +1,21 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-17
+> Última atualização: 2026-11-18
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
+
+## Sessão de desenvolvimento — 2026-11-18 (validar a forma JVM do Mixin Screen API)
+
+- **Objetivo:** fechar uma lacuna na validação fail-closed do adapter Screen API, sem integrar a branch experimental em `main`.
+- **Estado inicial verificado:** `main` em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; branch de trabalho `compat/fabric-screen-api-26.2` em `5eaf16ff9def7be992e0c5190f88f7c5bdf154ee`; PR #30 em draft e PR #29 aberta, sem alterações. O último CI de código, run [44072240220](https://github.com/GafiPro/GafiLoader/actions/runs/44072240220), passou em Ubuntu e Windows.
+- **Evidência investigada:** a fonte oficial Fabric API 1.21.11 define `MinecraftMixin` como classe abstrata package-private, com superclass `Object`, sem interfaces; os campos têm modificadores específicos (LOGGER/DEBUG_SCREEN private static final, screen public, gameThread/tickingScreen private) e os sete handlers são private. O adapter anterior verificava descritores/annotations/handlers/targets, mas não o cabeçalho JVM nem os modificadores. Os fixtures de teste declaravam a classe como public, pelo que não correspondiam integralmente à fonte upstream.
+- **Alterações implementadas nesta sessão:** `LegacyFabricScreenApiAdapter` passa a exigir cabeçalho `ACC_ABSTRACT | ACC_SUPER`, superclass `java/lang/Object`, zero interfaces, modificadores exatos nos cinco campos e handlers private. Os testes unitário e de integração passam a usar o cabeçalho package-private correto; o teste unitário inclui variantes públicas/privadas adulteradas e exige rejeição.
+- **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java`, `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java`, `src/test/java/dev/gafipro/gafiloader/LegacyModCompatibilityTransformerTest.java` e este registo.
+- **Validação local:** ainda não executada. O ambiente disponível tem Java 21, mas o projeto exige Java 25; além disso, a resolução DNS para `maven.fabricmc.net` falhou, pelo que não foi possível descarregar o JAR oficial para uma fixture binária real. A validação de compilação/testes ficará a cargo da CI da PR; não declarar compatibilidade runtime.
+- **Limitações:** continuam em falta o JAR real `fabric-api-0.141.6+1.21.11.jar`, a cópia staged e `logs/gafiloader-preflight.log`/`logs/latest.log` do arranque atual. A alteração reforça a validação estrutural, mas não verifica ainda os corpos de bytecode dos handlers nem substitui um teste com o artefacto oficial.
+- **Próximos passos:** (1) confirmar o resultado CI do novo commit em Ubuntu e Windows; (2) obter o JAR original e os logs do perfil `gafiloader-26.2`; (3) verificar a transformação do módulo aninhado real e os hashes originais; (4) validar os eventos Screen em runtime antes de retirar a PR #30 de draft ou escolher entre as PRs #29/#30.
+
 
 
 ## Estado atual — 2026-11-17 (após correção do fixture Screen API)

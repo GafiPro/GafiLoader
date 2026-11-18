@@ -542,7 +542,7 @@ class LegacyModCompatibilityTransformerTest {
                 "Lnet/minecraft/client/gui/screens/LevelLoadingScreen;tick()V";
 
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
+        writer.visit(Opcodes.V21, Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
                 mixinClass, null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);

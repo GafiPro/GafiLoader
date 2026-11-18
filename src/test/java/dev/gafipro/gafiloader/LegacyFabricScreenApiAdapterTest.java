@@ -214,6 +214,19 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsUnexpectedLegacyClassFieldAndHandlerAccessFlags() {
+        String[] selectors = {"setScreen", "destroy", "tick", "doWorldLoad"};
+        byte[] valid = legacyMixin(new String[] {MINECRAFT}, selectors, null, false, null);
+
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withClassAccess(valid, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withFieldAccess(valid, "screen", Opcodes.ACC_PRIVATE)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withMethodAccess(valid, "checkThreadOnDev", Opcodes.ACC_PUBLIC)));
+    }
+
+    @Test
     void rejectsMalformedOrIncompleteMixinConfigs() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(
                 "{not-json".getBytes(StandardCharsets.UTF_8)));
@@ -399,7 +412,7 @@ class LegacyFabricScreenApiAdapterTest {
     private static byte[] legacyMixin(String[] targets, String[] selectors, String changedAtHandler,
                                       boolean addUnexpectedInjectOption, String wrongDescriptorHandler) {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
+        writer.visit(Opcodes.V21, Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
                 "net/fabricmc/fabric/mixin/screen/MinecraftMixin", null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_ANNOTATION, true);
@@ -476,6 +489,47 @@ class LegacyFabricScreenApiAdapterTest {
         }
 
         writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] withClassAccess(byte[] original, int replacementAccess) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public void visit(int version, int access, String name, String signature,
+                              String superName, String[] interfaces) {
+                super.visit(version, replacementAccess, name, signature, superName, interfaces);
+            }
+        }, 0);
+        return writer.toByteArray();
+    }
+
+    private static byte[] withFieldAccess(byte[] original, String fieldName, int replacementAccess) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public org.objectweb.asm.FieldVisitor visitField(int access, String name, String descriptor,
+                                                              String signature, Object value) {
+                return super.visitField(fieldName.equals(name) ? replacementAccess : access,
+                        name, descriptor, signature, value);
+            }
+        }, 0);
+        return writer.toByteArray();
+    }
+
+    private static byte[] withMethodAccess(byte[] original, String methodName, int replacementAccess) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return super.visitMethod(methodName.equals(name) ? replacementAccess : access,
+                        name, descriptor, signature, exceptions);
+            }
+        }, 0);
         return writer.toByteArray();
     }
 
