@@ -555,8 +555,8 @@ class LegacyFabricScreenApiAdapterTest {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
-                return super.visitMethod(methodName.equals(name) ? access : access,
-                        name, methodName.equals(name) ? replacementDescriptor : descriptor,
+                return super.visitMethod(access, name,
+                        methodName.equals(name) ? replacementDescriptor : descriptor,
                         signature, exceptions);
             }
         }, 0);
