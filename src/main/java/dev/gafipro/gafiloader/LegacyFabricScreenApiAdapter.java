@@ -448,6 +448,16 @@ final class LegacyFabricScreenApiAdapter {
             throw new IOException("The legacy screen Mixin handler set differs from the audited 1.21.11 "
                     + "implementation; found handlers " + injections.keySet() + ".");
         }
+        // This adapter replaces the legacy Mixin class rather than copying its
+        // constructors/initializer. Require the exact JVM shapes present in the
+        // audited package-private Java class before discarding those methods.
+        if (!"()V".equals(methodDescriptors.get("<init>"))
+                || methodAccesses.getOrDefault("<init>", -1) != 0
+                || !"()V".equals(methodDescriptors.get("<clinit>"))
+                || methodAccesses.getOrDefault("<clinit>", -1) != Opcodes.ACC_STATIC) {
+            throw new IOException("The legacy screen Mixin constructor/class initializer no longer matches "
+                    + "the audited package-private 1.21.11 class; refusing to discard unrecognized initialization.");
+        }
 
         for (Map.Entry<String, ExpectedHandler> entry : EXPECTED_LEGACY_HANDLERS.entrySet()) {
             String handlerName = entry.getKey();
