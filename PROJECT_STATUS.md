@@ -18,7 +18,8 @@
 - **Validação local:** não executada. O ambiente tem OpenJDK 21.0.12 e não tem Gradle instalado; o projeto exige Java 25. Não foi alegado qualquer teste Gradle local.
 - **Validação CI:** run [44505761533](https://github.com/GafiPro/GafiLoader/actions/runs/44505761533), sobre o commit `35a54047b6210a6517cff948dd1812375dede60c`, terminou com sucesso em Ubuntu e Windows. Ubuntu executou `clean test build`; Windows executou `clean test installDist` e concluiu app image com runtime Java, WiX, instalador e uploads. Isto valida a compilação/testes e empacotamento, não runtime do Minecraft.
 - **Artefactos CI:** instalador ID `14519228204`, 50 514 123 bytes, digest `sha256:856cfec2f74e166f473d8e16963d980b43d894066675e8750b79e0e7433fdb7c`; app image ID `14518977697`, 50 284 943 bytes, digest `sha256:4649c5dcbe780f944cdf08077d7cdeac196038808616eccc6326dee77daa63d0`. Expiram em 2026-11-22 por volta das 10:28 UTC. São artefactos da branch experimental, não um release validado em PC de utilizador.
-- **Próximos passos:** (1) obter o JAR original e os dois logs do perfil `gafiloader-26.2`; (2) inspecionar obter o JAR original e os dois logs do perfil `gafiloader-26.2`; (3) inspecionar o módulo aninhado real e comparar os hashes dos JARs originais/staged; (4) validar em jogo mudança, remoção, tick, loading e encerramento de ecrãs antes de retirar a PR #30 de draft.
+- **Próximos passos:** (1) obter o JAR original e os dois logs do perfil `gafiloader-26.2`; (2) inspecionar o módulo aninhado real e comparar os hashes dos JARs originais/staged; (3) validar em jogo mudança, remoção, tick, loading e encerramento de ecrãs antes de retirar a PR #30 de draft.
+
 ## Sessão de desenvolvimento — 2026-11-18 (validar a forma JVM do Mixin Screen API)
 
 - **Objetivo:** fechar uma lacuna na validação fail-closed do adapter Screen API, sem integrar a branch experimental em `main`.
