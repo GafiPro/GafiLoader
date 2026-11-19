@@ -560,6 +560,9 @@ class LegacyModCompatibilityTransformerTest {
         addLegacyScreenField(writer, Opcodes.ACC_PRIVATE, "tickingScreen", screenDescriptor,
                 "Lorg/spongepowered/asm/mixin/Unique;");
 
+        addLegacyScreenConstructor(writer);
+        addLegacyScreenClassInitializer(writer);
+
         addLegacyScreenHandler(writer, "checkThreadOnDev",
                 "(" + screenDescriptor + callbackInfo + ")V",
                 "setScreen", "HEAD", null, null);
@@ -585,6 +588,39 @@ class LegacyModCompatibilityTransformerTest {
 
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static void addLegacyScreenConstructor(ClassWriter writer) {
+        MethodVisitor constructor = writer.visitMethod(0, "<init>", "()V", null, null);
+        constructor.visitCode();
+        constructor.visitVarInsn(Opcodes.ALOAD, 0);
+        constructor.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
+        constructor.visitInsn(Opcodes.RETURN);
+        constructor.visitMaxs(0, 0);
+        constructor.visitEnd();
+    }
+
+    private static void addLegacyScreenClassInitializer(ClassWriter writer) {
+        MethodVisitor initializer = writer.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
+        initializer.visitCode();
+        initializer.visitLdcInsn("fabric-screen-api-v1");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "org/slf4j/LoggerFactory", "getLogger",
+                "(Ljava/lang/String;)Lorg/slf4j/Logger;", false);
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "LOGGER", "Lorg/slf4j/Logger;");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "net/fabricmc/loader/api/FabricLoader",
+                "getInstance", "()Lnet/fabricmc/loader/api/FabricLoader;", true);
+        initializer.visitMethodInsn(Opcodes.INVOKEINTERFACE, "net/fabricmc/loader/api/FabricLoader",
+                "isDevelopmentEnvironment", "()Z", true);
+        initializer.visitLdcInsn("fabric.debugScreen");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Boolean", "getBoolean",
+                "(Ljava/lang/String;)Z", false);
+        initializer.visitInsn(Opcodes.IOR);
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "DEBUG_SCREEN", "Z");
+        initializer.visitInsn(Opcodes.RETURN);
+        initializer.visitMaxs(0, 0);
+        initializer.visitEnd();
     }
 
     private static void addLegacyScreenField(ClassWriter writer, int access, String name,
