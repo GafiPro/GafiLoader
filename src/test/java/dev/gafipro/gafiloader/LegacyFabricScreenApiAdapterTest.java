@@ -227,6 +227,25 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsMissingOrUnexpectedLegacyConstructorAndClassInitializerShapes() {
+        String[] selectors = {"setScreen", "destroy", "tick", "doWorldLoad"};
+        byte[] valid = legacyMixin(new String[] {MINECRAFT}, selectors, null, false, null);
+
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withoutMethod(valid, "<init>")));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withoutMethod(valid, "<clinit>")));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withMethodDescriptor(valid, "<init>", "(I)V")));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withMethodAccess(valid, "<init>", Opcodes.ACC_PUBLIC)));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withMethodDescriptor(valid, "<clinit>", "(I)V")));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withMethodAccess(valid, "<clinit>", 0)));
+    }
+
+    @Test
     void rejectsMalformedOrIncompleteMixinConfigs() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(
                 "{not-json".getBytes(StandardCharsets.UTF_8)));
@@ -432,6 +451,9 @@ class LegacyFabricScreenApiAdapterTest {
         addLegacyField(writer, Opcodes.ACC_PRIVATE, "tickingScreen", SCREEN_DESCRIPTOR,
                 "Lorg/spongepowered/asm/mixin/Unique;");
 
+        addLegacyConstructor(writer);
+        addLegacyClassInitializer(writer);
+
         List<LegacyHandlerFixture> handlers = List.of(
                 new LegacyHandlerFixture("checkThreadOnDev",
                         "(" + SCREEN_DESCRIPTOR + CALLBACK_INFO_DESCRIPTOR + ")V",
@@ -489,6 +511,69 @@ class LegacyFabricScreenApiAdapterTest {
         }
 
         writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addLegacyConstructor(ClassWriter writer) {
+        MethodVisitor constructor = writer.visitMethod(0, "<init>", "()V", null, null);
+        constructor.visitCode();
+        constructor.visitVarInsn(Opcodes.ALOAD, 0);
+        constructor.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
+        constructor.visitInsn(Opcodes.RETURN);
+        constructor.visitMaxs(0, 0);
+        constructor.visitEnd();
+    }
+
+    private static void addLegacyClassInitializer(ClassWriter writer) {
+        MethodVisitor initializer = writer.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
+        initializer.visitCode();
+        initializer.visitLdcInsn("fabric-screen-api-v1");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "org/slf4j/LoggerFactory", "getLogger",
+                "(Ljava/lang/String;)Lorg/slf4j/Logger;", false);
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "LOGGER", "Lorg/slf4j/Logger;");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "net/fabricmc/loader/api/FabricLoader",
+                "getInstance", "()Lnet/fabricmc/loader/api/FabricLoader;", true);
+        initializer.visitMethodInsn(Opcodes.INVOKEINTERFACE, "net/fabricmc/loader/api/FabricLoader",
+                "isDevelopmentEnvironment", "()Z", true);
+        initializer.visitLdcInsn("fabric.debugScreen");
+        initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Boolean", "getBoolean",
+                "(Ljava/lang/String;)Z", false);
+        initializer.visitInsn(Opcodes.IOR);
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "DEBUG_SCREEN", "Z");
+        initializer.visitInsn(Opcodes.RETURN);
+        initializer.visitMaxs(0, 0);
+        initializer.visitEnd();
+    }
+
+    private static byte[] withMethodDescriptor(byte[] original, String methodName,
+                                               String replacementDescriptor) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return super.visitMethod(methodName.equals(name) ? access : access,
+                        name, methodName.equals(name) ? replacementDescriptor : descriptor,
+                        signature, exceptions);
+            }
+        }, 0);
+        return writer.toByteArray();
+    }
+
+    private static byte[] withoutMethod(byte[] original, String methodName) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return methodName.equals(name) ? null
+                        : super.visitMethod(access, name, descriptor, signature, exceptions);
+            }
+        }, 0);
         return writer.toByteArray();
     }
 
