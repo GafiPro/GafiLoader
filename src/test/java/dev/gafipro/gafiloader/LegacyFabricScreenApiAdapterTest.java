@@ -15,6 +15,7 @@ import org.objectweb.asm.Type;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -74,6 +75,68 @@ class LegacyFabricScreenApiAdapterTest {
                 "net/minecraft/client/gui/GuiManager", "screen"));
         assertTrue(hasInjectionTarget(result.minecraftMixinBytes(),
                 "Lnet/minecraft/client/Minecraft;renderFrame(Z)V"));
+
+        // Verify the generated handlers still dispatch the legacy ScreenEvents contract.
+        // Selector assertions alone would not catch a handler that injects correctly but does nothing.
+        assertEquals(List.of(
+                "java/lang/Thread#currentThread()Ljava/lang/Thread;",
+                "net/minecraft/client/Minecraft#getRunningThread()Ljava/lang/Thread;",
+                "java/lang/Thread#getName()Ljava/lang/String;",
+                "org/slf4j/Logger#error(Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;)V"
+        ), methodCalls(result.guiMixinBytes(), "checkThreadOnDev"));
+        assertEquals(List.of(
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#remove("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$Remove#onRemove("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.guiMixinBytes(), "onScreenRemove"));
+        assertEquals(List.of(
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#beforeTick("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$BeforeTick#beforeTick("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.guiMixinBytes(), "beforeScreenTick"));
+        assertEquals(List.of(
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#afterTick("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick#afterTick("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.guiMixinBytes(), "afterScreenTick"));
+        assertEquals(List.of(
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#remove("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$Remove#onRemove("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.minecraftMixinBytes(), "onScreenRemoveBecauseStopping"));
+        assertEquals(List.of(
+                "net/minecraft/client/gui/GuiManager#screen()" + SCREEN_DESCRIPTOR,
+                "net/fabricmc/fabric/impl/client/screen/GuiExtensions#setTickingScreen("
+                        + SCREEN_DESCRIPTOR + ")V",
+                "net/fabricmc/fabric/impl/client/screen/GuiExtensions#getTickingScreen()"
+                        + SCREEN_DESCRIPTOR,
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#beforeTick("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$BeforeTick#beforeTick("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.minecraftMixinBytes(), "beforeLoadingScreenTick"));
+        assertEquals(List.of(
+                "net/fabricmc/fabric/impl/client/screen/GuiExtensions#getTickingScreen()"
+                        + SCREEN_DESCRIPTOR,
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#afterTick("
+                        + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
+                "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick#afterTick("
+                        + SCREEN_DESCRIPTOR + ")V",
+                "net/fabricmc/fabric/impl/client/screen/GuiExtensions#getTickingScreen()"
+                        + SCREEN_DESCRIPTOR,
+                "net/fabricmc/fabric/impl/client/screen/GuiExtensions#setTickingScreen("
+                        + SCREEN_DESCRIPTOR + ")V"
+        ), methodCalls(result.minecraftMixinBytes(), "afterLoadingScreenTick"));
 
         // Exact 26.2 Fabric API hooks: normal screen events move to GuiManager,
         // while loading-screen and shutdown lifecycle hooks remain on Minecraft.
@@ -363,6 +426,25 @@ class LegacyFabricScreenApiAdapterTest {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         return found[0];
+    }
+
+    private static List<String> methodCalls(byte[] bytes, String expectedMethod) {
+        List<String> calls = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!expectedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        calls.add(owner + "#" + methodName + methodDescriptor);
+                    }
+                };
+            }
+        }, 0);
+        return List.copyOf(calls);
     }
 
     private static boolean hasMethodCall(byte[] bytes, String expectedOwner, String expectedName) {
