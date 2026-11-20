@@ -106,9 +106,11 @@ class LegacyFabricScreenApiAdapterTest {
                         + SCREEN_DESCRIPTOR + ")V"
         ), methodCalls(result.guiMixinBytes(), "afterScreenTick"));
         assertEquals(List.of(
+                "net/minecraft/client/gui/GuiManager#screen()" + SCREEN_DESCRIPTOR,
                 "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#remove("
                         + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
                 "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
+                "net/minecraft/client/gui/GuiManager#screen()" + SCREEN_DESCRIPTOR,
                 "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$Remove#onRemove("
                         + SCREEN_DESCRIPTOR + ")V"
         ), methodCalls(result.minecraftMixinBytes(), "onScreenRemoveBecauseStopping"));
