@@ -190,6 +190,29 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsScreenMixinsRegisteredOutsideTheClientArray() {
+        byte[] commonGuiMixin = """
+                {
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["MinecraftMixin"],
+                  "mixins": ["KeyboardHandlerMixin", "GuiMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] serverMinecraftMixin = """
+                {
+                  "package": "net.fabricmc.fabric.mixin.screen",
+                  "client": ["MinecraftMixin"],
+                  "server": ["net.fabricmc.fabric.mixin.screen.MinecraftMixin"]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(commonGuiMixin));
+        assertThrows(IOException.class,
+                () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(serverMinecraftMixin));
+    }
+
+    @Test
     void rejectsAChangedMixinTargetOrMissingLegacyInjectionInsteadOfPartiallyAdapting() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
                 legacyMixin("net/minecraft/client/gui/GuiManager",
