@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -159,6 +160,7 @@ final class LegacyFabricScreenApiAdapter {
         JsonObject root = parsed.getAsJsonObject();
         String expectedPackage = LEGACY_MIXIN_CLASS.substring(0, LEGACY_MIXIN_CLASS.lastIndexOf('/'))
                 .replace('/', '.');
+        rejectScreenMixinsOutsideClient(root, expectedPackage);
         JsonElement packageElement = root.get("package");
         if (packageElement == null || !packageElement.isJsonPrimitive()
                 || !packageElement.getAsJsonPrimitive().isString()
@@ -180,11 +182,11 @@ final class LegacyFabricScreenApiAdapter {
         for (int i = 0; i < client.size(); i++) {
             JsonElement element = client.get(i);
             if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) continue;
-            String name = element.getAsString();
-            if ("MinecraftMixin".equals(name)) {
+            String mixinName = screenMixinName(element.getAsString(), expectedPackage);
+            if ("MinecraftMixin".equals(mixinName)) {
                 minecraftIndex = i;
                 minecraftCount++;
-            } else if ("GuiMixin".equals(name)) {
+            } else if ("GuiMixin".equals(mixinName)) {
                 guiIndex = i;
                 guiCount++;
             }
@@ -199,15 +201,47 @@ final class LegacyFabricScreenApiAdapter {
         }
         if (guiIndex >= 0 && guiIndex < minecraftIndex) return originalBytes;
 
+        JsonElement guiEntry = guiIndex >= 0
+                ? client.get(guiIndex).deepCopy() : new JsonPrimitive("GuiMixin");
         JsonArray updated = new JsonArray();
         for (int i = 0; i < client.size(); i++) {
             if (i == guiIndex) continue;
-            if (i == minecraftIndex) updated.add("GuiMixin");
+            if (i == minecraftIndex) updated.add(guiEntry.deepCopy());
             updated.add(client.get(i).deepCopy());
         }
 
         root.add("client", updated);
         return JSON.toJson(root).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void rejectScreenMixinsOutsideClient(JsonObject root, String expectedPackage)
+            throws IOException {
+        for (String section : List.of("mixins", "server")) {
+            JsonElement sectionElement = root.get(section);
+            if (sectionElement == null || !sectionElement.isJsonArray()) continue;
+
+            for (JsonElement entry : sectionElement.getAsJsonArray()) {
+                if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString()) continue;
+                String mixinName = screenMixinName(entry.getAsString(), expectedPackage);
+                if (mixinName != null) {
+                    throw new IOException("The legacy fabric-screen-api-v1 Mixin config lists "
+                            + mixinName + " in its \"" + section + "\" section; screen lifecycle Mixins "
+                            + "must be registered only in the client array.");
+                }
+            }
+        }
+    }
+
+    private static String screenMixinName(String configuredName, String expectedPackage) {
+        String simpleName = configuredName;
+        String qualifiedPrefix = expectedPackage + ".";
+        if (simpleName.startsWith(qualifiedPrefix)) {
+            simpleName = simpleName.substring(qualifiedPrefix.length());
+        }
+        if ("MinecraftMixin".equals(simpleName) || "GuiMixin".equals(simpleName)) {
+            return simpleName;
+        }
+        return null;
     }
 
     private static void verifyLegacyMixin(byte[] classBytes) throws IOException {
