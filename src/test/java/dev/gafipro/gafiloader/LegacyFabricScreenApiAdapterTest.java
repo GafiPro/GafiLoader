@@ -134,10 +134,10 @@ class LegacyFabricScreenApiAdapterTest {
                 "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents#afterTick("
                         + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;",
                 "net/fabricmc/fabric/api/event/Event#invoker()Ljava/lang/Object;",
-                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick#afterTick("
-                        + SCREEN_DESCRIPTOR + ")V",
                 "net/fabricmc/fabric/impl/client/screen/GuiExtensions#getTickingScreen()"
                         + SCREEN_DESCRIPTOR,
+                "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick#afterTick("
+                        + SCREEN_DESCRIPTOR + ")V",
                 "net/fabricmc/fabric/impl/client/screen/GuiExtensions#setTickingScreen("
                         + SCREEN_DESCRIPTOR + ")V"
         ), methodCalls(result.minecraftMixinBytes(), "afterLoadingScreenTick"));
