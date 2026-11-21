@@ -178,6 +178,22 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void preservesShortCircuitSemanticsForDebugScreenFlag() throws Exception {
+        LegacyFabricScreenApiAdapter.Result result = LegacyFabricScreenApiAdapter.adapt(
+                legacyMixin(MINECRAFT, "setScreen", "destroy", "tick", "doWorldLoad"));
+
+        assertEquals(List.of(
+                "org/slf4j/LoggerFactory#getLogger(Ljava/lang/String;)Lorg/slf4j/Logger;",
+                "net/fabricmc/loader/api/FabricLoader#getInstance()Lnet/fabricmc/loader/api/FabricLoader;",
+                "net/fabricmc/loader/api/FabricLoader#isDevelopmentEnvironment()Z",
+                "java/lang/Boolean#getBoolean(Ljava/lang/String;)Z"
+        ), methodCalls(result.guiMixinBytes(), "<clinit>"));
+        assertEquals(List.of(Opcodes.IFEQ, Opcodes.GOTO),
+                jumpOpcodes(result.guiMixinBytes(), "<clinit>"),
+                "Boolean.getBoolean must remain on the false branch of the development-environment check.");
+    }
+
+    @Test
     void addsGuiMixinBeforeMinecraftMixinAndIsIdempotent() throws Exception {
         byte[] original = """
                 {
@@ -430,6 +446,24 @@ class LegacyFabricScreenApiAdapterTest {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         return found[0];
+    }
+
+    private static List<Integer> jumpOpcodes(byte[] bytes, String expectedMethod) {
+        List<Integer> opcodes = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!expectedMethod.equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                        opcodes.add(opcode);
+                    }
+                };
+            }
+        }, 0);
+        return List.copyOf(opcodes);
     }
 
     private static List<String> methodCalls(byte[] bytes, String expectedMethod) {
