@@ -51,7 +51,8 @@ Not yet implemented or verified:
 - A reviewed alias catalogue generated from the official 1.21.11 and 26.2 game artifacts.
 - Broad legacy-mod resolution. The dependency-override generator removes only the selected mods' `minecraft` version constraint; it does not make bytecode compatible or adapt other dependencies.
 - Validation against real production 1.21.11 mods and the official 26.2 runtime. The synthetic integration proves direct bytecode references only, not full feature compatibility.
-- Missing-class aliases, semantic descriptor conversions, reflection-string and resource remapping, Mixin/Fabric API adapters, and game-behavior tests.
+- Missing-class aliases, semantic descriptor conversions, reflection-string and resource remapping, and broad game-behavior tests.
+- The legacy Fabric Screen API Mixin is a confirmed 26.2 blocker: it targets Minecraft and shadows a Screen field, while 26.2 stores the current screen in Minecraft.gui (GuiManager) and places setScreen/tick on GuiManager. GafiLoader now rejects this specific shape during preflight with an explicit diagnostic. This is a fail-fast guard, not a Screen API compatibility adapter; that migration remains unimplemented.
 - End-to-end launch with an actual 1.21.11 mod alongside a 26.2 mod.
 
 Therefore this is an early runtime-bridge prototype, not a claim that arbitrary legacy mods already load.

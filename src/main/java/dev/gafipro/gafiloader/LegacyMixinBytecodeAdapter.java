@@ -202,6 +202,13 @@ final class LegacyMixinBytecodeAdapter {
 
         MixinMetadata metadata = inspectMixinMetadata(reader);
         String currentClass = reader.getClassName();
+        if (requiresMovedScreenShadowMigration(metadata, mappings)) {
+            throw new IOException("Unsupported legacy Screen API Mixin " + currentClass
+                    + " targets Minecraft and shadows a Screen field, but Minecraft 26.2 moved the current "
+                    + "screen into Minecraft.gui (GuiManager.screen()). GuiManager now owns setScreen(Screen) "
+                    + "and tick(); the current adapter does not yet split and re-target these injections. "
+                    + "Refusing to pass this known-incompatible Mixin to Fabric.");
+        }
         boolean adaptSystemReportDetail = requiresSystemReportDetailAdapter(metadata, mappings);
         try {
             ClassWriter writer = new ClassWriter(reader, 0);
@@ -494,6 +501,33 @@ final class LegacyMixinBytecodeAdapter {
         return new MixinMetadata(reader.getClassName(), List.copyOf(targets),
                 Set.copyOf(shadowMethods), Set.copyOf(shadowFields),
                 Map.copyOf(shadowMethodPrefixes), Map.copyOf(inferredAccessors));
+    }
+
+    private static boolean requiresMovedScreenShadowMigration(MixinMetadata metadata,
+            LegacyClassTweakerMappings mappings) throws IOException {
+        String minecraftTarget = "net/minecraft/client/Minecraft";
+        String screenType = "net/minecraft/client/gui/screens/Screen";
+        boolean targetsMinecraft = metadata.targetOwners().stream()
+                .anyMatch(owner -> mapsToMinecraftName(owner, minecraftTarget, mappings));
+        if (!targetsMinecraft) return false;
+
+        for (String shadowField : metadata.shadowFields()) {
+            int separator = shadowField.indexOf('\u0000');
+            if (separator < 0) continue;
+            Type fieldType = Type.getType(shadowField.substring(separator + 1));
+            if (fieldType.getSort() == Type.OBJECT
+                    && mapsToMinecraftName(fieldType.getInternalName(), screenType, mappings)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean mapsToMinecraftName(String internalName, String expectedName,
+            LegacyClassTweakerMappings mappings) throws IOException {
+        if (expectedName.equals(internalName)) return true;
+        if (!internalName.startsWith("net/minecraft/")) return false;
+        return expectedName.equals(mappings.mapClass(internalName));
     }
 
     private static boolean requiresSystemReportDetailAdapter(MixinMetadata metadata,

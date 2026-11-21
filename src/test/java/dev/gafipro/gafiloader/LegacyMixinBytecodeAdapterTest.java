@@ -44,6 +44,8 @@ class LegacyMixinBytecodeAdapterTest {
             "(Ljava/lang/String;Ljava/util/function/Supplier;)V";
     private static final String TARGET_SYSTEM_REPORT_DETAIL_DESCRIPTOR =
             "(Ljava/lang/String;Lnet/minecraft/CrashReportDetail;)V";
+    private static final String MINECRAFT_INTERMEDIARY_OWNER = "net/minecraft/class_310";
+    private static final String SCREEN_INTERMEDIARY_OWNER = "net/minecraft/class_437";
 
     @TempDir
     Path temporaryDirectory;
@@ -98,6 +100,16 @@ class LegacyMixinBytecodeAdapterTest {
         assertEquals("()Lnet/minecraft/CrashReportDetail;", callSiteDescriptor.get());
         assertEquals("setDetail", invocationName.get());
         assertEquals(TARGET_SYSTEM_REPORT_DETAIL_DESCRIPTOR, invocationDescriptor.get());
+    }
+
+    @Test
+    void rejectsLegacyMinecraftMixinThatShadowsTheMovedScreenField() throws Exception {
+        IOException failure = assertThrows(IOException.class,
+                () -> LegacyMixinBytecodeAdapter.remap(legacyMinecraftScreenMixin(), createMappings()));
+
+        assertTrue(failure.getMessage().contains("Minecraft.gui (GuiManager.screen())"));
+        assertTrue(failure.getMessage().contains("setScreen(Screen)"));
+        assertTrue(failure.getMessage().contains("tick()"));
     }
 
     @Test
@@ -487,7 +499,9 @@ class LegacyMixinBytecodeAdapterTest {
                 + "c\ta\tnet/minecraft/class_7924\n"
                 + "\tf\tLa;\tb\tfield_1234\n"
                 + "\tm\t(La;)La;\tc\tmethod_2345\n"
-                + "c\tb\tnet/minecraft/class_9001\n")
+                + "c\tb\tnet/minecraft/class_9001\n"
+                + "c\te\tnet/minecraft/class_310\n"
+                + "c\tf\tnet/minecraft/class_437\n")
                 .getBytes(StandardCharsets.UTF_8);
         Files.write(intermediaryJar, jar(Map.of("mappings/mappings.tiny", tiny)));
 
@@ -497,8 +511,28 @@ class LegacyMixinBytecodeAdapterTest {
                     net.minecraft.core.Registry entry -> b
                     net.minecraft.core.Registry lookup(net.minecraft.core.Registry) -> c
                 net.minecraft.SystemReport -> b:
+                net.minecraft.client.Minecraft -> e:
+                net.minecraft.client.gui.screens.Screen -> f:
                 """, StandardCharsets.UTF_8);
         return LegacyClassTweakerMappings.load(intermediaryJar, mojangMappings);
+    }
+
+    private static byte[] legacyMinecraftScreenMixin() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", null, "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN, true);
+        mixin.visit("value", Type.getObjectType(MINECRAFT_INTERMEDIARY_OWNER));
+        mixin.visitEnd();
+
+        FieldVisitor screen = writer.visitField(Opcodes.ACC_PUBLIC, "field_1755",
+                "L" + SCREEN_INTERMEDIARY_OWNER + ";", null, null);
+        screen.visitAnnotation(SHADOW, true).visitEnd();
+        screen.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] legacySystemReportMixin() {
