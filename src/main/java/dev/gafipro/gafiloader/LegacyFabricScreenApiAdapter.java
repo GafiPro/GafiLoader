@@ -601,10 +601,17 @@ final class LegacyFabricScreenApiAdapter {
         clinit.visitMethodInsn(Opcodes.INVOKESTATIC, FABRIC_LOADER, "getInstance",
                 "()L" + FABRIC_LOADER + ";", true);
         clinit.visitMethodInsn(Opcodes.INVOKEINTERFACE, FABRIC_LOADER, "isDevelopmentEnvironment", "()Z", true);
+        // Preserve Java's short-circuit ||: the system property is read only outside a dev environment.
+        Label readDebugProperty = new Label();
+        Label storeDebugFlag = new Label();
+        clinit.visitJumpInsn(Opcodes.IFEQ, readDebugProperty);
+        clinit.visitInsn(Opcodes.ICONST_1);
+        clinit.visitJumpInsn(Opcodes.GOTO, storeDebugFlag);
+        clinit.visitLabel(readDebugProperty);
         clinit.visitLdcInsn("fabric.debugScreen");
         clinit.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Boolean", "getBoolean",
                 "(Ljava/lang/String;)Z", false);
-        clinit.visitInsn(Opcodes.IOR);
+        clinit.visitLabel(storeDebugFlag);
         clinit.visitFieldInsn(Opcodes.PUTSTATIC, GUI_MIXIN_CLASS, "DEBUG_SCREEN", "Z");
         clinit.visitInsn(Opcodes.RETURN);
         clinit.visitMaxs(0, 0);
