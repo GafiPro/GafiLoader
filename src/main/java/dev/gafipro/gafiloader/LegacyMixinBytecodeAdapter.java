@@ -512,7 +512,7 @@ final class LegacyMixinBytecodeAdapter {
         if (!targetsMinecraft) return false;
 
         for (String shadowField : metadata.shadowFields()) {
-            int separator = shadowField.indexOf('\u0000');
+            int separator = shadowField.indexOf(0);
             if (separator < 0) continue;
             Type fieldType = Type.getType(shadowField.substring(separator + 1));
             if (fieldType.getSort() == Type.OBJECT
