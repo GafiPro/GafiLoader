@@ -580,7 +580,7 @@ class LegacyFabricScreenApiAdapterTest {
         assertEquals(expectedShift, atShift.get(), handlerName + " @At.shift");
     }
 
-    private static byte[] legacyMixin(String target, String... selectors) {
+    static byte[] legacyMixin(String target, String... selectors) {
         return legacyMixin(new String[] {target}, selectors, null, false, null);
     }
 
