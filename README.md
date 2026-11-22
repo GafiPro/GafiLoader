@@ -141,6 +141,7 @@ The scanner reports missing classes, methods, and fields referenced by the mod b
 - The mod scanner can normalize production Intermediary references when the 1.21.11 Intermediary mapping artifact and official Mojang mappings are supplied. It does not yet normalize Yarn-named development JARs or every custom namespace. Explicit TSV aliases can normalize known API changes, but each rule must be verified against the 26.2 API.
 - The scanner checks Minecraft-owned symbols and can also check public `net.fabricmc.fabric.api` symbols when a target API JAR is supplied. It does not model Fabric Loader internals or private API implementation details.
 - The installer changes only the dedicated `gafiloader-26.2` version JSON so its bootstrap runs before Fabric Loader. It leaves the launcher executable, Fabric Loader JARs, and original mod JARs untouched. The bootstrap creates staged copies when supported transformations are needed, but full runtime compatibility is not yet complete.
+- The legacy Screen API migration is restricted to the audited 1.21.11 MinecraftMixin bytecode contract (seven handlers and its class initializer). If those method bodies change, preflight refuses to replace the class until the new behavior is reviewed and covered by regression tests.
 - A 26.2 JAR from the official launcher and real mod JARs are required for end-to-end validation.
 
 ## Development approach
