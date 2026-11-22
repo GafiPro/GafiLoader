@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -128,6 +129,71 @@ final class LegacyFabricScreenApiAdapter {
                     "Ljava/lang/Thread;", Set.of(SHADOW_ANNOTATION)),
             "tickingScreen", new FieldShape(Opcodes.ACC_PRIVATE,
                     SCREEN_DESCRIPTOR, Set.of(UNIQUE_ANNOTATION))
+    );
+
+    /*
+     * Strict instruction fingerprints for the audited Fabric API 1.21.11 source.
+     * The adapter discards these methods and replaces them with generated 26.2
+     * Mixins, so matching only their names/selectors is not sufficient: a changed
+     * upstream body must stop preparation until its behavior has been reviewed.
+     */
+    private static final Map<String, List<String>> EXPECTED_LEGACY_METHOD_BODIES = Map.ofEntries(
+            Map.entry("<init>", List.of(
+                    varToken(Opcodes.ALOAD, 0),
+                    methodToken(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false),
+                    insnToken(Opcodes.RETURN)
+            )),
+            Map.entry("checkThreadOnDev", List.of(
+                    methodToken(Opcodes.INVOKESTATIC, "java/lang/Thread", "currentThread",
+                            "()Ljava/lang/Thread;", false),
+                    varToken(Opcodes.ASTORE, 3),
+                    fieldToken(Opcodes.GETSTATIC, LEGACY_MIXIN_CLASS, "DEBUG_SCREEN", "Z"),
+                    jumpToken(Opcodes.IFEQ, 0),
+                    varToken(Opcodes.ALOAD, 3),
+                    varToken(Opcodes.ALOAD, 0),
+                    fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "gameThread", "Ljava/lang/Thread;"),
+                    jumpToken(Opcodes.IF_ACMPEQ, 0),
+                    fieldToken(Opcodes.GETSTATIC, LEGACY_MIXIN_CLASS, "LOGGER", LOGGER_DESCRIPTOR),
+                    constantToken("Attempted to set screen to \"{}\" outside the render thread (\"{}\"). "
+                            + "This will likely follow a crash! Make sure to call setScreen on the render thread."),
+                    varToken(Opcodes.ALOAD, 1),
+                    varToken(Opcodes.ALOAD, 3),
+                    methodToken(Opcodes.INVOKEVIRTUAL, "java/lang/Thread", "getName",
+                            "()Ljava/lang/String;", false),
+                    methodToken(Opcodes.INVOKEINTERFACE, LOGGER, "error",
+                            "(Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;)V", true),
+                    labelToken(0),
+                    insnToken(Opcodes.RETURN)
+            )),
+            Map.entry("onScreenRemove", screenRemoveBody()),
+            Map.entry("onScreenRemoveBecauseStopping", screenRemoveBody()),
+            Map.entry("beforeScreenTick", beforeScreenTickBody()),
+            Map.entry("beforeLoadingScreenTick", beforeScreenTickBody()),
+            Map.entry("afterScreenTick", afterScreenTickBody()),
+            Map.entry("afterLoadingScreenTick", afterScreenTickBody()),
+            Map.entry("<clinit>", List.of(
+                    constantToken("fabric-screen-api-v1"),
+                    methodToken(Opcodes.INVOKESTATIC, LOGGER_FACTORY, "getLogger",
+                            "(Ljava/lang/String;)" + LOGGER_DESCRIPTOR, false),
+                    fieldToken(Opcodes.PUTSTATIC, LEGACY_MIXIN_CLASS, "LOGGER", LOGGER_DESCRIPTOR),
+                    methodToken(Opcodes.INVOKESTATIC, FABRIC_LOADER, "getInstance",
+                            "()L" + FABRIC_LOADER + ";", true),
+                    methodToken(Opcodes.INVOKEINTERFACE, FABRIC_LOADER, "isDevelopmentEnvironment",
+                            "()Z", true),
+                    jumpToken(Opcodes.IFNE, 0),
+                    constantToken("fabric.debugScreen"),
+                    methodToken(Opcodes.INVOKESTATIC, "java/lang/Boolean", "getBoolean",
+                            "(Ljava/lang/String;)Z", false),
+                    jumpToken(Opcodes.IFEQ, 1),
+                    labelToken(0),
+                    insnToken(Opcodes.ICONST_1),
+                    jumpToken(Opcodes.GOTO, 2),
+                    labelToken(1),
+                    insnToken(Opcodes.ICONST_0),
+                    labelToken(2),
+                    fieldToken(Opcodes.PUTSTATIC, LEGACY_MIXIN_CLASS, "DEBUG_SCREEN", "Z"),
+                    insnToken(Opcodes.RETURN)
+            ))
     );
 
     private static final Gson JSON = new GsonBuilder()
@@ -270,6 +336,7 @@ final class LegacyFabricScreenApiAdapter {
         Set<String> duplicateMethods = new LinkedHashSet<>();
         Map<String, InjectionMetadata> injections = new LinkedHashMap<>();
         Set<String> duplicateInjectMethods = new LinkedHashSet<>();
+        Map<String, List<String>> methodBodies = new LinkedHashMap<>();
         Set<String> unexpectedInjectorAnnotations = new LinkedHashSet<>();
         Set<String> unexpectedMixinMethodAnnotations = new LinkedHashSet<>();
 
@@ -360,7 +427,108 @@ final class LegacyFabricScreenApiAdapter {
                     duplicateMethods.add(name);
                 }
                 methodAccesses.putIfAbsent(name, access);
+                List<String> body = new ArrayList<>();
+                Map<Label, Integer> labelIds = new IdentityHashMap<>();
+                int[] nextLabelId = {0};
+                java.util.function.ToIntFunction<Label> labelId = label ->
+                        labelIds.computeIfAbsent(label, ignored -> nextLabelId[0]++);
                 return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitInsn(int opcode) {
+                        body.add(insnToken(opcode));
+                    }
+
+                    @Override
+                    public void visitIntInsn(int opcode, int operand) {
+                        body.add("N:" + opcode + ":" + operand);
+                    }
+
+                    @Override
+                    public void visitVarInsn(int opcode, int variable) {
+                        body.add(varToken(opcode, variable));
+                    }
+
+                    @Override
+                    public void visitTypeInsn(int opcode, String type) {
+                        body.add(typeToken(opcode, type));
+                    }
+
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                        body.add(fieldToken(opcode, owner, fieldName, fieldDescriptor));
+                    }
+
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        body.add(methodToken(opcode, owner, methodName, methodDescriptor, isInterface));
+                    }
+
+                    @Override
+                    public void visitInvokeDynamicInsn(String invokedName, String invokedDescriptor,
+                                                       org.objectweb.asm.Handle bootstrapMethodHandle,
+                                                       Object... bootstrapMethodArguments) {
+                        body.add("D:" + invokedName + ":" + invokedDescriptor + ":"
+                                + bootstrapMethodHandle + ":"
+                                + java.util.Arrays.toString(bootstrapMethodArguments));
+                    }
+
+                    @Override
+                    public void visitJumpInsn(int opcode, Label target) {
+                        body.add(jumpToken(opcode, labelId.applyAsInt(target)));
+                    }
+
+                    @Override
+                    public void visitLabel(Label label) {
+                        body.add(labelToken(labelId.applyAsInt(label)));
+                    }
+
+                    @Override
+                    public void visitLdcInsn(Object value) {
+                        body.add(constantToken(value));
+                    }
+
+                    @Override
+                    public void visitIincInsn(int variable, int increment) {
+                        body.add("INC:" + variable + ":" + increment);
+                    }
+
+                    @Override
+                    public void visitTableSwitchInsn(int min, int max, Label defaultLabel, Label... labels) {
+                        List<Integer> targets = new ArrayList<>();
+                        for (Label target : labels) targets.add(labelId.applyAsInt(target));
+                        body.add("TABLE:" + min + ":" + max + ":" + labelId.applyAsInt(defaultLabel) + ":" + targets);
+                    }
+
+                    @Override
+                    public void visitLookupSwitchInsn(Label defaultLabel, int[] keys, Label[] labels) {
+                        List<Integer> targets = new ArrayList<>();
+                        for (Label target : labels) targets.add(labelId.applyAsInt(target));
+                        body.add("LOOKUP:" + java.util.Arrays.toString(keys) + ":"
+                                + labelId.applyAsInt(defaultLabel) + ":" + targets);
+                    }
+
+                    @Override
+                    public void visitMultiANewArrayInsn(String arrayDescriptor, int dimensions) {
+                        body.add("MULTI:" + arrayDescriptor + ":" + dimensions);
+                    }
+
+                    @Override
+                    public void visitTryCatchBlock(Label start, Label end, Label handler, String exceptionType) {
+                        body.add("TRY:" + labelId.applyAsInt(start) + ":" + labelId.applyAsInt(end) + ":"
+                                + labelId.applyAsInt(handler) + ":" + exceptionType);
+                    }
+
+                    @Override
+                    public void visitAttribute(org.objectweb.asm.Attribute attribute) {
+                        body.add("ATTR:" + attribute.type);
+                    }
+
+                    @Override
+                    public void visitEnd() {
+                        methodBodies.put(name, List.copyOf(body));
+                    }
+
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         if (!INJECT_ANNOTATION.equals(annotationDescriptor)) {
@@ -452,7 +620,7 @@ final class LegacyFabricScreenApiAdapter {
                     }
                 };
             }
-        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
         if (classAccess[0] != (Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER)
                 || !"java/lang/Object".equals(superclass[0]) || !interfaces.isEmpty()) {
@@ -491,6 +659,15 @@ final class LegacyFabricScreenApiAdapter {
                 || methodAccesses.getOrDefault("<clinit>", -1) != Opcodes.ACC_STATIC) {
             throw new IOException("The legacy screen Mixin constructor/class initializer no longer matches "
                     + "the audited package-private 1.21.11 class; refusing to discard unrecognized initialization.");
+        }
+
+        for (Map.Entry<String, List<String>> entry : EXPECTED_LEGACY_METHOD_BODIES.entrySet()) {
+            List<String> actualBody = methodBodies.get(entry.getKey());
+            if (!entry.getValue().equals(actualBody)) {
+                throw new IOException("Legacy screen method '" + entry.getKey()
+                        + "' no longer matches its audited 1.21.11 bytecode body; refusing to replace "
+                        + "unrecognized behavior.");
+            }
         }
 
         for (Map.Entry<String, ExpectedHandler> entry : EXPECTED_LEGACY_HANDLERS.entrySet()) {
@@ -902,6 +1079,94 @@ final class LegacyFabricScreenApiAdapter {
         if (shift != null) at.visitEnum("shift", AT_SHIFT_ANNOTATION, shift);
         at.visitEnd();
         inject.visitEnd();
+    }
+
+    private static List<String> screenRemoveBody() {
+        return List.of(
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "screen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKESTATIC, SCREEN_EVENTS, "remove",
+                        "(" + SCREEN_DESCRIPTOR + ")" + EVENT_DESCRIPTOR, false),
+                methodToken(Opcodes.INVOKEVIRTUAL, EVENT, "invoker", "()Ljava/lang/Object;", false),
+                typeToken(Opcodes.CHECKCAST, SCREEN_EVENTS + "$Remove"),
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "screen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKEINTERFACE, SCREEN_EVENTS + "$Remove", "onRemove",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true),
+                insnToken(Opcodes.RETURN)
+        );
+    }
+
+    private static List<String> beforeScreenTickBody() {
+        return List.of(
+                varToken(Opcodes.ALOAD, 0),
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "screen", SCREEN_DESCRIPTOR),
+                fieldToken(Opcodes.PUTFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKESTATIC, SCREEN_EVENTS, "beforeTick",
+                        "(" + SCREEN_DESCRIPTOR + ")" + EVENT_DESCRIPTOR, false),
+                methodToken(Opcodes.INVOKEVIRTUAL, EVENT, "invoker", "()Ljava/lang/Object;", false),
+                typeToken(Opcodes.CHECKCAST, SCREEN_EVENTS + "$BeforeTick"),
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKEINTERFACE, SCREEN_EVENTS + "$BeforeTick", "beforeTick",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true),
+                insnToken(Opcodes.RETURN)
+        );
+    }
+
+    private static List<String> afterScreenTickBody() {
+        return List.of(
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKESTATIC, SCREEN_EVENTS, "afterTick",
+                        "(" + SCREEN_DESCRIPTOR + ")" + EVENT_DESCRIPTOR, false),
+                methodToken(Opcodes.INVOKEVIRTUAL, EVENT, "invoker", "()Ljava/lang/Object;", false),
+                typeToken(Opcodes.CHECKCAST, SCREEN_EVENTS + "$AfterTick"),
+                varToken(Opcodes.ALOAD, 0),
+                fieldToken(Opcodes.GETFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                methodToken(Opcodes.INVOKEINTERFACE, SCREEN_EVENTS + "$AfterTick", "afterTick",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true),
+                varToken(Opcodes.ALOAD, 0),
+                insnToken(Opcodes.ACONST_NULL),
+                fieldToken(Opcodes.PUTFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
+                insnToken(Opcodes.RETURN)
+        );
+    }
+
+    private static String insnToken(int opcode) {
+        return "I:" + opcode;
+    }
+
+    private static String varToken(int opcode, int variable) {
+        return "V:" + opcode + ":" + variable;
+    }
+
+    private static String typeToken(int opcode, String type) {
+        return "T:" + opcode + ":" + type;
+    }
+
+    private static String fieldToken(int opcode, String owner, String name, String descriptor) {
+        return "F:" + opcode + ":" + owner + ":" + name + ":" + descriptor;
+    }
+
+    private static String methodToken(int opcode, String owner, String name, String descriptor,
+                                      boolean isInterface) {
+        return "M:" + opcode + ":" + owner + ":" + name + ":" + descriptor + ":" + isInterface;
+    }
+
+    private static String jumpToken(int opcode, int labelId) {
+        return "J:" + opcode + ":" + labelId;
+    }
+
+    private static String labelToken(int labelId) {
+        return "L:" + labelId;
+    }
+
+    private static String constantToken(Object value) {
+        return "C:" + String.valueOf(value);
     }
 
     private record ExpectedHandler(String descriptor, String selector, String atValue,
