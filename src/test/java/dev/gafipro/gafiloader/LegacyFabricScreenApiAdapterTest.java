@@ -10,6 +10,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Label;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
@@ -352,6 +353,18 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsChangedLegacyHandlerAndClassInitializerBytecode() {
+        String[] selectors = {"setScreen", "destroy", "tick", "doWorldLoad"};
+        byte[] valid = legacyMixin(new String[] {MINECRAFT}, selectors, null, false, null);
+
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withChangedMethodInvocation(valid, "onScreenRemove",
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents", "remove", "beforeTick")));
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(
+                withChangedClassInitializerJump(valid, Opcodes.IFNE, Opcodes.IFEQ)));
+    }
+
+    @Test
     void rejectsMalformedOrIncompleteMixinConfigs() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(
                 "{not-json".getBytes(StandardCharsets.UTF_8)));
@@ -648,7 +661,7 @@ class LegacyFabricScreenApiAdapterTest {
             points.visitEnd();
             inject.visitEnd();
             handler.visitCode();
-            handler.visitInsn(Opcodes.RETURN);
+            addLegacyHandlerBody(handler, fixture.name());
             handler.visitMaxs(0, 0);
             handler.visitEnd();
         }
@@ -668,26 +681,169 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     private static void addLegacyClassInitializer(ClassWriter writer) {
+        String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
         MethodVisitor initializer = writer.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
         initializer.visitCode();
         initializer.visitLdcInsn("fabric-screen-api-v1");
         initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "org/slf4j/LoggerFactory", "getLogger",
                 "(Ljava/lang/String;)Lorg/slf4j/Logger;", false);
-        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
-                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "LOGGER", "Lorg/slf4j/Logger;");
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC, mixinClass, "LOGGER", "Lorg/slf4j/Logger;");
         initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "net/fabricmc/loader/api/FabricLoader",
                 "getInstance", "()Lnet/fabricmc/loader/api/FabricLoader;", true);
         initializer.visitMethodInsn(Opcodes.INVOKEINTERFACE, "net/fabricmc/loader/api/FabricLoader",
                 "isDevelopmentEnvironment", "()Z", true);
+        Label developmentEnvironment = new Label();
+        Label debugDisabled = new Label();
+        Label join = new Label();
+        initializer.visitJumpInsn(Opcodes.IFNE, developmentEnvironment);
         initializer.visitLdcInsn("fabric.debugScreen");
         initializer.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Boolean", "getBoolean",
                 "(Ljava/lang/String;)Z", false);
-        initializer.visitInsn(Opcodes.IOR);
-        initializer.visitFieldInsn(Opcodes.PUTSTATIC,
-                "net/fabricmc/fabric/mixin/screen/MinecraftMixin", "DEBUG_SCREEN", "Z");
+        initializer.visitJumpInsn(Opcodes.IFEQ, debugDisabled);
+        initializer.visitLabel(developmentEnvironment);
+        initializer.visitInsn(Opcodes.ICONST_1);
+        initializer.visitJumpInsn(Opcodes.GOTO, join);
+        initializer.visitLabel(debugDisabled);
+        initializer.visitInsn(Opcodes.ICONST_0);
+        initializer.visitLabel(join);
+        initializer.visitFieldInsn(Opcodes.PUTSTATIC, mixinClass, "DEBUG_SCREEN", "Z");
         initializer.visitInsn(Opcodes.RETURN);
         initializer.visitMaxs(0, 0);
         initializer.visitEnd();
+    }
+
+    private static void addLegacyHandlerBody(MethodVisitor handler, String name) {
+        String mixinClass = "net/fabricmc/fabric/mixin/screen/MinecraftMixin";
+        switch (name) {
+            case "checkThreadOnDev" -> {
+                Label done = new Label();
+                handler.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Thread", "currentThread",
+                        "()Ljava/lang/Thread;", false);
+                handler.visitVarInsn(Opcodes.ASTORE, 3);
+                handler.visitFieldInsn(Opcodes.GETSTATIC, mixinClass, "DEBUG_SCREEN", "Z");
+                handler.visitJumpInsn(Opcodes.IFEQ, done);
+                handler.visitVarInsn(Opcodes.ALOAD, 3);
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "gameThread", "Ljava/lang/Thread;");
+                handler.visitJumpInsn(Opcodes.IF_ACMPEQ, done);
+                handler.visitFieldInsn(Opcodes.GETSTATIC, mixinClass, "LOGGER", "Lorg/slf4j/Logger;");
+                handler.visitLdcInsn("Attempted to set screen to \"{}\" outside the render thread (\"{}\"). "
+                        + "This will likely follow a crash! Make sure to call setScreen on the render thread.");
+                handler.visitVarInsn(Opcodes.ALOAD, 1);
+                handler.visitVarInsn(Opcodes.ALOAD, 3);
+                handler.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Thread", "getName",
+                        "()Ljava/lang/String;", false);
+                handler.visitMethodInsn(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "error",
+                        "(Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;)V", true);
+                handler.visitLabel(done);
+            }
+            case "onScreenRemove", "onScreenRemoveBecauseStopping" -> {
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "screen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKESTATIC,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents", "remove",
+                        "(" + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;", false);
+                handler.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+                        "net/fabricmc/fabric/api/event/Event", "invoker", "()Ljava/lang/Object;", false);
+                handler.visitTypeInsn(Opcodes.CHECKCAST,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$Remove");
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "screen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKEINTERFACE,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$Remove", "onRemove",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true);
+            }
+            case "beforeScreenTick", "beforeLoadingScreenTick" -> {
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "screen", SCREEN_DESCRIPTOR);
+                handler.visitFieldInsn(Opcodes.PUTFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKESTATIC,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents", "beforeTick",
+                        "(" + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;", false);
+                handler.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+                        "net/fabricmc/fabric/api/event/Event", "invoker", "()Ljava/lang/Object;", false);
+                handler.visitTypeInsn(Opcodes.CHECKCAST,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$BeforeTick");
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKEINTERFACE,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$BeforeTick", "beforeTick",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true);
+            }
+            case "afterScreenTick", "afterLoadingScreenTick" -> {
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKESTATIC,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents", "afterTick",
+                        "(" + SCREEN_DESCRIPTOR + ")Lnet/fabricmc/fabric/api/event/Event;", false);
+                handler.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+                        "net/fabricmc/fabric/api/event/Event", "invoker", "()Ljava/lang/Object;", false);
+                handler.visitTypeInsn(Opcodes.CHECKCAST,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick");
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitFieldInsn(Opcodes.GETFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+                handler.visitMethodInsn(Opcodes.INVOKEINTERFACE,
+                        "net/fabricmc/fabric/api/client/screen/v1/ScreenEvents$AfterTick", "afterTick",
+                        "(" + SCREEN_DESCRIPTOR + ")V", true);
+                handler.visitVarInsn(Opcodes.ALOAD, 0);
+                handler.visitInsn(Opcodes.ACONST_NULL);
+                handler.visitFieldInsn(Opcodes.PUTFIELD, mixinClass, "tickingScreen", SCREEN_DESCRIPTOR);
+            }
+            default -> throw new IllegalArgumentException("Unexpected legacy screen handler: " + name);
+        }
+        handler.visitInsn(Opcodes.RETURN);
+    }
+
+    private static byte[] withChangedMethodInvocation(byte[] original, String targetMethod,
+                                                       String owner, String oldName, String newName) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!targetMethod.equals(name)) return delegate;
+                return new MethodVisitor(Opcodes.ASM9, delegate) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String actualOwner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        if (owner.equals(actualOwner) && oldName.equals(methodName)) methodName = newName;
+                        super.visitMethodInsn(opcode, actualOwner, methodName, methodDescriptor, isInterface);
+                    }
+                };
+            }
+        }, 0);
+        return writer.toByteArray();
+    }
+
+    private static byte[] withChangedClassInitializerJump(byte[] original, int fromOpcode, int toOpcode) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!"<clinit>".equals(name)) return delegate;
+                return new MethodVisitor(Opcodes.ASM9, delegate) {
+                    private boolean changed;
+
+                    @Override
+                    public void visitJumpInsn(int opcode, Label label) {
+                        if (!changed && opcode == fromOpcode) {
+                            opcode = toOpcode;
+                            changed = true;
+                        }
+                        super.visitJumpInsn(opcode, label);
+                    }
+                };
+            }
+        }, 0);
+        return writer.toByteArray();
     }
 
     private static byte[] withMethodDescriptor(byte[] original, String methodName,
