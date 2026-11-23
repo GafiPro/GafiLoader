@@ -339,6 +339,7 @@ final class LegacyFabricScreenApiAdapter {
         Map<String, List<String>> methodBodies = new LinkedHashMap<>();
         Set<String> unexpectedInjectorAnnotations = new LinkedHashSet<>();
         Set<String> unexpectedMixinMethodAnnotations = new LinkedHashSet<>();
+        Set<String> unexpectedMixinAnnotations = new LinkedHashSet<>();
 
         reader.accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -355,7 +356,12 @@ final class LegacyFabricScreenApiAdapter {
 
             @Override
             public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                if (!MIXIN_ANNOTATION.equals(descriptor)) return null;
+                if (!MIXIN_ANNOTATION.equals(descriptor)) {
+                    if (isMixinFrameworkAnnotation(descriptor)) {
+                        unexpectedMixinAnnotations.add("class:" + descriptor);
+                    }
+                    return null;
+                }
                 mixinAnnotationCount[0]++;
                 return new AnnotationVisitor(Opcodes.ASM9) {
                     private void recordTarget(Object value) {
@@ -401,6 +407,15 @@ final class LegacyFabricScreenApiAdapter {
             }
 
             @Override
+            public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
+                                                         String descriptor, boolean visible) {
+                if (isMixinFrameworkAnnotation(descriptor)) {
+                    unexpectedMixinAnnotations.add("class-type:" + descriptor);
+                }
+                return null;
+            }
+
+            @Override
             public FieldVisitor visitField(int access, String name, String descriptor,
                                            String signature, Object value) {
                 Set<String> annotations = new LinkedHashSet<>();
@@ -408,6 +423,15 @@ final class LegacyFabricScreenApiAdapter {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         annotations.add(annotationDescriptor);
+                        return null;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitTypeAnnotation(int typeRef,
+                            org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add("field-type:" + name + ":" + annotationDescriptor);
+                        }
                         return null;
                     }
 
@@ -532,11 +556,13 @@ final class LegacyFabricScreenApiAdapter {
                     @Override
                     public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
                         if (!INJECT_ANNOTATION.equals(annotationDescriptor)) {
-                            if (annotationDescriptor.startsWith(
-                                    "Lorg/spongepowered/asm/mixin/injection/")) {
-                                unexpectedInjectorAnnotations.add(name + ":" + annotationDescriptor);
-                            } else if (annotationDescriptor.startsWith("Lorg/spongepowered/asm/mixin/")) {
-                                unexpectedMixinMethodAnnotations.add(name + ":" + annotationDescriptor);
+                            if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                                if (annotationDescriptor.startsWith(
+                                        "Lorg/spongepowered/asm/mixin/injection/")) {
+                                    unexpectedInjectorAnnotations.add(name + ":" + annotationDescriptor);
+                                } else {
+                                    unexpectedMixinMethodAnnotations.add(name + ":" + annotationDescriptor);
+                                }
                             }
                             return null;
                         }
@@ -618,6 +644,54 @@ final class LegacyFabricScreenApiAdapter {
                             }
                         };
                     }
+
+                    @Override
+                    public AnnotationVisitor visitParameterAnnotation(int parameter, String annotationDescriptor,
+                                                                       boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add(name + ":parameter[" + parameter + "]:"
+                                    + annotationDescriptor);
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitTypeAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
+                                                                 String annotationDescriptor, boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add(name + ":type:" + annotationDescriptor);
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitInsnAnnotation(int typeRef, org.objectweb.asm.TypePath typePath,
+                                                                 String annotationDescriptor, boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add(name + ":instruction:" + annotationDescriptor);
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitTryCatchAnnotation(int typeRef,
+                            org.objectweb.asm.TypePath typePath, String annotationDescriptor, boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add(name + ":try-catch:" + annotationDescriptor);
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitLocalVariableAnnotation(int typeRef,
+                            org.objectweb.asm.TypePath typePath, org.objectweb.asm.Label[] start,
+                            org.objectweb.asm.Label[] end, int[] index, String annotationDescriptor,
+                            boolean visible) {
+                        if (isMixinFrameworkAnnotation(annotationDescriptor)) {
+                            unexpectedMixinAnnotations.add(name + ":local-variable:" + annotationDescriptor);
+                        }
+                        return null;
+                    }
                 };
             }
         }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
@@ -637,8 +711,10 @@ final class LegacyFabricScreenApiAdapter {
                     + "shadow/unique field contract; found " + fields.keySet() + ".");
         }
         if (!duplicateMethods.isEmpty() || !duplicateInjectMethods.isEmpty()
-                || !unexpectedInjectorAnnotations.isEmpty() || !unexpectedMixinMethodAnnotations.isEmpty()) {
-            throw new IOException("The legacy screen Mixin contains duplicate or unreviewed handler methods.");
+                || !unexpectedInjectorAnnotations.isEmpty() || !unexpectedMixinMethodAnnotations.isEmpty()
+                || !unexpectedMixinAnnotations.isEmpty()) {
+            throw new IOException("The legacy screen Mixin contains duplicate methods or unreviewed "
+                    + "Mixin annotations: " + unexpectedMixinAnnotations + ".");
         }
 
         Set<String> allowedMethods = new LinkedHashSet<>(EXPECTED_LEGACY_HANDLERS.keySet());
@@ -1134,6 +1210,11 @@ final class LegacyFabricScreenApiAdapter {
                 fieldToken(Opcodes.PUTFIELD, LEGACY_MIXIN_CLASS, "tickingScreen", SCREEN_DESCRIPTOR),
                 insnToken(Opcodes.RETURN)
         );
+    }
+
+    private static boolean isMixinFrameworkAnnotation(String descriptor) {
+        return descriptor.startsWith("Lorg/spongepowered/asm/mixin/")
+                || descriptor.startsWith("Lcom/llamalad7/mixinextras/");
     }
 
     private static String insnToken(int opcode) {

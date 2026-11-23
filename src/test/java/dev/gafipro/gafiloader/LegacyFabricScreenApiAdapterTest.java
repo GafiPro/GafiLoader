@@ -365,6 +365,16 @@ class LegacyFabricScreenApiAdapterTest {
     }
 
     @Test
+    void rejectsMixinParameterAnnotationsThatWouldBeDiscarded() {
+        byte[] valid = legacyMixin(new String[] {MINECRAFT},
+                new String[] {"setScreen", "destroy", "tick", "doWorldLoad"}, null, false, null);
+        byte[] withCoerce = withParameterAnnotation(valid, "checkThreadOnDev", 0,
+                "Lorg/spongepowered/asm/mixin/injection/Coerce;");
+
+        assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.adapt(withCoerce));
+    }
+
+    @Test
     void rejectsMalformedOrIncompleteMixinConfigs() {
         assertThrows(IOException.class, () -> LegacyFabricScreenApiAdapter.addGuiMixinToConfig(
                 "{not-json".getBytes(StandardCharsets.UTF_8)));
@@ -795,6 +805,30 @@ class LegacyFabricScreenApiAdapterTest {
             default -> throw new IllegalArgumentException("Unexpected legacy screen handler: " + name);
         }
         handler.visitInsn(Opcodes.RETURN);
+    }
+
+    private static byte[] withParameterAnnotation(byte[] original, String methodName,
+                                                   int parameter, String annotationDescriptor) {
+        ClassReader reader = new ClassReader(original);
+        ClassWriter writer = new ClassWriter(0);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!methodName.equals(name)) return delegate;
+                return new MethodVisitor(Opcodes.ASM9, delegate) {
+                    @Override
+                    public void visitEnd() {
+                        AnnotationVisitor annotation = super.visitParameterAnnotation(
+                                parameter, annotationDescriptor, true);
+                        if (annotation != null) annotation.visitEnd();
+                        super.visitEnd();
+                    }
+                };
+            }
+        }, 0);
+        return writer.toByteArray();
     }
 
     private static byte[] withChangedMethodInvocation(byte[] original, String targetMethod,
