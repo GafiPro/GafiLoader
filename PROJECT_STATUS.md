@@ -1,3 +1,19 @@
+## Sessão de desenvolvimento — 2026-11-23 (fechar lacunas de anotações Mixin descartadas)
+
+- **Objetivo:** continuar a auditoria fail-closed da Screen API na PR #30 e verificar a adaptação contra o fonte oficial Fabric API 1.21.11/26.2.
+- **Estado inicial verificado:** `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) estava aberta em draft na branch `compat/fabric-screen-api-26.2`, cabeça `45ca1d90b2634f5011e83bd702a49d835eb8b165`. PR [#29](https://github.com/GafiPro/GafiLoader/pull/29) permanece aberta e não foi alterada. Nenhuma alteração foi integrada em `main`.
+- **Inspeção do projeto:** consultados este registo, README, `build.gradle`, `settings.gradle`, workflow, `LaunchBootstrap`, `LegacyModCompatibilityTransformer`, `LegacyFabricScreenApiAdapter` e os testes correspondentes. A cadeia confirma que o bootstrap prepara cópias staged e define `fabric.modsFolder` antes de delegar a `KnotClient`; a arquitetura ainda não é runtime-only.
+- **Estado CI anterior:** a run [45016009271](https://github.com/GafiPro/GafiLoader/actions/runs/45016009271), no commit anterior `45ca1d90`, terminou com sucesso nos jobs Ubuntu e Windows. O Windows publicou os artefactos `GafiLoader-Installer-Windows-x64` (ID `14751896805`) e `GafiLoader-Windows-x64` (ID `14752370445`), com expiração em 2026-11-25. Esta CI não valida o novo commit desta sessão nem o runtime.
+- **Comparação upstream:** consultados os fontes oficiais Fabric API `1.21.11` (`MinecraftMixin.java`) e `26.2` (`GuiMixin.java`, `MinecraftMixin.java`, `GuiExtensions.java` e `fabric-screen-api-v1.mixins.json`). A divisão gerada pelo adapter corresponde estruturalmente ao desenho 26.2: lifecycle normal em `GuiManager`, loading/shutdown em `Minecraft`, e a interface partilhada `GuiExtensions`. Isto é comparação estática de fontes; não prova que o JAR publicado contém exatamente esses bytes nem que o jogo arranca.
+- **Nova lacuna encontrada:** o verificador já comparava campos, handlers, selectors, `@At` e corpos de bytecode, mas não observava anotações Mixin em parâmetros, anotações de tipo, instruções, blocos try/catch ou variáveis locais. Como a classe legada é substituída, uma futura anotação como `@Coerce` poderia ser descartada sem ser revista.
+- **Alteração de produção:** `LegacyFabricScreenApiAdapter.java` passa a detetar anotações de `org.spongepowered.asm.mixin` e MixinExtras nos pontos de anotação adicionais e a rejeitar variantes não auditadas antes de gerar os Mixins 26.2. Também rejeita anotações Mixin não reconhecidas ao nível da classe.
+- **Regressão:** `LegacyFabricScreenApiAdapterTest.java` acrescenta um caso negativo que injeta `@Coerce` num parâmetro de handler e exige `IOException`; a fixture confirma que a anotação não pode ser silenciosamente descartada.
+- **Ficheiros alterados:** `src/main/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapter.java`, `src/test/java/dev/gafipro/gafiloader/LegacyFabricScreenApiAdapterTest.java` e este registo. Nenhum JAR de utilizador, mundo, perfil vanilla ou configuração local foi alterado.
+- **Commit de código/teste:** [`7fa09ee9988b4e3a7327b66da056b73ecf561b34`](https://github.com/GafiPro/GafiLoader/commit/7fa09ee9988b4e3a7327b66da056b73ecf561b34). A cabeça da PR foi atualizada com compare-and-swap; `main` não foi movida.
+- **Validação desta alteração:** não foi executado Gradle localmente. A tentativa de checkout/execução local não está disponível neste ambiente remoto. Até ao momento do registo, a API de Actions ainda não apresentava uma run associada ao novo SHA; as runs verdes acima pertencem ao commit anterior. Portanto, a nova alteração permanece **por validar em CI**.
+- **Limitações em aberto:** falta o JAR original `fabric-api-0.141.6+1.21.11.jar`, a cópia staged em `.gafiloader/compat-mods` e logs atuais `gafiloader-preflight.log`/`latest.log`. A última evidência de runtime continua a ser o log de 2026-11-02: Fabric registou `Dependencies overridden for fabric-api` e carregou 48 mods antes da falha da Mixin Screen API. Não há prova de chegada ao menu nem de eventos Screen funcionais.
+- **Próximos passos:** (1) confirmar CI para `7fa09ee` e corrigir qualquer falha sem relaxar o guard; (2) inspecionar o JAR real e a cópia staged e comparar hashes; (3) testar em Minecraft 26.2 os eventos de mudança, remoção, tick, loading e shutdown; (4) só depois avaliar runtime-only e retirar a PR #30 de draft.
+
 ## Sessão de desenvolvimento — 2026-11-22 (validar os corpos da Mixin Screen API antes de os substituir)
 
 - **Objetivo:** fechar a lacuna de segurança identificada na sessão de 2026-11-21: a adaptação Screen API substitui a MinecraftMixin legada, mas até agora verificava apenas a estrutura e as anotações, não o bytecode executável dos sete handlers nem do inicializador.
@@ -33,18 +49,19 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-22
+> Última atualização: 2026-11-23
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
-## Estado atual — 2026-11-22
+## Estado atual — 2026-11-23
 
-- main permanece em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; nenhuma alteração desta sessão foi integrada.
-- PR #30 continua aberta em draft na branch compat/fabric-screen-api-26.2. O último commit de código/testes validado é 89173e1545b36f638d7f3ad217169535437e0421; README e este registo foram atualizados separadamente.
-- A verificação fail-closed da Screen API cobre agora o construtor, o inicializador e os sete handlers; a CI 45015546230 passou em Ubuntu e Windows, incluindo empacotamento do instalador.
-- O gate de dependências da Fabric API estava ultrapassado no último log real conhecido; o bloqueio observado passou a ser a Mixin Screen API. Não existe ainda log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
-- A transformação continua a carregar cópias staged em .gafiloader/compat-mods; o requisito runtime-only e a validação funcional dos eventos Screen permanecem por cumprir.
-- PR #29 permanece aberta e sem alterações; PR #31 continua fechada. Não integrar nenhuma das propostas antes do teste end-to-end.
+- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; nenhuma alteração desta linha experimental foi integrada.
+- PR #30 continua aberta em draft. O último commit de código/teste é `7fa09ee9988b4e3a7327b66da056b73ecf561b34`; o novo guard de anotações Mixin ainda aguarda CI.
+- A Screen API tem validação fail-closed de estrutura, corpos dos sete handlers, inicializador e, agora, anotações Mixin de classe/método/parâmetro/tipo/instrução/try-catch/variável local.
+- A última CI verde conhecida é a run 45016009271 sobre o commit anterior `45ca1d90`; não deve ser atribuída ao novo SHA.
+- O gate de dependências foi ultrapassado no último log real conhecido, mas o bloqueio observado foi a Mixin Screen API. Não existe log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
+- A transformação continua a carregar cópias staged em `.gafiloader/compat-mods`; runtime-only e validação funcional dos eventos Screen permanecem por cumprir.
+- PR #29 permanece aberta e não foi alterada. Não integrar nenhuma das propostas antes do teste end-to-end.
 
 ## Estado histórico — 2026-11-21
 
