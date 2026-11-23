@@ -13,7 +13,7 @@
 - **Validação desta alteração:** GitHub Actions run [45158043899](https://github.com/GafiPro/GafiLoader/actions/runs/45158043899), run 896, sobre a cabeça `418090cb914e18980c014883bc01d1f8f174bd48` (que contém o commit de código/teste `7fa09ee`), terminou com sucesso nos dois sistemas. Ubuntu executou `./gradlew --no-daemon "-Pproject_version=0.1.896" clean test build`; Windows executou `gradlew.bat --no-daemon "-Pproject_version=0.1.896" clean test installDist`. No Windows passaram ainda app image com runtime Java, WiX, construção do instalador e uploads. Não foi executado Gradle localmente e não houve arranque real do Minecraft.
 - **Artefactos CI da run 896:** instalador `GafiLoader-Installer-Windows-x64`, ID `14809911180`, 50 527 876 bytes, digest ZIP `sha256:c6518062a7c69a13b67a8f5b4b5044bbb22074f3e18198c3eeef7d67c71111b5`, expira em 2026-11-26 10:40:43 UTC; app image `GafiLoader-Windows-x64`, ID `14809766520`, 50 297 838 bytes, digest ZIP `sha256:d6b5b1aea4229fd1288ce622cc827006992a9c30441ea5b3b89c52a6bcf7eb9a`, expira em 2026-11-26 10:40:46 UTC. São artefactos experimentais da PR, não um release nem prova de instalação/runtime num PC de utilizador.
 - **Limitações em aberto:** falta o JAR original `fabric-api-0.141.6+1.21.11.jar`, a cópia staged em `.gafiloader/compat-mods` e logs atuais `gafiloader-preflight.log`/`latest.log`. A última evidência de runtime continua a ser o log de 2026-11-02: Fabric registou `Dependencies overridden for fabric-api` e carregou 48 mods antes da falha da Mixin Screen API. Não há prova de chegada ao menu nem de eventos Screen funcionais.
-- **Próximos passos:** (1) confirmar CI para `7fa09ee` e corrigir qualquer falha sem relaxar o guard; (2) inspecionar o JAR real e a cópia staged e comparar hashes; (3) testar em Minecraft 26.2 os eventos de mudança, remoção, tick, loading e shutdown; (4) só depois avaliar runtime-only e retirar a PR #30 de draft.
+- **Próximos passos:** (1) obter e inspecionar o JAR real `fabric-api-0.141.6+1.21.11.jar` e a cópia staged, comparando hashes e conteúdo do módulo Screen; (2) obter `gafiloader-preflight.log` e `latest.log` de um arranque atual; (3) testar em Minecraft 26.2 os eventos de mudança, remoção, tick, loading e shutdown; (4) só depois avaliar runtime-only e retirar a PR #30 de draft.
 
 ## Sessão de desenvolvimento — 2026-11-22 (validar os corpos da Mixin Screen API antes de os substituir)
 
@@ -57,7 +57,7 @@
 ## Estado atual — 2026-11-23
 
 - `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; nenhuma alteração desta linha experimental foi integrada.
-- PR #30 continua aberta em draft. O último commit de código/teste é `7fa09ee9988b4e3a7327b66da056b73ecf561b34`; o novo guard de anotações Mixin ainda aguarda CI.
+- PR #30 continua aberta em draft. O último commit de código/teste é `7fa09ee9988b4e3a7327b66da056b73ecf561b34`; o novo guard de anotações Mixin passou na CI Ubuntu/Windows da run 45158043899.
 - A Screen API tem validação fail-closed de estrutura, corpos dos sete handlers, inicializador e, agora, anotações Mixin de classe/método/parâmetro/tipo/instrução/try-catch/variável local.
 - A CI da nova auditoria passou na run 45158043899 (run 896), sobre a cabeça `418090cb`; Ubuntu e Windows passaram testes/build, e Windows publicou app image e instalador. Isto não demonstra runtime.
 - O gate de dependências foi ultrapassado no último log real conhecido, mas o bloqueio observado foi a Mixin Screen API. Não existe log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
