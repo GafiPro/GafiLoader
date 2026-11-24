@@ -60,23 +60,37 @@ final class LegacyMinecraftVersionDetector {
      * Identifies binaries compiled for the 1.21.11 Intermediary namespace.
      * This is deliberately separate from {@link #matches(JsonObject)}, which decides
      * whether Fabric's declared Minecraft dependency needs an override.
+     *
+     * A dependency range is evidence of legacy bytecode only when it mentions 1.21.11
+     * and excludes 26.2. A broad lower bound such as >=1.21.11 also admits 26.2 and
+     * is not enough to infer which Minecraft namespace the binary uses. An explicit
+     * artifact suffix such as +1.21.11 remains an independent build marker.
      */
     static boolean targetsLegacyBytecode(JsonObject metadata) {
         if (metadata == null) return false;
         JsonElement depends = metadata.get("depends");
         if (depends != null && depends.isJsonObject()) {
             JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
-            if (containsLegacyVersionToken(minecraft)) return true;
-            if (minecraft != null && minecraft.isJsonArray()) {
-                for (JsonElement range : minecraft.getAsJsonArray()) {
-                    if (containsLegacyVersionToken(range)) return true;
-                }
+            if (minecraft != null && !constraintAdmitsTarget(minecraft)
+                    && containsLegacyVersionAlternative(minecraft)) {
+                return true;
             }
         }
         JsonElement version = metadata.get("version");
         return version != null && version.isJsonPrimitive()
                 && version.getAsJsonPrimitive().isString()
                 && LEGACY_ARTIFACT_SUFFIX.matcher(version.getAsString().trim()).find();
+    }
+
+    private static boolean containsLegacyVersionAlternative(JsonElement value) {
+        if (value == null) return false;
+        if (value.isJsonArray()) {
+            for (JsonElement alternative : value.getAsJsonArray()) {
+                if (containsLegacyVersionAlternative(alternative)) return true;
+            }
+            return false;
+        }
+        return containsLegacyVersion(value);
     }
 
     private static boolean constraintAdmitsTarget(JsonElement value) {
@@ -179,12 +193,6 @@ final class LegacyMinecraftVersionDetector {
             if (comparison != 0) return comparison;
         }
         return 0;
-    }
-
-    private static boolean containsLegacyVersionToken(JsonElement value) {
-        if (value == null || !value.isJsonPrimitive()
-                || !value.getAsJsonPrimitive().isString()) return false;
-        return TARGET_LEGACY_VERSION.matcher(value.getAsString()).find();
     }
 
     private static boolean containsLegacyVersion(JsonElement value) {

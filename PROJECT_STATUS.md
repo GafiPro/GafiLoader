@@ -1,3 +1,16 @@
+## Sessão de desenvolvimento — 2026-11-24 (evitar remapeamento por dependências Minecraft ambíguas)
+
+- **Objetivo:** auditar a decisão que ativa o remapeamento Intermediary de 1.21.11 e impedir que uma declaração de compatibilidade ampla seja confundida com prova da versão contra a qual o binário foi compilado.
+- **Estado inicial verificado:** main permanece em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; PR #30 continua aberta em draft na branch compat/fabric-screen-api-26.2, cabeça inicial 4fecc346a661042410288c64becc62a7593cc0ab. PR #29 continua aberta e não foi alterada. Não há alterações nesta linha experimental integradas em main.
+- **Inspeção:** consultados PROJECT_STATUS.md, README.md, build.gradle, settings.gradle, LaunchBootstrap, LegacyDependencyOverrideGenerator, LegacyMinecraftVersionDetector, LegacyModCompatibilityTransformer, testes e workflow. O último log real registado continua a mostrar que o gate Fabric foi ultrapassado antes da falha da Screen API; não existe log de runtime posterior a 2026-11-02.
+- **Problema confirmado por inspeção estática:** targetsLegacyBytecode usava containsLegacyVersionToken, classificando como binário 1.21.11 qualquer mod cujo intervalo mencionasse essa versão. Assim, um mod sem marcador de build, com minecraft: ">=1.21.11", podia ser remapeado com mappings 1.21.11 apesar de o intervalo também admitir Minecraft 26.2. Isto é um risco de classificação demonstrado pelo código; não é apresentado como crash observado.
+- **Alteração de produção:** LegacyMinecraftVersionDetector.targetsLegacyBytecode só usa o intervalo de Minecraft como evidência quando este menciona 1.21.11 e exclui 26.2. Intervalos alternativos são avaliados como conjunto: se alguma alternativa admitir 26.2, o intervalo não prova que o bytecode seja legado. O sufixo explícito de artefacto +1.21.11 continua a ser aceite como marcador independente, preservando o caso da Fabric API.
+- **Regressões acrescentadas:** testes para rejeitar inferência a partir de >=1.21.11 sem marcador, rejeitar alternativas que incluem ~26.2, e aceitar alternativas/ranges que apenas cobrem versões antigas. O teste existente do sufixo explícito +1.21.11 continua a cobrir esse marcador.
+- **Ficheiros alterados:** src/main/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.java, src/test/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetectorTest.java e este registo. Nenhum JAR, mundo, save, perfil vanilla ou configuração de utilizador foi alterado.
+- **Validação:** inspeção estática e revisão do diff. Gradle não foi executado localmente; a CI da PR será a validação executável desta alteração. Ainda não houve arranque Minecraft 26.2 nesta sessão.
+- **Limitações em aberto:** o JAR real fabric-api-0.141.6+1.21.11.jar, a cópia staged e os logs atuais gafiloader-preflight.log/latest.log continuam em falta. A adaptação Screen API ainda não foi validada em runtime e a pipeline continua a usar cópias staged.
+- **Próximos passos:** (1) aguardar CI Ubuntu/Windows e corrigir falhas sem enfraquecer os guards; (2) obter o JAR original/staged e logs atuais para validar a Screen API; (3) testar os eventos Screen em Minecraft 26.2; (4) manter a PR em draft até existir prova end-to-end.
+
 ## Sessão de desenvolvimento — 2026-11-23 (fechar lacunas de anotações Mixin descartadas)
 
 - **Objetivo:** continuar a auditoria fail-closed da Screen API na PR #30 e verificar a adaptação contra o fonte oficial Fabric API 1.21.11/26.2.
@@ -50,20 +63,19 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-23
+> Última atualização: 2026-11-24
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
-## Estado atual — 2026-11-23
+## Estado atual — 2026-11-24
 
-- `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; nenhuma alteração desta linha experimental foi integrada.
-- PR #30 continua aberta em draft. O último commit de código/teste é `7fa09ee9988b4e3a7327b66da056b73ecf561b34`; o novo guard de anotações Mixin passou na CI Ubuntu/Windows da run 45158043899.
-- A Screen API tem validação fail-closed de estrutura, corpos dos sete handlers, inicializador e, agora, anotações Mixin de classe/método/parâmetro/tipo/instrução/try-catch/variável local.
-- A CI da nova auditoria passou na run 45158043899 (run 896), sobre a cabeça `418090cb`; Ubuntu e Windows passaram testes/build, e Windows publicou app image e instalador. Isto não demonstra runtime.
-- O gate de dependências foi ultrapassado no último log real conhecido, mas o bloqueio observado foi a Mixin Screen API. Não existe log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
-- A transformação continua a carregar cópias staged em `.gafiloader/compat-mods`; runtime-only e validação funcional dos eventos Screen permanecem por cumprir.
+- main permanece em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; nenhuma alteração desta linha experimental foi integrada.
+- PR #30 continua aberta em draft na branch compat/fabric-screen-api-26.2. A auditoria do classificador de bytecode foi acrescentada nesta sessão; a CI desta alteração está pendente.
+- A Screen API mantém validação fail-closed da estrutura, corpos dos sete handlers, inicializador e anotações Mixin auditadas. Ainda não existe validação runtime.
+- O classificador de bytecode deixa de inferir namespace 1.21.11 a partir de intervalos amplos que também admitem 26.2; o marcador explícito +1.21.11 continua suportado.
+- O gate de dependências foi ultrapassado no último log real conhecido, mas a falha seguinte foi a Mixin Screen API. Não existe log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
+- A transformação continua a carregar cópias staged em .gafiloader/compat-mods; runtime-only e validação funcional dos eventos Screen permanecem por cumprir.
 - PR #29 permanece aberta e não foi alterada. Não integrar nenhuma das propostas antes do teste end-to-end.
-
 ## Estado histórico — 2026-11-21
 
 - `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; nenhuma alteração foi integrada em main nesta sessão.

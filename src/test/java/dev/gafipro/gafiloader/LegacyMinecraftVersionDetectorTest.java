@@ -98,6 +98,38 @@ class LegacyMinecraftVersionDetectorTest {
     }
 
     @Test
+    void doesNotInferLegacyBytecodeFromAnUnboundedLowerBoundThatAdmits262() {
+        var metadata = JsonParser.parseString("""
+                {"id":"broad","version":"1.0.0","depends":{"minecraft":">=1.21.11"}}
+                """).getAsJsonObject();
+        assertFalse(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+    }
+
+    @Test
+    void doesNotInferLegacyBytecodeWhenOneDependencyAlternativeAdmits262() {
+        var metadata = JsonParser.parseString("""
+                {"id":"multi","version":"1.0.0","depends":{"minecraft":["~1.21.11","~26.2"]}}
+                """).getAsJsonObject();
+        assertFalse(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+    }
+
+    @Test
+    void recognizesLegacyBytecodeFromLegacyOnlyDependencyAlternatives() {
+        var metadata = JsonParser.parseString("""
+                {"id":"legacy-binary","version":"1.0.0","depends":{"minecraft":["~1.21.11","~1.21.10"]}}
+                """).getAsJsonObject();
+        assertTrue(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+    }
+
+    @Test
+    void recognizesLegacyBytecodeFromALegacyOnlyBoundedRange() {
+        var metadata = JsonParser.parseString("""
+                {"id":"legacy-binary","version":"1.0.0","depends":{"minecraft":">=1.21.11 <26.2"}}
+                """).getAsJsonObject();
+        assertTrue(LegacyMinecraftVersionDetector.targetsLegacyBytecode(metadata));
+    }
+
+    @Test
     void recognizesLegacyArtifactVersionWhenMinecraftRangeIsIndirect() {
         assertTrue(matches("""
                 {"id":"fabric-api","version":"0.141.6+1.21.11","depends":{"fabricloader":">=0.16.0"}}
