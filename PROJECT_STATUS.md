@@ -7,9 +7,11 @@
 - **Alteração de produção:** LegacyMinecraftVersionDetector.targetsLegacyBytecode só usa o intervalo de Minecraft como evidência quando este menciona 1.21.11 e exclui 26.2. Intervalos alternativos são avaliados como conjunto: se alguma alternativa admitir 26.2, o intervalo não prova que o bytecode seja legado. O sufixo explícito de artefacto +1.21.11 continua a ser aceite como marcador independente, preservando o caso da Fabric API.
 - **Regressões acrescentadas:** testes para rejeitar inferência a partir de >=1.21.11 sem marcador, rejeitar alternativas que incluem ~26.2, e aceitar alternativas/ranges que apenas cobrem versões antigas. O teste existente do sufixo explícito +1.21.11 continua a cobrir esse marcador.
 - **Ficheiros alterados:** src/main/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetector.java, src/test/java/dev/gafipro/gafiloader/LegacyMinecraftVersionDetectorTest.java e este registo. Nenhum JAR, mundo, save, perfil vanilla ou configuração de utilizador foi alterado.
-- **Validação:** inspeção estática e revisão do diff. Gradle não foi executado localmente; a CI da PR será a validação executável desta alteração. Ainda não houve arranque Minecraft 26.2 nesta sessão.
+- **Commit de código/testes:** [62e67a07273fcde1e096f58e1ed7c2d9ba8ffba6](https://github.com/GafiPro/GafiLoader/commit/62e67a07273fcde1e096f58e1ed7c2d9ba8ffba6).
+- **Validação CI:** a run [45375668938](https://github.com/GafiPro/GafiLoader/actions/runs/45375668938), run 899, executada exatamente sobre o commit 62e67a0, terminou com sucesso em Ubuntu e Windows. Ubuntu executou ./gradlew --no-daemon "-Pproject_version=0.1.899" clean test build e terminou BUILD SUCCESSFUL em 23 s. Windows executou .\gradlew.bat --no-daemon "-Pproject_version=0.1.899" clean test installDist e terminou BUILD SUCCESSFUL em 34 s. No Windows passaram ainda a app image com runtime Java, WiX, construção do instalador e upload dos dois artefactos. Gradle não foi executado localmente; não houve arranque Minecraft 26.2.
+- **Artefactos CI da run 899:** instalador GafiLoader-Installer-Windows-x64, ID 14910468704, 50 527 366 bytes, digest ZIP sha256:c5486c259a1e73bdd9ef695b9b0a909ecf75e3a69055985234f198b73d783213, expira em 2026-11-27 10:33:39 UTC; app image GafiLoader-Windows-x64, ID 14910049073, 50 297 791 bytes, digest ZIP sha256:75be1e0e2c32a772e54c343d9fc63273e101b97593fe302e84acc43c262c2e86, expira em 2026-11-27 10:33:42 UTC. São artefactos experimentais de CI, não um release nem prova de instalação/runtime num PC de utilizador.
 - **Limitações em aberto:** o JAR real fabric-api-0.141.6+1.21.11.jar, a cópia staged e os logs atuais gafiloader-preflight.log/latest.log continuam em falta. A adaptação Screen API ainda não foi validada em runtime e a pipeline continua a usar cópias staged.
-- **Próximos passos:** (1) aguardar CI Ubuntu/Windows e corrigir falhas sem enfraquecer os guards; (2) obter o JAR original/staged e logs atuais para validar a Screen API; (3) testar os eventos Screen em Minecraft 26.2; (4) manter a PR em draft até existir prova end-to-end.
+- **Próximos passos:** (1) obter o JAR original fabric-api-0.141.6+1.21.11.jar, a cópia staged e os logs atuais para confirmar o conteúdo efetivamente transformado; (2) testar os eventos Screen em Minecraft 26.2; (3) só depois avaliar runtime-only; (4) manter a PR em draft até existir prova end-to-end.
 
 ## Sessão de desenvolvimento — 2026-11-23 (fechar lacunas de anotações Mixin descartadas)
 
@@ -70,9 +72,11 @@
 ## Estado atual — 2026-11-24
 
 - main permanece em 6bd4cef9cdee2ededde8518f5edd19e11cd657b7; nenhuma alteração desta linha experimental foi integrada.
-- PR #30 continua aberta em draft na branch compat/fabric-screen-api-26.2. A auditoria do classificador de bytecode foi acrescentada nesta sessão; a CI desta alteração está pendente.
+- PR #30 continua aberta em draft na branch compat/fabric-screen-api-26.2. O último commit de código/testes é 62e67a07273fcde1e096f58e1ed7c2d9ba8ffba6.
+- A auditoria do classificador de bytecode impede inferir namespace 1.21.11 a partir de intervalos amplos que também admitem 26.2; os testes de regressão passaram na CI Ubuntu/Windows da run 45375668938 (run 899).
+- Ubuntu passou clean test build; Windows passou clean test installDist, app image com runtime Java, WiX e instalador. Isto valida testes/build/empacotamento, não compatibilidade runtime.
+- Artefactos experimentais: instalador ID 14910468704 e app image ID 14910049073, disponíveis até 2026-11-27; não foram instalados nem testados num PC de utilizador.
 - A Screen API mantém validação fail-closed da estrutura, corpos dos sete handlers, inicializador e anotações Mixin auditadas. Ainda não existe validação runtime.
-- O classificador de bytecode deixa de inferir namespace 1.21.11 a partir de intervalos amplos que também admitem 26.2; o marcador explícito +1.21.11 continua suportado.
 - O gate de dependências foi ultrapassado no último log real conhecido, mas a falha seguinte foi a Mixin Screen API. Não existe log de runtime posterior a 2026-11-02 nem prova de chegada ao menu.
 - A transformação continua a carregar cópias staged em .gafiloader/compat-mods; runtime-only e validação funcional dos eventos Screen permanecem por cumprir.
 - PR #29 permanece aberta e não foi alterada. Não integrar nenhuma das propostas antes do teste end-to-end.
