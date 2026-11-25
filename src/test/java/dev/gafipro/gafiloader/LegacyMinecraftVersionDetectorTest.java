@@ -146,6 +146,16 @@ class LegacyMinecraftVersionDetectorTest {
                 """));
     }
 
+    @Test
+    void safelyEvaluatesVeryLargeNumericVersionComponents() {
+        assertFalse(matches("""
+                {"id":"large-version","depends":{"minecraft":">=1.21.11 <999999999999999999999999999999999999"}}
+                """));
+        assertFalse(matches("""
+                {"id":"large-wildcard","depends":{"minecraft":["~1.21.11","999999999999999999999999.x"]}}
+                """));
+    }
+
     private static boolean matches(String metadata) {
         return LegacyMinecraftVersionDetector.matches(
                 JsonParser.parseString(metadata).getAsJsonObject());
