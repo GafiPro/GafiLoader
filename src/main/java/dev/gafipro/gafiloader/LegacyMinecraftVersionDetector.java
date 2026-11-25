@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
+import java.math.BigInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -161,7 +162,7 @@ final class LegacyMinecraftVersionDetector {
         String[] targetParts = "26.2".split(Pattern.quote("."));
         for (int i = 0; i < prefixParts.length; i++) {
             int targetPart = i < targetParts.length ? Integer.parseInt(targetParts[i]) : 0;
-            if (Integer.parseInt(prefixParts[i]) != targetPart) return false;
+            if (new BigInteger(prefixParts[i]).compareTo(BigInteger.valueOf(targetPart)) != 0) return false;
         }
         return true;
     }
@@ -187,9 +188,9 @@ final class LegacyMinecraftVersionDetector {
         String[] rightParts = right.split(Pattern.quote("."));
         int length = Math.max(leftParts.length, rightParts.length);
         for (int i = 0; i < length; i++) {
-            int leftPart = i < leftParts.length ? Integer.parseInt(leftParts[i]) : 0;
-            int rightPart = i < rightParts.length ? Integer.parseInt(rightParts[i]) : 0;
-            int comparison = Integer.compare(leftPart, rightPart);
+            BigInteger leftPart = new BigInteger(i < leftParts.length ? leftParts[i] : "0");
+            BigInteger rightPart = new BigInteger(i < rightParts.length ? rightParts[i] : "0");
+            int comparison = leftPart.compareTo(rightPart);
             if (comparison != 0) return comparison;
         }
         return 0;
