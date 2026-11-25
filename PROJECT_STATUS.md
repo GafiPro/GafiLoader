@@ -1,3 +1,16 @@
+## Sessão de desenvolvimento — 2026-11-25 (versões numéricas grandes em metadados Fabric)
+
+- **Objetivo:** eliminar falhas de parsing evitáveis quando um mod declara componentes numéricos de versão muito grandes em `depends.minecraft`. O detector é executado no preflight, pelo que metadados válidos/estranhos não devem provocar uma exceção aritmética acidental.
+- **Estado inicial verificado:** `main` continua em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; PR #30 está aberta em draft na branch `compat/fabric-screen-api-26.2`. PR #29 não foi alterada. A CI run 899 (`45375668938`) do commit `62e67a0` foi confirmada concluída: Ubuntu e Windows passaram; no Windows também passaram app image, WiX, instalador e uploads. Esta verificação de jobs confirma build/testes, não runtime Minecraft.
+- **Problema encontrado por revisão estática:** `compareNumericVersions`, a verificação de prefixos wildcard e os limites de `~`/`^` usavam `Integer.parseInt`. Um componente numérico extenso que satisfaz a gramática do detector podia lançar `NumberFormatException` durante a avaliação de uma constraint, interrompendo o preflight.
+- **Correção na branch experimental:** a comparação de componentes e o cálculo dos limites superiores usam agora `BigInteger`, sem alterar a regra de comparação numérica nem o alvo 26.2. A alteração fica confinada ao parser de constraints; não muda a política de override ou a classificação de bytecode.
+- **Testes acrescentados:** constraints com números muito grandes em limites, wildcard, tilde e caret. Os casos verificam que o detector avalia as versões sem overflow de 32 bits e mantém a decisão esperada para o alvo.
+- **Ficheiros:** `LegacyMinecraftVersionDetector.java` e `LegacyMinecraftVersionDetectorTest.java`. Não foram alterados mods, JARs, saves, perfis ou ficheiros do utilizador.
+- **Commits da alteração:** [`5dad80c`](https://github.com/GafiPro/GafiLoader/commit/5dad80c1000612224a23f63c48a5f175eab52178) (comparação BigInteger), [`d0fc66a`](https://github.com/GafiPro/GafiLoader/commit/d0fc66ab13713f0e078c5e23529165614adcf896) (testes iniciais), [`51d2f67`](https://github.com/GafiPro/GafiLoader/commit/51d2f67b5509aa5af3174a157d8e1336b65c7554) (corrigir expectativa para array OR), [`7f40885`](https://github.com/GafiPro/GafiLoader/commit/7f40885db751e2bdc7842911f8446b33b7ab1cb3) (limites tilde/caret com precisão arbitrária), [`48c8039`](https://github.com/GafiPro/GafiLoader/commit/48c8039cebb703186da392cf84ab52614ed79239) (teste tilde) e [`a0285ba`](https://github.com/GafiPro/GafiLoader/commit/a0285baded756c9f626af1cf934a67af70f0774d) (teste caret).
+- **Validação desta alteração:** revisão estática dos diffs e atualização sequencial dos ficheiros pela API GitHub. Gradle/JUnit não foram executados neste ambiente. A CI desencadeada pelos commits mais recentes ainda precisa de ser consultada; não se declara a regressão aprovada até o workflow concluir.
+- **Limitações:** o problema prioritário de runtime Screen API permanece sem log/JAR atual do utilizador. O caminho staged continua experimental e não é runtime-only.
+- **Próximos passos:** (1) verificar a CI sobre a cabeça atual da PR; (2) corrigir qualquer falha sem enfraquecer os guards; (3) obter JAR original/staged e logs atuais para validar a Screen API em Minecraft 26.2.
+
 ## Sessão de desenvolvimento — 2026-11-24 (evitar remapeamento por dependências Minecraft ambíguas)
 
 - **Objetivo:** auditar a decisão que ativa o remapeamento Intermediary de 1.21.11 e impedir que uma declaração de compatibilidade ampla seja confundida com prova da versão contra a qual o binário foi compilado.
@@ -65,7 +78,7 @@
 # GafiLoader — Registo de progresso
 
 > Objetivo: manter um registo persistente e verificável do estado do projeto, para retomar o trabalho sem perder decisões, resultados ou próximos passos.
-> Última atualização: 2026-11-24
+> Última atualização: 2026-11-25
 > Repositório: https://github.com/GafiPro/GafiLoader
 > Branch principal: `main`
 
