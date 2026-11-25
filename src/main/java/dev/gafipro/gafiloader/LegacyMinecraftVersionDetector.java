@@ -169,18 +169,24 @@ final class LegacyMinecraftVersionDetector {
 
     private static String tildeUpperBound(String version) {
         String[] parts = version.split(Pattern.quote("."));
-        if (parts.length == 1) return (Integer.parseInt(parts[0]) + 1) + ".0";
-        return parts[0] + "." + (Integer.parseInt(parts[1]) + 1);
+        if (parts.length == 1) {
+            return new BigInteger(parts[0]).add(BigInteger.ONE) + ".0";
+        }
+        return parts[0] + "." + new BigInteger(parts[1]).add(BigInteger.ONE);
     }
 
     private static String caretUpperBound(String version) {
         String[] parts = version.split(Pattern.quote("."));
-        int major = Integer.parseInt(parts[0]);
-        int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-        if (major > 0 || parts.length == 1) return (major + 1) + ".0";
-        if (minor > 0 || parts.length == 2) return "0." + (minor + 1);
-        int patch = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
-        return "0.0." + (patch + 1);
+        BigInteger major = new BigInteger(parts[0]);
+        BigInteger minor = parts.length > 1 ? new BigInteger(parts[1]) : BigInteger.ZERO;
+        if (major.signum() > 0 || parts.length == 1) {
+            return major.add(BigInteger.ONE) + ".0";
+        }
+        if (minor.signum() > 0 || parts.length == 2) {
+            return "0." + minor.add(BigInteger.ONE);
+        }
+        BigInteger patch = parts.length > 2 ? new BigInteger(parts[2]) : BigInteger.ZERO;
+        return "0.0." + patch.add(BigInteger.ONE);
     }
 
     private static int compareNumericVersions(String left, String right) {
