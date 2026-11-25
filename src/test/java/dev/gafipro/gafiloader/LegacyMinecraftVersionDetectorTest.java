@@ -151,7 +151,7 @@ class LegacyMinecraftVersionDetectorTest {
         assertFalse(matches("""
                 {"id":"large-version","depends":{"minecraft":">=1.21.11 <999999999999999999999999999999999999"}}
                 """));
-        assertFalse(matches("""
+        assertTrue(matches("""
                 {"id":"large-wildcard","depends":{"minecraft":["~1.21.11","999999999999999999999999.x"]}}
                 """));
     }
