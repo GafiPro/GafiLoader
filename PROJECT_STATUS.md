@@ -628,3 +628,13 @@ Em cada sessão de trabalho:
 - Limitação: o endpoint de workflows disponível não devolveu runs associados ao push do merge commit `32ec10d`; a evidência de CI é a execução PR verde sobre o mesmo código de runtime, antes do squash. O merge acrescentou apenas o teste e o registo.
 - Estado de runtime: não há ainda um novo log do utilizador após a adaptação SystemReport. A CI demonstra compilação, testes, transformação em fixture e empacotamento, não demonstra que Minecraft 26.2 chega ao menu com a Fabric API real.
 - Próximos passos: (1) testar o instalador 0.1.767 no perfil dedicado; (2) verificar o preflight e o primeiro erro de `latest.log`; (3) confirmar a pasta staged e a preservação dos originais; (4) só então avaliar a próxima incompatibilidade.
+
+
+### 2026-11-26 — Verificação independente da CI mais recente da PR #30
+
+- **Objetivo:** confirmar a validação automatizada da cabeça atual da implementação experimental, sem confundir CI com teste de runtime.
+- **Estado verificado:** branch `compat/fabric-screen-api-26.2`, commit `ddbdcaa804daf272ac76155879acaffc44bc5914`; PR [#30](https://github.com/GafiPro/GafiLoader/pull/30) continua aberta em draft. `main` permanece em `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`; nenhuma alteração desta branch foi integrada.
+- **CI confirmada:** run [45591674630](https://github.com/GafiPro/GafiLoader/actions/runs/45591674630), número 905, executada sobre exatamente o commit acima, terminou `success`. Job Ubuntu: wrapper Gradle, `clean test build` concluído. Job Windows: wrapper Gradle, `clean test installDist`, app image com Java, WiX, instalador e uploads concluídos com sucesso. Esta confirmação foi feita consultando os resultados dos jobs e passos, não apenas o resumo da run.
+- **Artefactos:** run 905 publicou o instalador e a app image; não foram descarregados nem instalados nesta sessão. Os artefactos da run 899 documentados anteriormente expiram em 2026-11-27, pelo que não devem ser tratados como distribuição permanente.
+- **Limitação essencial:** não existe nesta sessão acesso ao Minecraft do utilizador nem ao JAR/log runtime atualizado. Portanto, esta CI não confirma a compatibilidade funcional da Fabric Screen API, o menu do Minecraft 26.2, os eventos de ecrã, nem uma instalação Windows real. Os JAR originais permanecem protegidos por testes de fixture, mas a verificação de hashes em instalação real continua pendente.
+- **Próximo passo prioritário:** utilizar o artefacto atual da run 905 e recolher, após um arranque controlado, `logs/gafiloader-preflight.log`, `logs/latest.log` e hashes dos JARs original/staged; manter a PR em draft até essa validação.
