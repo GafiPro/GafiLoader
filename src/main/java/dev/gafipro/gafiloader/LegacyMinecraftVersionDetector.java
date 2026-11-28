@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
+import java.math.BigInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -60,23 +61,37 @@ final class LegacyMinecraftVersionDetector {
      * Identifies binaries compiled for the 1.21.11 Intermediary namespace.
      * This is deliberately separate from {@link #matches(JsonObject)}, which decides
      * whether Fabric's declared Minecraft dependency needs an override.
+     *
+     * A dependency range is evidence of legacy bytecode only when it mentions 1.21.11
+     * and excludes 26.2. A broad lower bound such as >=1.21.11 also admits 26.2 and
+     * is not enough to infer which Minecraft namespace the binary uses. An explicit
+     * artifact suffix such as +1.21.11 remains an independent build marker.
      */
     static boolean targetsLegacyBytecode(JsonObject metadata) {
         if (metadata == null) return false;
         JsonElement depends = metadata.get("depends");
         if (depends != null && depends.isJsonObject()) {
             JsonElement minecraft = depends.getAsJsonObject().get("minecraft");
-            if (containsLegacyVersionToken(minecraft)) return true;
-            if (minecraft != null && minecraft.isJsonArray()) {
-                for (JsonElement range : minecraft.getAsJsonArray()) {
-                    if (containsLegacyVersionToken(range)) return true;
-                }
+            if (minecraft != null && !constraintAdmitsTarget(minecraft)
+                    && containsLegacyVersionAlternative(minecraft)) {
+                return true;
             }
         }
         JsonElement version = metadata.get("version");
         return version != null && version.isJsonPrimitive()
                 && version.getAsJsonPrimitive().isString()
                 && LEGACY_ARTIFACT_SUFFIX.matcher(version.getAsString().trim()).find();
+    }
+
+    private static boolean containsLegacyVersionAlternative(JsonElement value) {
+        if (value == null) return false;
+        if (value.isJsonArray()) {
+            for (JsonElement alternative : value.getAsJsonArray()) {
+                if (containsLegacyVersionAlternative(alternative)) return true;
+            }
+            return false;
+        }
+        return containsLegacyVersion(value);
     }
 
     private static boolean constraintAdmitsTarget(JsonElement value) {
@@ -147,25 +162,31 @@ final class LegacyMinecraftVersionDetector {
         String[] targetParts = "26.2".split(Pattern.quote("."));
         for (int i = 0; i < prefixParts.length; i++) {
             int targetPart = i < targetParts.length ? Integer.parseInt(targetParts[i]) : 0;
-            if (Integer.parseInt(prefixParts[i]) != targetPart) return false;
+            if (new BigInteger(prefixParts[i]).compareTo(BigInteger.valueOf(targetPart)) != 0) return false;
         }
         return true;
     }
 
     private static String tildeUpperBound(String version) {
         String[] parts = version.split(Pattern.quote("."));
-        if (parts.length == 1) return (Integer.parseInt(parts[0]) + 1) + ".0";
-        return parts[0] + "." + (Integer.parseInt(parts[1]) + 1);
+        if (parts.length == 1) {
+            return new BigInteger(parts[0]).add(BigInteger.ONE) + ".0";
+        }
+        return parts[0] + "." + new BigInteger(parts[1]).add(BigInteger.ONE);
     }
 
     private static String caretUpperBound(String version) {
         String[] parts = version.split(Pattern.quote("."));
-        int major = Integer.parseInt(parts[0]);
-        int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-        if (major > 0 || parts.length == 1) return (major + 1) + ".0";
-        if (minor > 0 || parts.length == 2) return "0." + (minor + 1);
-        int patch = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
-        return "0.0." + (patch + 1);
+        BigInteger major = new BigInteger(parts[0]);
+        BigInteger minor = parts.length > 1 ? new BigInteger(parts[1]) : BigInteger.ZERO;
+        if (major.signum() > 0 || parts.length == 1) {
+            return major.add(BigInteger.ONE) + ".0";
+        }
+        if (minor.signum() > 0 || parts.length == 2) {
+            return "0." + minor.add(BigInteger.ONE);
+        }
+        BigInteger patch = parts.length > 2 ? new BigInteger(parts[2]) : BigInteger.ZERO;
+        return "0.0." + patch.add(BigInteger.ONE);
     }
 
     private static int compareNumericVersions(String left, String right) {
@@ -173,18 +194,12 @@ final class LegacyMinecraftVersionDetector {
         String[] rightParts = right.split(Pattern.quote("."));
         int length = Math.max(leftParts.length, rightParts.length);
         for (int i = 0; i < length; i++) {
-            int leftPart = i < leftParts.length ? Integer.parseInt(leftParts[i]) : 0;
-            int rightPart = i < rightParts.length ? Integer.parseInt(rightParts[i]) : 0;
-            int comparison = Integer.compare(leftPart, rightPart);
+            BigInteger leftPart = new BigInteger(i < leftParts.length ? leftParts[i] : "0");
+            BigInteger rightPart = new BigInteger(i < rightParts.length ? rightParts[i] : "0");
+            int comparison = leftPart.compareTo(rightPart);
             if (comparison != 0) return comparison;
         }
         return 0;
-    }
-
-    private static boolean containsLegacyVersionToken(JsonElement value) {
-        if (value == null || !value.isJsonPrimitive()
-                || !value.getAsJsonPrimitive().isString()) return false;
-        return TARGET_LEGACY_VERSION.matcher(value.getAsString()).find();
     }
 
     private static boolean containsLegacyVersion(JsonElement value) {

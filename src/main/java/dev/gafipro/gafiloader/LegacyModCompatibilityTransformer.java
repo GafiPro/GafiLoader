@@ -65,7 +65,7 @@ final class LegacyModCompatibilityTransformer {
 
     Result prepare(Path sourceModsDirectory, Path gameDirectory) throws IOException {
         if (sourceModsDirectory == null || !Files.isDirectory(sourceModsDirectory)) {
-            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, 0, 0, List.of());
+            return new Result(false, sourceModsDirectory, 0, 0, 0, 0, 0, 0, 0, List.of());
         }
 
         Path source = sourceModsDirectory.toAbsolutePath().normalize();
@@ -76,7 +76,7 @@ final class LegacyModCompatibilityTransformer {
             throw new IOException("Refusing to create compatibility files outside the active game directory.");
         }
         if (source.startsWith(staging)) {
-            return new Result(false, source, 0, 0, 0, 0, 0, 0,
+            return new Result(false, source, 0, 0, 0, 0, 0, 0, 0,
                     List.of("The configured mods directory points inside GafiLoader's own compatibility cache; "
                             + "automatic compatibility rewrites were skipped."));
         }
@@ -90,7 +90,7 @@ final class LegacyModCompatibilityTransformer {
                     .toList();
         }
         if (jarPaths.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, 0, 0, List.of());
+            return new Result(false, source, 0, 0, 0, 0, 0, 0, 0, List.of());
         }
 
         // Load the full 1.21.11 namespace bridge when any top-level or nested mod
@@ -125,6 +125,7 @@ final class LegacyModCompatibilityTransformer {
         int rewrittenMixinRefmaps = 0;
         int remappedClasses = 0;
         int adaptedModelLoadingClasses = 0;
+        int adaptedScreenApiModules = 0;
         for (Path jarPath : jarPaths) {
             byte[] originalBytes;
             try {
@@ -140,18 +141,20 @@ final class LegacyModCompatibilityTransformer {
             warnings.addAll(transformed.warnings());
             if (transformed.rewrittenReferences() > 0 || transformed.rewrittenClassTweakerFiles() > 0
                     || transformed.rewrittenMixinRefmaps() > 0 || transformed.remappedClasses() > 0
-                    || transformed.adaptedModelLoadingClasses() > 0) {
+                    || transformed.adaptedModelLoadingClasses() > 0
+                    || transformed.adaptedScreenApiModules() > 0) {
                 changedArchives.put(source.relativize(jarPath), transformed.bytes());
                 rewrittenReferences += transformed.rewrittenReferences();
                 rewrittenClassTweakerFiles += transformed.rewrittenClassTweakerFiles();
                 rewrittenMixinRefmaps += transformed.rewrittenMixinRefmaps();
                 remappedClasses += transformed.remappedClasses();
                 adaptedModelLoadingClasses += transformed.adaptedModelLoadingClasses();
+                adaptedScreenApiModules += transformed.adaptedScreenApiModules();
             }
         }
 
         if (changedArchives.isEmpty()) {
-            return new Result(false, source, 0, 0, 0, 0, 0, 0, List.copyOf(warnings));
+            return new Result(false, source, 0, 0, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
 
         if (Files.isSymbolicLink(internalRoot)) {
@@ -239,7 +242,7 @@ final class LegacyModCompatibilityTransformer {
 
         return new Result(true, staging, rewrittenReferences, rewrittenClassTweakerFiles,
                 rewrittenMixinRefmaps, remappedClasses, adaptedModelLoadingClasses,
-                changedArchives.size(), List.copyOf(warnings));
+                adaptedScreenApiModules, changedArchives.size(), List.copyOf(warnings));
     }
 
     private static Set<String> collectMixinRefmapResources(byte[] archive) throws IOException {
@@ -415,6 +418,8 @@ final class LegacyModCompatibilityTransformer {
                 ? collectMixinTargets(originalBytes) : Map.of();
         boolean adaptLegacyModelLoadingApi = remapIntermediaryBytecode
                 && declaresModId(originalBytes, LegacyFabricModelLoadingApiAdapter.MODULE_ID);
+        boolean adaptLegacyScreenApi = remapIntermediaryBytecode
+                && declaresModId(originalBytes, LegacyFabricScreenApiAdapter.MODULE_ID);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean archiveChanged = false;
         int rewrittenReferences = 0;
@@ -422,6 +427,11 @@ final class LegacyModCompatibilityTransformer {
         int rewrittenMixinRefmaps = 0;
         int remappedClasses = 0;
         int adaptedModelLoadingClasses = 0;
+        int adaptedScreenApiModules = 0;
+        boolean screenMixinFound = false;
+        boolean screenConfigFound = false;
+        byte[] generatedGuiMixin = null;
+        byte[] generatedGuiExtensions = null;
         List<String> warnings = new ArrayList<>();
         long expandedBytes = 0;
 
@@ -447,6 +457,12 @@ final class LegacyModCompatibilityTransformer {
                             + MAX_EXPANDED_ARCHIVE_BYTES + "-byte safety limit.");
                 }
                 if (!entry.isDirectory()) {
+                    if (adaptLegacyScreenApi
+                            && (LegacyFabricScreenApiAdapter.GUI_MIXIN_ENTRY.equals(entryName)
+                            || LegacyFabricScreenApiAdapter.GUI_EXTENSIONS_ENTRY.equals(entryName))) {
+                        throw new IOException("The legacy fabric-screen-api-v1 module already contains a "
+                                + "26.2 screen compatibility class (" + entryName + "); refusing to overwrite it.");
+                    }
                     String lowerName = entryName.toLowerCase(Locale.ROOT);
                     if (lowerName.endsWith(".class")) {
                         if (remapIntermediaryBytecode) {
@@ -460,6 +476,22 @@ final class LegacyModCompatibilityTransformer {
                                 archiveChanged = true;
                                 remappedClasses++;
                             }
+                        }
+
+                        if (adaptLegacyScreenApi
+                                && LegacyFabricScreenApiAdapter.LEGACY_MIXIN_ENTRY.equals(entryName)) {
+                            if (screenMixinFound) {
+                                throw new IOException("The legacy fabric-screen-api-v1 module contains duplicate "
+                                        + "MinecraftMixin classes; refusing an ambiguous screen migration.");
+                            }
+                            LegacyFabricScreenApiAdapter.Result screenResult =
+                                    LegacyFabricScreenApiAdapter.adapt(data);
+                            data = screenResult.minecraftMixinBytes();
+                            generatedGuiMixin = screenResult.guiMixinBytes();
+                            generatedGuiExtensions = screenResult.guiExtensionsBytes();
+                            screenMixinFound = true;
+                            adaptedScreenApiModules++;
+                            archiveChanged = true;
                         }
 
                         if (adaptLegacyModelLoadingApi) {
@@ -499,7 +531,8 @@ final class LegacyModCompatibilityTransformer {
                         warnings.addAll(nested.warnings());
                         if (nested.rewrittenReferences() > 0 || nested.rewrittenClassTweakerFiles() > 0
                                 || nested.rewrittenMixinRefmaps() > 0 || nested.remappedClasses() > 0
-                                || nested.adaptedModelLoadingClasses() > 0) {
+                                || nested.adaptedModelLoadingClasses() > 0
+                                || nested.adaptedScreenApiModules() > 0) {
                             data = nested.bytes();
                             archiveChanged = true;
                             rewrittenReferences += nested.rewrittenReferences();
@@ -507,6 +540,7 @@ final class LegacyModCompatibilityTransformer {
                             rewrittenMixinRefmaps += nested.rewrittenMixinRefmaps();
                             remappedClasses += nested.remappedClasses();
                             adaptedModelLoadingClasses += nested.adaptedModelLoadingClasses();
+                            adaptedScreenApiModules += nested.adaptedScreenApiModules();
                         }
                     } else if (isClassTweakerResource(entryName, data, declaredClassTweakerResource)) {
                         String sourceText = new String(data, StandardCharsets.UTF_8);
@@ -516,6 +550,18 @@ final class LegacyModCompatibilityTransformer {
                             archiveChanged = true;
                             rewrittenClassTweakerFiles++;
                         }
+                    } else if (adaptLegacyScreenApi
+                            && LegacyFabricScreenApiAdapter.MIXIN_CONFIG_ENTRY.equals(entryName)) {
+                        if (screenConfigFound) {
+                            throw new IOException("The legacy fabric-screen-api-v1 module contains duplicate "
+                                    + "Mixin config resources; refusing an ambiguous screen migration.");
+                        }
+                        byte[] updatedConfig = LegacyFabricScreenApiAdapter.addGuiMixinToConfig(data);
+                        if (updatedConfig != data) {
+                            data = updatedConfig;
+                            archiveChanged = true;
+                        }
+                        screenConfigFound = true;
                     } else if (remapIntermediaryBytecode
                             && (lowerName.endsWith(".refmap.json")
                             || refmapResources.contains(normalizeResourcePath(entryName)))) {
@@ -544,14 +590,36 @@ final class LegacyModCompatibilityTransformer {
                 zipOutput.closeEntry();
                 input.closeEntry();
             }
+
+            if (adaptLegacyScreenApi) {
+                if (!screenMixinFound || generatedGuiMixin == null || generatedGuiExtensions == null) {
+                    throw new IOException("The legacy fabric-screen-api-v1 module does not contain the expected "
+                            + "MinecraftMixin class; refusing to launch with an unadapted screen target.");
+                }
+                if (!screenConfigFound) {
+                    throw new IOException("The legacy fabric-screen-api-v1 module does not contain "
+                            + LegacyFabricScreenApiAdapter.MIXIN_CONFIG_ENTRY
+                            + "; refusing to launch with an unregistered compatibility Mixin.");
+                }
+                writeArchiveEntry(zipOutput, LegacyFabricScreenApiAdapter.GUI_MIXIN_ENTRY, generatedGuiMixin);
+                writeArchiveEntry(zipOutput, LegacyFabricScreenApiAdapter.GUI_EXTENSIONS_ENTRY,
+                        generatedGuiExtensions);
+            }
         }
 
         if (!archiveChanged) {
-            return new ArchiveTransform(originalBytes, 0, 0, 0, 0, 0, List.copyOf(warnings));
+            return new ArchiveTransform(originalBytes, 0, 0, 0, 0, 0, 0, List.copyOf(warnings));
         }
         return new ArchiveTransform(output.toByteArray(), rewrittenReferences,
                 rewrittenClassTweakerFiles, rewrittenMixinRefmaps, remappedClasses,
-                adaptedModelLoadingClasses, List.copyOf(warnings));
+                adaptedModelLoadingClasses, adaptedScreenApiModules, List.copyOf(warnings));
+    }
+
+    private static void writeArchiveEntry(ZipOutputStream output, String name, byte[] contents)
+            throws IOException {
+        output.putNextEntry(new ZipEntry(name));
+        output.write(contents);
+        output.closeEntry();
     }
 
     private static boolean declaresLegacyBytecode(byte[] archive) throws IOException {
@@ -875,14 +943,15 @@ final class LegacyModCompatibilityTransformer {
 
     record Result(boolean transformed, Path modsDirectory, int rewrittenReferences,
                   int rewrittenClassTweakerFiles, int rewrittenMixinRefmaps, int remappedClasses,
-                  int adaptedModelLoadingClasses, int modifiedJars, List<String> warnings) {}
+                  int adaptedModelLoadingClasses, int adaptedScreenApiModules,
+                  int modifiedJars, List<String> warnings) {}
 
     private record FieldReference(String owner, String name) {}
 
     private record ArchiveTransform(byte[] bytes, int rewrittenReferences,
                                     int rewrittenClassTweakerFiles, int rewrittenMixinRefmaps,
                                     int remappedClasses, int adaptedModelLoadingClasses,
-                                    List<String> warnings) {}
+                                    int adaptedScreenApiModules, List<String> warnings) {}
 
     private record ClassTransform(byte[] bytes, int rewrittenReferences) {}
 }
