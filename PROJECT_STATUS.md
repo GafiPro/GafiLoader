@@ -648,3 +648,14 @@ Em cada sessão de trabalho:
 - **Artefactos:** run 905 publicou o instalador e a app image; não foram descarregados nem instalados nesta sessão. Os artefactos da run 899 documentados anteriormente expiram em 2026-11-27, pelo que não devem ser tratados como distribuição permanente.
 - **Limitação essencial:** não existe nesta sessão acesso ao Minecraft do utilizador nem ao JAR/log runtime atualizado. Portanto, esta CI não confirma a compatibilidade funcional da Fabric Screen API, o menu do Minecraft 26.2, os eventos de ecrã, nem uma instalação Windows real. Os JAR originais permanecem protegidos por testes de fixture, mas a verificação de hashes em instalação real continua pendente.
 - **Próximo passo prioritário:** utilizar o artefacto atual da run 905 e recolher, após um arranque controlado, `logs/gafiloader-preflight.log`, `logs/latest.log` e hashes dos JARs original/staged; manter a PR em draft até essa validação.
+
+
+### 2026-11-28 — Confirmação de CI e janela de artefactos da PR #30
+
+- **Objetivo:** confirmar diretamente os jobs da validação mais recente registada e identificar se ainda existe um artefacto útil para teste manual.
+- **Estado observado:** a branch da PR #30 continua a ser `compat/fabric-screen-api-26.2`; a cabeça documentada é `3d07dadf507a9e4e5a73b03de99d8e3befe19328`. A PR #30 permanece aberta em draft; a PR #29 continua separada. O último commit de `main` observado pelo endpoint de commits é `6bd4cef9cdee2ededde8518f5edd19e11cd657b7`.
+- **Verificação efetuada nesta sessão:** consultei os jobs da run [906](https://github.com/GafiPro/GafiLoader/actions/runs/45803383820): `test (ubuntu-latest)` e `test (windows-latest)` estão ambos `completed/success`. Isto confirma CI na run indicada, não prova por si só que o commit atual da PR é exatamente o commit testado, nem demonstra runtime do Minecraft.
+- **Janela importante:** os artefactos da run 906, registados na entrada de 27-11, expiram em **2026-11-29**. Se ainda estiverem disponíveis, descarregar o instalador/app image e testar no perfil dedicado antes da expiração; não usar um perfil vanilla.
+- **Alterações de código/testes nesta sessão:** nenhuma. Não tive checkout local nem Minecraft/JAR/log do utilizador, portanto não executei Gradle nem teste end-to-end. Esta entrada é apenas uma confirmação documental de estado remoto.
+- **Bloqueio:** falta um arranque real atual com Fabric API 0.141.6+1.21.11, confirmação de menu e eventos Screen, e comparação dos hashes original/staged. O pipeline continua a usar cópias staged; não é runtime-only.
+- **Próxima ação:** testar o artefacto da run 906, guardar `gafiloader-preflight.log` e `latest.log`, e comparar hashes dos JARs antes de decidir sobre integração.
